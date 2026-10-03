@@ -1,0 +1,41 @@
+package com.local.kakaoautosender;
+
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.Context;
+import android.content.Intent;
+
+final class SendScheduler {
+    static final int MIN_INTERVAL_MINUTES = 30;
+    static final int MAX_DAILY_LIMIT = 24;
+    private static final int REQUEST_CODE = 7301;
+
+    private SendScheduler() {}
+
+    static PendingIntent pending(Context c) {
+        Intent i = new Intent(c, SendAlarmReceiver.class);
+        i.setAction("com.local.kakaoautosender.SEND_ALARM");
+        return PendingIntent.getBroadcast(c, REQUEST_CODE, i,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    static void scheduleFromNow(Context c) {
+        int minutes = Math.max(MIN_INTERVAL_MINUTES,
+                Prefs.p(c).getInt(Prefs.KEY_INTERVAL_MIN, 60));
+        long when = System.currentTimeMillis() + minutes * 60_000L;
+        scheduleAt(c, when);
+    }
+
+    static void scheduleAt(Context c, long when) {
+        AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) return;
+        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pending(c));
+        Prefs.p(c).edit().putLong(Prefs.KEY_NEXT_AT, when).apply();
+    }
+
+    static void cancel(Context c) {
+        AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+        if (am != null) am.cancel(pending(c));
+        Prefs.p(c).edit().putLong(Prefs.KEY_NEXT_AT, 0L).apply();
+    }
+}
