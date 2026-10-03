@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!--
+      MainActivity uses Context.RECEIVER_NOT_EXPORTED on Android 13+ and the
+      two-argument registerReceiver overload only inside the pre-33 branch,
+      where the flag overload does not exist. Keep this narrowly scoped to
+      that compatibility branch instead of disabling the check project-wide.
+    -->
+    <issue id="UnspecifiedRegisterReceiverFlag">
+        <ignore path="src/main/java/com/local/kakaoautosender/MainActivity.java" />
+    </issue>
+</lint>
