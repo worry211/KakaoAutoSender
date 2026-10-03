@@ -21,3 +21,5 @@ Android local automation app for sending a configured message to a detected Kaka
 GitHub Actions builds a debug APK on every push to `main`.
 
 Artifact name: `KakaoAutoSender-debug-apk`
+
+Build pipeline initialized for the Android MVP.
