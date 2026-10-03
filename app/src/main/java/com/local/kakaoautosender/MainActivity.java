@@ -27,7 +27,6 @@ import android.widget.Toast;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashSet;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
@@ -37,6 +36,7 @@ public class MainActivity extends Activity {
     private EditText maxInput;
     private TextView permissionStatus;
     private TextView automationStatus;
+    private TextView routingStatus;
     private TextView runtimeStatus;
     private TextView latestSessionStatus;
     private Button startButton;
@@ -53,6 +53,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Prefs.ensureLabelSchema(this);
         setContentView(buildUi());
         loadValues();
         refreshUi();
@@ -79,59 +80,64 @@ public class MainActivity extends Activity {
 
     private View buildUi() {
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.rgb(18, 18, 18));
+        scroll.setBackgroundColor(Color.rgb(16, 17, 19));
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(28), dp(20), dp(36));
+        root.setPadding(dp(18), dp(24), dp(18), dp(36));
         scroll.addView(root);
 
         root.addView(text("카톡 자동전송", 27, true));
-        TextView version = text("v" + appVersion() + " · 휴대폰 내부에서만 동작", 12, false);
+        TextView version = text("v" + appVersion() + " · 안전 라우팅", 12, false);
         version.setTextColor(Color.GRAY);
         root.addView(version, lpTop(4));
 
-        TextView sub = text("카카오톡 알림의 답장 세션을 이용해 카톡 화면을 열지 않고 전송합니다.", 14, false);
+        TextView sub = text(
+                "자동 감지는 후보만 보여주고, 사용자가 확인한 카카오 답장 세션에만 전송합니다.",
+                14, false);
         sub.setTextColor(Color.LTGRAY);
         root.addView(sub, lpTop(10));
 
         automationStatus = text("", 17, true);
         root.addView(automationStatus, lpTop(20));
 
-        permissionStatus = text("", 14, true);
-        root.addView(permissionStatus, lpTop(12));
+        routingStatus = text("", 14, true);
+        root.addView(routingStatus, lpTop(8));
 
-        Button permission = button("알림 접근 권한 설정 열기");
+        permissionStatus = text("", 14, true);
+        root.addView(permissionStatus, lpTop(10));
+
+        Button permission = button("알림 접근 권한 설정");
         permission.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
         root.addView(permission, lpTop(8));
 
-        root.addView(sectionTitle("1. 대상 오픈채팅 연결"), lpTop(24));
-        roomInput = edit("대상 오픈채팅방 이름", false);
-        root.addView(roomInput, lpTop(8));
+        root.addView(sectionTitle("1. 대상 방 연결"), lpTop(24));
+        TextView stepHelp = text(
+                "오배송 방지를 위해 '감지됨'만으로는 연결하지 않습니다. 후보를 확인하거나 최근 알림을 직접 골라야 합니다.",
+                12, false);
+        stepHelp.setTextColor(Color.GRAY);
+        root.addView(stepHelp, lpTop(6));
 
-        Button detected = button("자동 감지된 방에서 선택");
-        detected.setOnClickListener(v -> showDetectedRooms());
+        roomInput = edit("대상 오픈채팅방 이름", false);
+        root.addView(roomInput, lpTop(10));
+
+        Button detected = button("감지된 방 후보 확인 / 연결");
+        detected.setOnClickListener(v -> showDetectedCandidates());
         root.addView(detected, lpTop(8));
 
-        Button recent = button("최근 카톡 알림에서 직접 선택해서 연결");
+        Button recent = button("최근 카톡 알림에서 직접 선택 / 연결");
         recent.setOnClickListener(v -> showRecentSessions());
         root.addView(recent, lpTop(8));
+
+        Button unbind = button("현재 방 연결 해제");
+        unbind.setOnClickListener(v -> unbindCurrentRoom());
+        root.addView(unbind, lpTop(8));
 
         latestSessionStatus = text("", 13, false);
         latestSessionStatus.setTextColor(Color.LTGRAY);
         root.addView(latestSessionStatus, lpTop(12));
 
-        Button bindLatest = button("가장 최근 카톡 알림을 이 방으로 연결");
-        bindLatest.setOnClickListener(v -> bindLatestSession());
-        root.addView(bindLatest, lpTop(8));
-
-        TextView pairingHelp = text(
-                "자동 감지가 실패하면 방 이름을 직접 입력하고 대상 방에서 온 알림을 선택해 연결하세요. 안전한 고유 식별자가 있는 경우 다음 알림부터 자동 복구합니다.",
-                12, false);
-        pairingHelp.setTextColor(Color.GRAY);
-        root.addView(pairingHelp, lpTop(7));
-
-        root.addView(sectionTitle("2. 메시지와 전송 주기"), lpTop(24));
+        root.addView(sectionTitle("2. 메시지 / 전송 제한"), lpTop(24));
         messageInput = edit("자동으로 보낼 메시지", true);
         root.addView(messageInput, lpTop(8));
 
@@ -139,21 +145,21 @@ public class MainActivity extends Activity {
         intervalInput.setInputType(InputType.TYPE_CLASS_NUMBER);
         root.addView(intervalInput, lpTop(12));
 
-        maxInput = edit("하루 최대 전송 횟수 - 최대 24", false);
+        maxInput = edit("하루 최대 자동전송 횟수 - 최대 24", false);
         maxInput.setInputType(InputType.TYPE_CLASS_NUMBER);
         root.addView(maxInput, lpTop(10));
 
-        Button test = button("지금 1회 테스트 전송");
+        Button test = button("현재 연결로 1회 테스트 전송");
         test.setOnClickListener(v -> testSend());
         root.addView(test, lpTop(14));
 
-        root.addView(sectionTitle("3. 자동전송 제어"), lpTop(24));
+        root.addView(sectionTitle("3. 자동전송"), lpTop(24));
         startButton = button("자동전송 시작");
-        startButton.setBackgroundColor(Color.rgb(45, 125, 80));
+        startButton.setBackgroundColor(Color.rgb(43, 115, 76));
         startButton.setOnClickListener(v -> startAutomation());
 
         stopButton = button("즉시 중단");
-        stopButton.setBackgroundColor(Color.rgb(145, 55, 55));
+        stopButton.setBackgroundColor(Color.rgb(132, 54, 54));
         stopButton.setOnClickListener(v -> stopAutomation());
 
         LinearLayout controlRow = new LinearLayout(this);
@@ -164,7 +170,7 @@ public class MainActivity extends Activity {
         controlRow.addView(stopButton, stopLp);
         root.addView(controlRow, lpTop(8));
 
-        Button apply = button("설정 저장 / 실행 중이면 예약 갱신");
+        Button apply = button("설정 저장");
         apply.setOnClickListener(v -> applySettings());
         root.addView(apply, lpTop(8));
 
@@ -181,7 +187,7 @@ public class MainActivity extends Activity {
         diagnostics.setOnClickListener(v -> showDiagnostics());
         root.addView(diagnostics, lpTop(8));
 
-        Button reset = button("방 연결 정보 초기화");
+        Button reset = button("모든 방 연결 정보 초기화");
         reset.setOnClickListener(v -> confirmResetConnections());
         root.addView(reset, lpTop(8));
 
@@ -189,10 +195,10 @@ public class MainActivity extends Activity {
                 "권장 순서\n" +
                 "① 알림 접근 허용\n" +
                 "② 대상 오픈채팅방에서 새 메시지 하나 받기\n" +
-                "③ 자동 감지 또는 '최근 카톡 알림에서 직접 선택'으로 정확한 방 연결\n" +
-                "④ 1회 테스트 전송 확인\n" +
+                "③ '감지된 방 후보' 또는 '최근 카톡 알림'에서 실제 대상 알림을 확인해 연결\n" +
+                "④ 1회 테스트 전송으로 대상 방 확인\n" +
                 "⑤ 자동전송 시작\n\n" +
-                "카카오톡 알림 권한 자체는 켜둬야 합니다. 소리·진동·팝업은 숨겨도 됩니다. 재부팅/카카오 업데이트/세션 만료 뒤에는 새 알림이 한 번 필요할 수 있습니다.",
+                "v0.5부터 예전 자동 연결 정보는 안전상 폐기됩니다. 카카오톡/안드로이드가 방 식별자를 충분히 주지 않으면 자동감지보다 직접 선택이 더 정확합니다.",
                 12, false);
         notes.setTextColor(Color.GRAY);
         root.addView(notes, lpTop(24));
@@ -246,11 +252,20 @@ public class MainActivity extends Activity {
     }
 
     private void applySettings() {
+        SharedPreferences p = Prefs.p(this);
+        String oldRoom = p.getString(Prefs.KEY_ROOM, "");
+        boolean active = p.getBoolean(Prefs.KEY_ACTIVE, false);
         saveValues();
-        boolean active = Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false);
-        if (active) {
+        String newRoom = roomInput.getText().toString().trim();
+
+        if (active && !sameRoom(oldRoom, newRoom)) {
+            p.edit().putBoolean(Prefs.KEY_ACTIVE, false).apply();
+            SendScheduler.cancel(this);
+            Prefs.setStatus(this, "대상 방 변경 감지 · 안전을 위해 자동전송 중단 · 새 방 재연결 필요");
+            toast("대상 방이 바뀌어서 자동전송을 중단했어. 새 방을 다시 연결해줘.");
+        } else if (active) {
             SendScheduler.scheduleFromNow(this);
-            Prefs.setStatus(this, "설정 저장됨 · 다음 예약을 새 전송 주기로 갱신");
+            Prefs.setStatus(this, "설정 저장됨 · 다음 예약 갱신");
             toast("설정을 저장하고 예약을 갱신했어.");
         } else {
             Prefs.setStatus(this, "설정 저장됨");
@@ -259,49 +274,81 @@ public class MainActivity extends Activity {
         refreshUi();
     }
 
-    private void bindLatestSession() {
-        String room = roomInput.getText().toString().trim();
-        if (room.isEmpty()) {
-            toast("먼저 대상 오픈채팅방 이름을 입력해줘.");
-            return;
-        }
+    private void showDetectedCandidates() {
         KakaoNotificationListener.requestRefresh();
-        if (!KakaoNotificationListener.hasLatestReplyTarget()) {
-            toast("최근 답장 세션이 없어. 대상 방에서 새 메시지를 하나 받은 뒤 다시 눌러줘.");
+        final ArrayList<KakaoNotificationListener.SessionEntry> entries = KakaoNotificationListener.candidateSessionEntries();
+        if (entries.isEmpty()) {
+            toast("신뢰할 만한 방 후보를 못 찾았어. 대상 방에서 새 메시지를 받은 뒤 '최근 카톡 알림'에서 직접 선택해줘.");
             return;
         }
-        if (KakaoNotificationListener.bindLatestToRoom(this, room)) {
-            saveValues();
-            toast("연결 완료. 이제 1회 테스트 전송을 눌러봐.");
-        } else {
-            toast("연결 실패. 대상 방에서 새 메시지를 다시 받은 뒤 시도해줘.");
-        }
-        refreshUi();
+
+        String[] items = new String[entries.size()];
+        for (int i = 0; i < entries.size(); i++) items[i] = entries.get(i).description;
+
+        new AlertDialog.Builder(this)
+                .setTitle("감지된 방 후보")
+                .setMessage("후보를 누른 뒤 실제 대상 방이 맞는지 한 번 더 확인해. 선택만으로는 전송되지 않아.")
+                .setItems(items, (d, which) -> confirmCandidatePair(entries.get(which)))
+                .setNegativeButton("취소", null)
+                .show();
+    }
+
+    private void confirmCandidatePair(KakaoNotificationListener.SessionEntry entry) {
+        if (entry == null || entry.suggestedRoom == null || entry.suggestedRoom.trim().isEmpty()) return;
+        String suggested = entry.suggestedRoom.trim();
+        new AlertDialog.Builder(this)
+                .setTitle("이 방이 맞아?")
+                .setMessage("감지 후보: " + suggested + "\n\n" + entry.description
+                        + "\n\n실제 대상 오픈채팅방이 맞을 때만 연결해.")
+                .setPositiveButton("맞음 · 연결", (d, w) -> {
+                    roomInput.setText(suggested);
+                    boolean ok = KakaoNotificationListener.bindRecentTokenToRoom(this, entry.token, suggested);
+                    if (ok) {
+                        saveValues();
+                        toast("'" + suggested + "' 연결 완료. 1회 테스트로 마지막 확인해줘.");
+                    } else {
+                        toast("세션이 만료됐어. 대상 방에서 새 메시지를 받은 뒤 다시 시도해줘.");
+                    }
+                    refreshUi();
+                })
+                .setNegativeButton("아님", null)
+                .show();
     }
 
     private void showRecentSessions() {
         KakaoNotificationListener.requestRefresh();
         String room = roomInput.getText().toString().trim();
         if (room.isEmpty()) {
-            toast("먼저 연결할 오픈채팅방 이름을 입력해줘.");
+            toast("먼저 실제 대상 오픈채팅방 이름을 입력해줘.");
             return;
         }
+
         final ArrayList<KakaoNotificationListener.SessionEntry> entries = KakaoNotificationListener.recentSessionEntries();
         if (entries.isEmpty()) {
             toast("최근 답장 가능한 카카오 알림이 없어. 대상 방에서 메시지를 하나 받아줘.");
             return;
         }
+
         String[] items = new String[entries.size()];
         for (int i = 0; i < entries.size(); i++) items[i] = entries.get(i).description;
 
         new AlertDialog.Builder(this)
-                .setTitle("대상 방에서 온 알림을 선택")
-                .setItems(items, (d, which) -> {
-                    KakaoNotificationListener.SessionEntry entry = entries.get(which);
+                .setTitle("대상 방에서 온 알림을 직접 선택")
+                .setMessage("시간·보낸사람·메시지 미리보기를 보고 정확한 알림을 골라.")
+                .setItems(items, (d, which) -> confirmManualPair(entries.get(which), room))
+                .setNegativeButton("취소", null)
+                .show();
+    }
+
+    private void confirmManualPair(KakaoNotificationListener.SessionEntry entry, String room) {
+        new AlertDialog.Builder(this)
+                .setTitle("'" + room + "'에 연결할까?")
+                .setMessage(entry.description + "\n\n이 알림이 실제 '" + room + "' 방에서 온 게 맞을 때만 연결해.")
+                .setPositiveButton("확인 · 연결", (d, w) -> {
                     boolean ok = KakaoNotificationListener.bindRecentTokenToRoom(this, entry.token, room);
                     if (ok) {
                         saveValues();
-                        toast("선택한 알림을 '" + room + "'에 연결했어.");
+                        toast("연결 완료. 이제 1회 테스트 전송으로 확인해줘.");
                     } else {
                         toast("해당 세션이 만료됐어. 새 메시지를 받은 뒤 다시 시도해줘.");
                     }
@@ -309,6 +356,22 @@ public class MainActivity extends Activity {
                 })
                 .setNegativeButton("취소", null)
                 .show();
+    }
+
+    private void unbindCurrentRoom() {
+        String room = roomInput.getText().toString().trim();
+        if (room.isEmpty()) {
+            toast("해제할 방 이름이 비어 있어.");
+            return;
+        }
+        boolean active = Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false);
+        if (active) {
+            Prefs.p(this).edit().putBoolean(Prefs.KEY_ACTIVE, false).apply();
+            SendScheduler.cancel(this);
+        }
+        boolean removed = KakaoNotificationListener.unbindRoom(this, room);
+        toast(removed ? "'" + room + "' 연결을 해제했어." : "이 방에 저장된 연결이 없어.");
+        refreshUi();
     }
 
     private void testSend() {
@@ -323,16 +386,30 @@ public class MainActivity extends Activity {
             toast("먼저 알림 접근 권한을 켜줘.");
             return;
         }
+        if (!KakaoNotificationListener.hasLiveSession(room)) {
+            toast("안전 차단: 이 방은 아직 확인된 실시간 세션이 없어. 최근 카톡 알림에서 정확한 방을 연결해줘.");
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("테스트 전송")
+                .setMessage("확인된 연결 '" + room + "'로 지금 1회 보낼까?\n\n" + msg)
+                .setPositiveButton("전송", (d, w) -> performTestSend(room, msg))
+                .setNegativeButton("취소", null)
+                .show();
+    }
+
+    private void performTestSend(String room, String msg) {
         boolean ok = KakaoNotificationListener.sendToRoom(this, room, msg);
         if (ok) {
             Prefs.markManualSuccess(this);
             Prefs.setStatus(this, "수동 테스트 전송 성공: " + room);
-            toast("테스트 전송 성공");
+            toast("테스트 전송 성공. 실제 카톡 방을 확인한 뒤 자동전송을 시작해줘.");
         } else {
             String reason = KakaoNotificationListener.lastSendError();
             Prefs.recordFailure(this);
             Prefs.setStatus(this, "테스트 실패: " + reason);
-            toast("테스트 실패: " + reason + "\n최근 알림에서 방을 다시 연결해봐.");
+            toast("테스트 실패: " + reason);
         }
         refreshUi();
     }
@@ -349,21 +426,16 @@ public class MainActivity extends Activity {
             toast("방과 메시지를 먼저 입력해줘.");
             return;
         }
-        if (!KakaoNotificationListener.hasLiveSession(room)
-                && !KakaoNotificationListener.hasStoredBinding(this, room)) {
-            toast("아직 이 방과 연결된 카카오 알림이 없어. 먼저 대상 방 메시지를 받고 정확한 알림을 연결해줘.");
+        if (!KakaoNotificationListener.hasLiveSession(room)) {
+            toast("자동전송 시작 차단: 현재 확인된 실시간 세션이 없어. 대상 방에서 새 메시지를 받고 다시 연결해줘.");
             return;
         }
 
         Prefs.p(this).edit().putBoolean(Prefs.KEY_ACTIVE, true).apply();
         SendScheduler.scheduleFromNow(this);
         int interval = Prefs.p(this).getInt(Prefs.KEY_INTERVAL_MIN, 60);
-        if (KakaoNotificationListener.hasLiveSession(room)) {
-            Prefs.setStatus(this, "자동전송 시작됨 · 첫 예약은 약 " + interval + "분 후");
-        } else {
-            Prefs.setStatus(this, "자동전송 시작됨 · 저장 연결 있음 · 새 카카오 알림으로 실시간 세션 복구 대기");
-        }
-        toast("자동전송을 시작했어.");
+        Prefs.setStatus(this, "자동전송 시작됨 · 검증된 방 " + room + " · 첫 예약 약 " + interval + "분 후");
+        toast("자동전송 시작. 대상은 확인된 '" + room + "'만 사용해.");
         refreshUi();
     }
 
@@ -371,7 +443,7 @@ public class MainActivity extends Activity {
         Prefs.p(this).edit().putBoolean(Prefs.KEY_ACTIVE, false).apply();
         SendScheduler.cancel(this);
         Prefs.setStatus(this, "자동전송 즉시 중단됨");
-        toast("자동전송을 중단했어. 예약도 취소했어.");
+        toast("자동전송을 중단했고 예약도 취소했어.");
         refreshUi();
     }
 
@@ -380,24 +452,6 @@ public class MainActivity extends Activity {
         KakaoNotificationListener.requestRefresh();
         toast("리스너 재연결과 카카오 알림 재스캔을 요청했어.");
         refreshUi();
-    }
-
-    private void showDetectedRooms() {
-        KakaoNotificationListener.requestRefresh();
-        ArrayList<String> all = KakaoNotificationListener.liveLabels();
-        if (all.isEmpty()) all.addAll(Prefs.recentLabels(this));
-        all = new ArrayList<>(new HashSet<>(all));
-        all.sort(String.CASE_INSENSITIVE_ORDER);
-        if (all.isEmpty()) {
-            toast("자동 감지된 방이 없어. '최근 카톡 알림에서 직접 선택해서 연결'을 사용해줘.");
-            return;
-        }
-        final String[] items = all.toArray(new String[0]);
-        new AlertDialog.Builder(this)
-                .setTitle("감지/연결된 카카오톡 방")
-                .setItems(items, (d, which) -> roomInput.setText(items[which]))
-                .setNegativeButton("취소", null)
-                .show();
     }
 
     private void showDiagnostics() {
@@ -423,29 +477,31 @@ public class MainActivity extends Activity {
 
     private void confirmResetConnections() {
         new AlertDialog.Builder(this)
-                .setTitle("방 연결 정보를 초기화할까?")
-                .setMessage("자동전송을 중단하고 저장된 방 식별자와 현재 답장 세션을 지웁니다. 메시지/주기 입력값은 유지합니다.")
+                .setTitle("모든 방 연결을 초기화할까?")
+                .setMessage("자동전송을 중단하고 저장된 자동복구 식별자와 현재 답장 세션을 지웁니다. 메시지/주기 입력값은 유지합니다.")
                 .setPositiveButton("초기화", (d, w) -> {
-                    stopAutomation();
+                    Prefs.p(this).edit().putBoolean(Prefs.KEY_ACTIVE, false).apply();
+                    SendScheduler.cancel(this);
                     KakaoNotificationListener.clearRuntimeAndBindings(this);
                     refreshUi();
-                    toast("방 연결 정보를 초기화했어.");
+                    toast("모든 방 연결 정보를 초기화했어.");
                 })
                 .setNegativeButton("취소", null)
                 .show();
     }
 
     private void refreshUi() {
-        if (permissionStatus == null || automationStatus == null || latestSessionStatus == null
-                || startButton == null || stopButton == null || runtimeStatus == null) return;
+        if (permissionStatus == null || automationStatus == null || routingStatus == null
+                || latestSessionStatus == null || startButton == null || stopButton == null
+                || runtimeStatus == null) return;
 
         boolean access = isNotificationAccessEnabled();
         permissionStatus.setText(access
-                ? "● 알림 접근: 허용됨 · 리스너 " + (KakaoNotificationListener.isListenerConnected() ? "연결됨" : "연결 대기")
+                ? "● 알림 접근: 허용 · 리스너 " + (KakaoNotificationListener.isListenerConnected() ? "연결됨" : "연결 대기")
                 : "● 알림 접근: 꺼져 있음");
         permissionStatus.setTextColor(access ? Color.rgb(80, 220, 140) : Color.rgb(255, 120, 120));
 
-        latestSessionStatus.setText(KakaoNotificationListener.latestSessionDescription());
+        latestSessionStatus.setText("최근 알림: " + KakaoNotificationListener.latestSessionDescription());
 
         SharedPreferences p = Prefs.p(this);
         boolean active = p.getBoolean(Prefs.KEY_ACTIVE, false);
@@ -454,6 +510,14 @@ public class MainActivity extends Activity {
         startButton.setEnabled(!active);
         stopButton.setEnabled(active);
 
+        String room = roomInput == null ? "" : roomInput.getText().toString().trim();
+        boolean live = !room.isEmpty() && KakaoNotificationListener.hasLiveSession(room);
+        boolean stored = !room.isEmpty() && KakaoNotificationListener.hasStoredBinding(this, room);
+        routingStatus.setText(live
+                ? "● 대상 연결: 확인됨 · 이 방으로만 전송 가능"
+                : "● 대상 연결: 미확인 · 전송 차단");
+        routingStatus.setTextColor(live ? Color.rgb(90, 210, 150) : Color.rgb(255, 175, 90));
+
         String status = p.getString(Prefs.KEY_LAST_STATUS, "아직 기록 없음");
         long at = p.getLong(Prefs.KEY_LAST_STATUS_AT, 0L);
         long next = p.getLong(Prefs.KEY_NEXT_AT, 0L);
@@ -461,7 +525,6 @@ public class MainActivity extends Activity {
         int count = Prefs.getTodayCount(this);
         int failures = p.getInt(Prefs.KEY_FAILURE_STREAK, 0);
 
-        String room = roomInput == null ? "" : roomInput.getText().toString().trim();
         StringBuilder sb = new StringBuilder();
         sb.append("상태: ").append(status);
         if (at > 0) sb.append("\n최근 변경: ").append(formatTime(at));
@@ -469,11 +532,12 @@ public class MainActivity extends Activity {
         sb.append("\n연속 실패: ").append(failures).append("회");
         if (lastSuccess > 0) sb.append("\n마지막 성공: ").append(formatTime(lastSuccess));
         if (active && next > 0) sb.append("\n다음 예약(대략): ").append(formatTime(next));
-        sb.append("\n실시간 방 세션: ").append(KakaoNotificationListener.liveLabels().size()).append("개");
+        sb.append("\n검증된 실시간 세션: ").append(KakaoNotificationListener.liveLabels().size()).append("개");
+        sb.append("\n감지 후보: ").append(KakaoNotificationListener.candidateSessionEntries().size()).append("개");
         if (!room.isEmpty()) {
-            sb.append("\n현재 선택 방: ")
-                    .append(KakaoNotificationListener.hasLiveSession(room) ? "실시간 연결됨" :
-                            (KakaoNotificationListener.hasStoredBinding(this, room) ? "저장 연결 있음 / 실시간 세션 대기" : "미연결"));
+            sb.append("\n현재 방: ").append(room);
+            sb.append("\n현재 방 실시간 연결: ").append(live ? "확인됨" : "없음");
+            sb.append("\n현재 방 자동복구: ").append(stored ? "가능" : "없음");
         }
         runtimeStatus.setText(sb.toString());
     }
@@ -489,6 +553,12 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             return "?";
         }
+    }
+
+    private static boolean sameRoom(String a, String b) {
+        String x = a == null ? "" : a.trim();
+        String y = b == null ? "" : b.trim();
+        return x.equalsIgnoreCase(y);
     }
 
     private static int parseInt(String s, int fallback) {
@@ -527,7 +597,7 @@ public class MainActivity extends Activity {
         e.setHint(hint);
         e.setHintTextColor(Color.GRAY);
         e.setTextColor(Color.WHITE);
-        e.setBackgroundColor(Color.rgb(42, 42, 42));
+        e.setBackgroundColor(Color.rgb(38, 40, 44));
         e.setPadding(dp(12), dp(12), dp(12), dp(12));
         if (multiline) {
             e.setMinLines(4);
