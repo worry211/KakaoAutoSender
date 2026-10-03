@@ -13,16 +13,17 @@ public class BootReceiver extends BroadcastReceiver {
                 || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action);
         if (!restoreEvent) return;
 
-        // 버전 업 직후에는 예전의 잘못된 방 연결/활성 상태를 먼저 폐기한다.
         Prefs.ensureLabelSchema(context);
+        MultiRoomStore.ensureMigrated(context);
 
         if (Prefs.p(context).getBoolean(Prefs.KEY_ACTIVE, false)) {
-            SendScheduler.scheduleFromNow(context);
+            MultiRoomStore.repairNextTimesAfterRestore(context);
+            SendScheduler.scheduleNext(context);
             KakaoNotificationListener.requestReconnect(context);
             Prefs.setStatus(context,
                     Intent.ACTION_BOOT_COMPLETED.equals(action)
-                            ? "재부팅 후 자동전송 예약 복구됨 · 검증 세션 복구 대기"
-                            : "앱 업데이트 후 자동전송 예약 복구됨 · 검증 세션 재연결 요청");
+                            ? "재부팅 후 다중방 자동전송 예약 복구 · 방 세션 복구 대기"
+                            : "앱 업데이트 후 다중방 예약 복구 · 카카오 세션 재연결 요청");
         } else {
             SendScheduler.cancel(context);
         }
