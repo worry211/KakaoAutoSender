@@ -31,7 +31,7 @@ final class Prefs {
     static final String KEY_EVENT_LOG = "event_log";
 
     private static final String KEY_LABEL_SCHEMA_VERSION = "label_schema_version";
-    private static final int LABEL_SCHEMA_VERSION = 3;
+    private static final int LABEL_SCHEMA_VERSION = 4;
     private static final String BINDING_PREFIX = "binding.";
     private static final int MAX_LOG_CHARS = 12000;
 
@@ -42,12 +42,20 @@ final class Prefs {
     }
 
     static void ensureLabelSchema(Context c) {
-        SharedPreferences p = p(c);
-        if (p.getInt(KEY_LABEL_SCHEMA_VERSION, 0) >= LABEL_SCHEMA_VERSION) return;
-        p.edit()
-                .remove(KEY_RECENT_LABELS)
-                .putInt(KEY_LABEL_SCHEMA_VERSION, LABEL_SCHEMA_VERSION)
-                .apply();
+        SharedPreferences prefs = p(c);
+        int oldVersion = prefs.getInt(KEY_LABEL_SCHEMA_VERSION, 0);
+        if (oldVersion >= LABEL_SCHEMA_VERSION) return;
+
+        SharedPreferences.Editor e = prefs.edit().remove(KEY_RECENT_LABELS);
+        if (oldVersion < 4) {
+            // v0.3까지는 notification-id/channel-id처럼 여러 방에서 재사용될 수 있는 약한 키가
+            // 저장될 수 있었다. 엉뚱한 방으로 보내는 것보다 한 번 다시 연결하도록 초기화한다.
+            for (String key : prefs.getAll().keySet()) {
+                if (key.startsWith(BINDING_PREFIX)) e.remove(key);
+            }
+        }
+        e.putInt(KEY_LABEL_SCHEMA_VERSION, LABEL_SCHEMA_VERSION).apply();
+        appendLog(c, "방 연결 스키마 갱신: 안전한 식별자만 사용");
     }
 
     static void addRecentLabel(Context c, String label) {
@@ -69,6 +77,7 @@ final class Prefs {
     }
 
     static void bindIdentity(Context c, String alias, List<String> identityKeys) {
+        ensureLabelSchema(c);
         if (alias == null || identityKeys == null) return;
         alias = alias.trim();
         if (alias.isEmpty()) return;
@@ -82,22 +91,24 @@ final class Prefs {
         if (added > 0) {
             e.apply();
             addRecentLabel(c, alias);
-            appendLog(c, "연결 규칙 저장: " + alias + " (식별자 " + added + "개)");
+            appendLog(c, "연결 규칙 저장: " + alias + " (안전 식별자 " + added + "개)");
         }
     }
 
     static String aliasForIdentity(Context c, List<String> identityKeys) {
+        ensureLabelSchema(c);
         if (identityKeys == null) return null;
-        SharedPreferences p = p(c);
+        SharedPreferences prefs = p(c);
         for (String key : identityKeys) {
             if (key == null || key.trim().isEmpty()) continue;
-            String alias = p.getString(BINDING_PREFIX + digest(key), null);
+            String alias = prefs.getString(BINDING_PREFIX + digest(key), null);
             if (alias != null && !alias.trim().isEmpty()) return alias.trim();
         }
         return null;
     }
 
     static boolean hasBindingForAlias(Context c, String alias) {
+        ensureLabelSchema(c);
         if (alias == null || alias.trim().isEmpty()) return false;
         String wanted = alias.trim();
         for (Map.Entry<String, ?> entry : p(c).getAll().entrySet()) {
@@ -109,6 +120,7 @@ final class Prefs {
     }
 
     static int bindingCount(Context c) {
+        ensureLabelSchema(c);
         int count = 0;
         for (String key : p(c).getAll().keySet()) {
             if (key.startsWith(BINDING_PREFIX)) count++;
@@ -127,14 +139,14 @@ final class Prefs {
     }
 
     static int getTodayCount(Context c) {
-        SharedPreferences p = p(c);
+        SharedPreferences prefs = p(c);
         String today = LocalDate.now().toString();
-        String saved = p.getString(KEY_COUNT_DATE, "");
+        String saved = prefs.getString(KEY_COUNT_DATE, "");
         if (!today.equals(saved)) {
-            p.edit().putString(KEY_COUNT_DATE, today).putInt(KEY_COUNT, 0).apply();
+            prefs.edit().putString(KEY_COUNT_DATE, today).putInt(KEY_COUNT, 0).apply();
             return 0;
         }
-        return p.getInt(KEY_COUNT, 0);
+        return prefs.getInt(KEY_COUNT, 0);
     }
 
     static int incrementTodayCount(Context c) {
