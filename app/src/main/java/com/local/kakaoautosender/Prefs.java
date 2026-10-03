@@ -148,6 +148,13 @@ final class Prefs {
         return next;
     }
 
+    static void markManualSuccess(Context c) {
+        p(c).edit()
+                .putLong(KEY_LAST_SUCCESS_AT, System.currentTimeMillis())
+                .putInt(KEY_FAILURE_STREAK, 0)
+                .apply();
+    }
+
     static int recordFailure(Context c) {
         int next = p(c).getInt(KEY_FAILURE_STREAK, 0) + 1;
         p(c).edit().putInt(KEY_FAILURE_STREAK, next).apply();
