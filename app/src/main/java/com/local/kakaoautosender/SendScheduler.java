@@ -7,6 +7,7 @@ import android.content.Intent;
 
 final class SendScheduler {
     static final int MIN_INTERVAL_MINUTES = 30;
+    // Kept for the non-launcher v0.7 fallback activity so old code still compiles.
     static final int MAX_DAILY_LIMIT = 24;
     private static final int REQUEST_CODE = 7301;
 
@@ -19,11 +20,25 @@ final class SendScheduler {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
-    static void scheduleFromNow(Context c) {
-        int minutes = Math.max(MIN_INTERVAL_MINUTES,
-                Prefs.p(c).getInt(Prefs.KEY_INTERVAL_MIN, 60));
-        long when = System.currentTimeMillis() + minutes * 60_000L;
+    static void scheduleNext(Context c) {
+        if (!Prefs.p(c).getBoolean(Prefs.KEY_ACTIVE, false)) {
+            cancel(c);
+            return;
+        }
+        MultiRoomStore.ensureMigrated(c);
+        long when = MultiRoomStore.nextDueAt(c);
+        if (when <= 0L) {
+            cancel(c);
+            return;
+        }
         scheduleAt(c, when);
+    }
+
+    // Compatibility wrapper for the retained v0.7 activity.
+    static void scheduleFromNow(Context c) {
+        MultiRoomStore.ensureMigrated(c);
+        MultiRoomStore.setAllNextFromNow(c);
+        scheduleNext(c);
     }
 
     static void scheduleAt(Context c, long when) {

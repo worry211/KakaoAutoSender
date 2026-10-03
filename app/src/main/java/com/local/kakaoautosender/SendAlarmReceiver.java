@@ -6,6 +6,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.service.notification.NotificationListenerService;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -19,85 +22,95 @@ public class SendAlarmReceiver extends BroadcastReceiver {
 
         executor.execute(() -> {
             try {
-                // v0.5 안전 라우팅 마이그레이션이 아직 안 됐다면 전송 판단보다 먼저 실행한다.
                 Prefs.ensureLabelSchema(app);
+                MultiRoomStore.ensureMigrated(app);
 
                 if (!Prefs.p(app).getBoolean(Prefs.KEY_ACTIVE, false)) {
                     SendScheduler.cancel(app);
                     return;
                 }
 
-                String room = Prefs.p(app).getString(Prefs.KEY_ROOM, "");
-                String message = Prefs.p(app).getString(Prefs.KEY_MESSAGE, "");
-                if (room == null) room = "";
-                if (message == null) message = "";
-                room = room.trim();
-
-                if (room.isEmpty() || message.trim().isEmpty()) {
-                    Prefs.p(app).edit().putBoolean(Prefs.KEY_ACTIVE, false).apply();
-                    SendScheduler.cancel(app);
-                    Prefs.recordFailure(app);
-                    Prefs.setStatus(app, "자동전송 중단: 방 또는 메시지 설정이 비어 있음");
-                    return;
-                }
-
-                int max = Math.min(SendScheduler.MAX_DAILY_LIMIT,
-                        Math.max(1, Prefs.p(app).getInt(Prefs.KEY_MAX_PER_DAY, 8)));
-                int count = Prefs.getTodayCount(app);
-                if (count >= max) {
-                    Prefs.setStatus(app, "오늘 전송 한도 도달 (" + count + "/" + max + ") · 다음 주기에서 다시 확인");
-                    rescheduleIfActive(app);
-                    return;
-                }
-
                 NotificationListenerService.requestRebind(
                         new ComponentName(app, KakaoNotificationListener.class));
+                KakaoNotificationListener.requestRefresh();
 
-                boolean sent = false;
-                String failureReason = "확인된 답장 세션 없음";
-                for (int i = 0; i < 3 && !sent; i++) {
-                    sent = KakaoNotificationListener.sendToRoom(app, room, message);
-                    if (!sent) {
-                        failureReason = KakaoNotificationListener.lastSendError();
-                        if (failureReason == null || failureReason.trim().isEmpty()) {
-                            failureReason = "확인된 답장 세션 없음";
-                        }
-                        try {
-                            Thread.sleep(500L);
-                        } catch (InterruptedException ignored) {
-                            Thread.currentThread().interrupt();
-                            break;
+                long now = System.currentTimeMillis();
+                ArrayList<MultiRoomStore.Profile> due = MultiRoomStore.due(app, now);
+                if (due.isEmpty()) {
+                    SendScheduler.scheduleNext(app);
+                    return;
+                }
+
+                int attempted = 0;
+                int success = 0;
+                int skipped = 0;
+                for (MultiRoomStore.Profile profile : due) {
+                    if (!Prefs.p(app).getBoolean(Prefs.KEY_ACTIVE, false)) break;
+                    if (!profile.enabled || profile.room.trim().isEmpty() || profile.message.trim().isEmpty()) continue;
+
+                    if (!profile.unlimited() && profile.todayCount >= profile.dailyLimit) {
+                        long next = nextDayStart();
+                        String status = "오늘 방별 한도 도달: " + profile.room + " ("
+                                + profile.todayCount + "/" + profile.dailyLimit + ")";
+                        MultiRoomStore.markSkippedForLimit(app, profile.room, next, status);
+                        skipped++;
+                        continue;
+                    }
+
+                    attempted++;
+                    boolean sent = false;
+                    String failureReason = "확인된 답장 세션 없음";
+                    for (int i = 0; i < 2 && !sent; i++) {
+                        sent = KakaoNotificationListener.sendToRoom(app, profile.room, profile.message);
+                        if (!sent) {
+                            failureReason = KakaoNotificationListener.lastSendError();
+                            if (failureReason == null || failureReason.trim().isEmpty()) {
+                                failureReason = "확인된 답장 세션 없음";
+                            }
+                            sleep(450L);
                         }
                     }
+
+                    long next = System.currentTimeMillis() + profile.intervalMinutes * 60_000L;
+                    if (sent) {
+                        MultiRoomStore.markSuccess(app, profile.room, next,
+                                "자동전송 성공: " + profile.room);
+                        success++;
+                    } else {
+                        String recovery = KakaoNotificationListener.hasStoredBinding(app, profile.room)
+                                ? "자동복구키 있음 · 같은 방 새 알림 대기"
+                                : "새 알림에서 이 방을 다시 연결 필요";
+                        MultiRoomStore.markFailure(app, profile.room, next,
+                                "자동전송 실패: " + failureReason + " · " + recovery);
+                    }
+
+                    // 여러 방이 같은 시각에 예정돼도 PendingIntent 답장이 한꺼번에 충돌하지 않도록 짧게 분리한다.
+                    sleep(700L);
                 }
 
-                if (sent) {
-                    int newCount = Prefs.incrementTodayCount(app);
-                    Prefs.setStatus(app, "자동전송 성공: " + room + " (오늘 " + newCount + "회)");
-                } else {
-                    int streak = Prefs.recordFailure(app);
-                    String recovery = KakaoNotificationListener.hasStoredBinding(app, room)
-                            ? "검증된 자동복구키 있음 · 같은 방의 새 알림으로 세션 복구 대기"
-                            : "대상 방의 새 알림을 받은 뒤 직접 다시 연결 필요";
-                    Prefs.setStatus(app, "자동전송 실패: " + failureReason + " · 연속 " + streak + "회 · " + recovery);
-                }
-
-                rescheduleIfActive(app);
+                Prefs.setStatus(app, "다중방 예약 실행 · 시도 " + attempted + " · 성공 " + success
+                        + (skipped > 0 ? " · 한도대기 " + skipped : ""));
+                SendScheduler.scheduleNext(app);
             } catch (Throwable t) {
-                int streak = Prefs.recordFailure(app);
-                Prefs.setStatus(app, "자동전송 내부 오류: " + t.getClass().getSimpleName() + " · 연속 " + streak + "회");
-                rescheduleIfActive(app);
+                Prefs.recordFailure(app);
+                Prefs.setStatus(app, "다중방 자동전송 내부 오류: " + t.getClass().getSimpleName());
+                SendScheduler.scheduleNext(app);
             } finally {
                 result.finish();
             }
         });
     }
 
-    private static void rescheduleIfActive(Context context) {
-        if (Prefs.p(context).getBoolean(Prefs.KEY_ACTIVE, false)) {
-            SendScheduler.scheduleFromNow(context);
-        } else {
-            SendScheduler.cancel(context);
+    private static long nextDayStart() {
+        return LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault())
+                .plusMinutes(1).toInstant().toEpochMilli();
+    }
+
+    private static void sleep(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
         }
     }
 }
