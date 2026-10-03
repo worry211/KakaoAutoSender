@@ -9,6 +9,7 @@ import org.json.JSONObject;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Locale;
 
 final class MultiRoomStore {
     static final String KEY_PROFILES = "multi_room_profiles_v1";
@@ -96,7 +97,7 @@ final class MultiRoomStore {
         ArrayList<Profile> profiles = readRaw(context);
         boolean changed = false;
         for (Profile p : profiles) changed |= normalizeDailyCount(p);
-        profiles.sort(Comparator.comparing(a -> a.room.toLowerCase()));
+        profiles.sort(Comparator.comparing(a -> a.room.toLowerCase(Locale.ROOT)));
         if (changed) writeRaw(context, profiles);
         ArrayList<Profile> result = new ArrayList<>();
         for (Profile p : profiles) result.add(p.copy());
@@ -325,7 +326,7 @@ final class MultiRoomStore {
     }
 
     private static String normalize(String s) {
-        return safe(s).trim().toLowerCase();
+        return safe(s).trim().toLowerCase(Locale.ROOT);
     }
 
     private static String safe(String s) {
