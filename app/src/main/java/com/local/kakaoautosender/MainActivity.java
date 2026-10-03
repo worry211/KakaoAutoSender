@@ -30,6 +30,7 @@ public class MainActivity extends Activity {
     private EditText maxInput;
     private TextView permissionStatus;
     private TextView runtimeStatus;
+    private TextView latestSessionStatus;
     private Button startStop;
 
     @Override
@@ -55,9 +56,8 @@ public class MainActivity extends Activity {
         root.setPadding(dp(20), dp(28), dp(20), dp(28));
         scroll.addView(root);
 
-        TextView title = text("카톡 자동전송", 26, true);
-        root.addView(title);
-        TextView sub = text("오픈채팅 알림의 '답장' 기능을 이용해 화면을 열지 않고 전송합니다.", 14, false);
+        root.addView(text("카톡 자동전송", 26, true));
+        TextView sub = text("카카오톡 알림의 '답장' 기능을 이용해 화면을 열지 않고 전송합니다.", 14, false);
         sub.setTextColor(Color.LTGRAY);
         root.addView(sub, lpTop(8));
 
@@ -68,12 +68,24 @@ public class MainActivity extends Activity {
         permission.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
         root.addView(permission, lpTop(10));
 
-        roomInput = edit("대상 오픈채팅방 / 감지된 대화 이름", false);
+        roomInput = edit("대상 오픈채팅방 이름", false);
         root.addView(roomInput, lpTop(22));
 
-        Button detected = button("감지된 카카오톡 대화에서 선택");
+        Button detected = button("자동 감지된 방에서 선택");
         detected.setOnClickListener(v -> showDetectedRooms());
         root.addView(detected, lpTop(8));
+
+        latestSessionStatus = text("", 13, false);
+        latestSessionStatus.setTextColor(Color.LTGRAY);
+        root.addView(latestSessionStatus, lpTop(12));
+
+        Button bindLatest = button("최근 카톡 알림을 이 방으로 연결");
+        bindLatest.setOnClickListener(v -> bindLatestSession());
+        root.addView(bindLatest, lpTop(8));
+
+        TextView pairingHelp = text("방 이름이 자동으로 안 잡히면: 위에 방 이름 직접 입력 → 대상 방에서 새 메시지 1개 받기 → 바로 위 버튼 누르기", 12, false);
+        pairingHelp.setTextColor(Color.GRAY);
+        root.addView(pairingHelp, lpTop(6));
 
         messageInput = edit("자동으로 보낼 메시지", true);
         root.addView(messageInput, lpTop(18));
@@ -100,11 +112,11 @@ public class MainActivity extends Activity {
 
         TextView notes = text(
                 "사용 순서\n" +
-                "① 알림 접근 권한 허용\n" +
-                "② 대상 오픈채팅방에서 새 메시지를 하나 받기\n" +
-                "③ '감지된 대화에서 선택'으로 방 확인\n" +
+                "① 알림 접근 허용\n" +
+                "② 대상 오픈채팅방에서 새 메시지 하나 받기\n" +
+                "③ 자동 감지되면 방 선택, 안 되면 방 이름 직접 입력 후 '최근 카톡 알림을 이 방으로 연결'\n" +
                 "④ 테스트 전송 성공 확인 후 자동전송 시작\n\n" +
-                "카카오톡 알림 권한 자체를 끄면 세션을 잡을 수 없습니다. 소리·진동·팝업만 숨기는 방식으로 사용하세요.",
+                "카카오톡 알림 권한 자체는 켜둬야 합니다. 소리·진동·팝업만 숨겨도 됩니다.",
                 13, false);
         notes.setTextColor(Color.GRAY);
         root.addView(notes, lpTop(24));
@@ -134,6 +146,26 @@ public class MainActivity extends Activity {
                 .apply();
     }
 
+    private void bindLatestSession() {
+        String room = roomInput.getText().toString().trim();
+        if (room.isEmpty()) {
+            toast("먼저 대상 오픈채팅방 이름을 직접 입력해줘.");
+            return;
+        }
+        if (!KakaoNotificationListener.hasLatestReplyTarget()) {
+            toast("최근 답장 세션이 없어. 대상 방에서 새 메시지를 하나 받은 뒤 바로 다시 눌러줘.");
+            return;
+        }
+        boolean ok = KakaoNotificationListener.bindLatestToRoom(this, room);
+        if (ok) {
+            saveValues();
+            toast("연결 완료. 이제 테스트 전송을 눌러봐.");
+        } else {
+            toast("연결 실패. 대상 방에서 새 메시지를 다시 받은 뒤 시도해줘.");
+        }
+        refreshUi();
+    }
+
     private void testSend() {
         saveValues();
         String room = roomInput.getText().toString().trim();
@@ -152,7 +184,7 @@ public class MainActivity extends Activity {
             toast("테스트 전송 성공");
         } else {
             Prefs.setStatus(this, "테스트 실패: 답장 세션 없음");
-            toast("세션이 없어. 대상 방에서 메시지를 하나 받은 뒤 다시 해봐.");
+            toast("세션이 없어. 자동감지가 안 되면 '최근 카톡 알림을 이 방으로 연결'을 먼저 해줘.");
         }
         refreshUi();
     }
@@ -188,7 +220,7 @@ public class MainActivity extends Activity {
         all = new ArrayList<>(new HashSet<>(all));
         all.sort(String.CASE_INSENSITIVE_ORDER);
         if (all.isEmpty()) {
-            toast("아직 감지된 방이 없어. 대상 방에서 새 메시지를 하나 받아줘.");
+            toast("자동 감지된 방이 없어. 방 이름을 직접 입력하고 최근 카톡 알림을 연결하면 돼.");
             return;
         }
         final String[] items = all.toArray(new String[0]);
@@ -204,6 +236,8 @@ public class MainActivity extends Activity {
         permissionStatus.setText(access ? "● 알림 접근: 허용됨" : "● 알림 접근: 꺼져 있음");
         permissionStatus.setTextColor(access ? Color.rgb(80, 220, 140) : Color.rgb(255, 120, 120));
 
+        latestSessionStatus.setText(KakaoNotificationListener.latestSessionDescription());
+
         boolean active = Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false);
         startStop.setText(active ? "자동전송 중지" : "자동전송 시작");
 
@@ -216,7 +250,7 @@ public class MainActivity extends Activity {
         if (at > 0) sb.append("\n최근 변경: ").append(formatTime(at));
         sb.append("\n오늘 성공 전송: ").append(count).append("회");
         if (active && next > 0) sb.append("\n다음 예약(대략): ").append(formatTime(next));
-        sb.append("\n현재 감지 세션: ").append(KakaoNotificationListener.liveLabels().size()).append("개");
+        sb.append("\n연결된 방 세션: ").append(KakaoNotificationListener.liveLabels().size()).append("개");
         runtimeStatus.setText(sb.toString());
     }
 
