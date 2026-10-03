@@ -22,6 +22,8 @@ final class Prefs {
     static final String KEY_RECENT_LABELS = "recent_labels";
     static final String KEY_LAST_STATUS = "last_status";
     static final String KEY_LAST_STATUS_AT = "last_status_at";
+    private static final String KEY_LABEL_SCHEMA_VERSION = "label_schema_version";
+    private static final int LABEL_SCHEMA_VERSION = 2;
 
     private Prefs() {}
 
@@ -29,7 +31,17 @@ final class Prefs {
         return c.getSharedPreferences(FILE, Context.MODE_PRIVATE);
     }
 
+    static void ensureLabelSchema(Context c) {
+        SharedPreferences p = p(c);
+        if (p.getInt(KEY_LABEL_SCHEMA_VERSION, 0) >= LABEL_SCHEMA_VERSION) return;
+        p.edit()
+                .remove(KEY_RECENT_LABELS)
+                .putInt(KEY_LABEL_SCHEMA_VERSION, LABEL_SCHEMA_VERSION)
+                .apply();
+    }
+
     static void addRecentLabel(Context c, String label) {
+        ensureLabelSchema(c);
         if (label == null) return;
         label = label.trim();
         if (label.isEmpty()) return;
@@ -40,6 +52,7 @@ final class Prefs {
     }
 
     static ArrayList<String> recentLabels(Context c) {
+        ensureLabelSchema(c);
         ArrayList<String> list = new ArrayList<>(p(c).getStringSet(KEY_RECENT_LABELS, Collections.emptySet()));
         Collections.sort(list, String.CASE_INSENSITIVE_ORDER);
         return list;
