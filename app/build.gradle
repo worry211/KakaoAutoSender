@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.kakaoautosender'
         minSdk 26
         targetSdk 35
-        versionCode 6
-        versionName '0.6.0'
+        versionCode 7
+        versionName '0.7.0'
     }
 
     buildFeatures {
@@ -23,6 +23,12 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
+    }
+
+    lint {
+        // MainActivityV2 uses the flagged registerReceiver overload only on API < 33;
+        // API 33+ explicitly uses RECEIVER_NOT_EXPORTED. Lint does not fully model that guard here.
+        disable 'UnspecifiedRegisterReceiverFlag'
     }
 
     compileOptions {
