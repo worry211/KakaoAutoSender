@@ -7,6 +7,7 @@ import android.app.RemoteInput;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ShortcutInfo;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Parcelable;
@@ -31,12 +32,11 @@ import java.util.concurrent.ConcurrentHashMap;
 public class KakaoNotificationListener extends NotificationListenerService {
     static final String KAKAO_PACKAGE = "com.kakao.talk";
     static final String ACTION_SESSIONS_UPDATED = "com.local.kakaoautosender.SESSIONS_UPDATED";
-    private static final int MAX_RECENT_TARGETS = 20;
+    private static final int MAX_RECENT_TARGETS = 24;
     private static final int CONFIDENCE_LOW = 1;
     private static final int CONFIDENCE_MEDIUM = 2;
     private static final int CONFIDENCE_HIGH = 3;
 
-    // sessions에는 사용자가 직접 확인했거나, 사용자가 확인한 안정 식별자로 복구된 세션만 들어간다.
     private static final Map<String, ReplyTarget> sessions = new ConcurrentHashMap<>();
     private static final LinkedHashMap<String, ReplyTarget> recentTargets = new LinkedHashMap<>();
     private static final Object recentLock = new Object();
@@ -116,7 +116,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         super.onListenerConnected();
         instance = this;
         Prefs.ensureLabelSchema(this);
-        Prefs.setStatus(this, "알림 리스너 연결됨 · 안전 라우팅 모드");
+        Prefs.setStatus(this, "알림 리스너 연결됨 · 대화 바로가기 감지 활성");
         rebuildFromActiveNotifications();
         broadcastUpdated();
     }
@@ -131,13 +131,26 @@ public class KakaoNotificationListener extends NotificationListenerService {
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
         if (sbn == null || !KAKAO_PACKAGE.equals(sbn.getPackageName())) return;
-        capture(sbn);
+        capture(sbn, safeCurrentRanking());
+    }
+
+    @Override
+    public void onNotificationPosted(StatusBarNotification sbn, RankingMap rankingMap) {
+        if (sbn == null || !KAKAO_PACKAGE.equals(sbn.getPackageName())) return;
+        capture(sbn, rankingMap);
     }
 
     @Override
     public void onNotificationRemoved(StatusBarNotification sbn) {
         super.onNotificationRemoved(sbn);
-        // PendingIntent가 잠시 더 유효할 수 있으므로 제거 이벤트만으로 검증 세션을 지우지 않는다.
+    }
+
+    private RankingMap safeCurrentRanking() {
+        try {
+            return getCurrentRanking();
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     private void rebuildFromActiveNotifications() {
@@ -145,19 +158,21 @@ public class KakaoNotificationListener extends NotificationListenerService {
             StatusBarNotification[] active = getActiveNotifications();
             if (active == null || active.length == 0) return;
             Arrays.sort(active, Comparator.comparingLong(StatusBarNotification::getPostTime));
+            RankingMap rankingMap = safeCurrentRanking();
             for (StatusBarNotification sbn : active) {
-                if (sbn != null && KAKAO_PACKAGE.equals(sbn.getPackageName())) capture(sbn);
+                if (sbn != null && KAKAO_PACKAGE.equals(sbn.getPackageName())) capture(sbn, rankingMap);
             }
         } catch (Throwable t) {
             Prefs.appendLog(this, "활성 알림 재스캔 실패: " + t.getClass().getSimpleName());
         }
     }
 
-    private void capture(StatusBarNotification sbn) {
+    private void capture(StatusBarNotification sbn, RankingMap rankingMap) {
         Notification n = sbn.getNotification();
         if (n == null) return;
 
-        ParsedNotification parsed = parseNotification(sbn, n);
+        RankingSnapshot ranking = readRankingSnapshot(sbn, rankingMap);
+        ParsedNotification parsed = parseNotification(sbn, n, ranking);
         if (sbn.getPostTime() >= latestMetadataPostTime) {
             latestMetadataPostTime = sbn.getPostTime();
             latestMetadataSummary = parsed.metadata;
@@ -165,7 +180,8 @@ public class KakaoNotificationListener extends NotificationListenerService {
 
         Notification.Action replyAction = findReplyAction(n);
         if (replyAction == null) {
-            Prefs.appendLog(this, "카카오 알림 감지 · 답장 액션 없음 · " + safe(parsed.sender));
+            String roomText = parsed.candidateRoom == null ? "-" : parsed.candidateRoom;
+            Prefs.appendLog(this, "카카오 알림 감지 · 방=" + roomText + " · 답장 액션 없음 · " + safe(parsed.sender));
             broadcastUpdated();
             return;
         }
@@ -187,14 +203,15 @@ public class KakaoNotificationListener extends NotificationListenerService {
                 false);
 
         String mappedAlias = Prefs.aliasForIdentity(this, parsed.stableIdentityKeys);
-        if (mappedAlias != null) {
+        if (mappedAlias != null && Prefs.isRoomConfirmed(this, mappedAlias)) {
             target = bindTarget(this, mappedAlias, target, false);
             Prefs.setStatus(this, "검증된 방 연결 자동복구: " + mappedAlias);
         } else if (parsed.candidateRoom != null) {
-            Prefs.setStatus(this, "카카오 알림 감지 · 후보 '" + parsed.candidateRoom
-                    + "' (" + confidenceLabel(parsed.candidateConfidence) + ") · 확인 전에는 전송하지 않음");
+            Prefs.setStatus(this, "카카오 방 후보 감지: " + parsed.candidateRoom
+                    + " · " + candidateSourceLabel(parsed.candidateSource)
+                    + " · 확인 전 전송 차단");
         } else {
-            Prefs.setStatus(this, "카카오 답장 세션 감지됨 · 방 후보 없음 · 최근 알림에서 직접 연결 필요");
+            Prefs.setStatus(this, "카카오 답장 세션 감지됨 · 방 이름 미확인 · 최근 알림에서 직접 연결 필요");
         }
 
         rememberRecent(target);
@@ -205,16 +222,38 @@ public class KakaoNotificationListener extends NotificationListenerService {
         broadcastUpdated();
     }
 
+    private RankingSnapshot readRankingSnapshot(StatusBarNotification sbn, RankingMap rankingMap) {
+        if (Build.VERSION.SDK_INT < 31) return new RankingSnapshot(null, null, null, false);
+        try {
+            RankingMap map = rankingMap != null ? rankingMap : safeCurrentRanking();
+            if (map == null) return new RankingSnapshot(null, null, null, false);
+            Ranking ranking = new Ranking();
+            if (!map.getRanking(sbn.getKey(), ranking)) {
+                return new RankingSnapshot(null, null, null, false);
+            }
+            ShortcutInfo shortcut = ranking.getConversationShortcutInfo();
+            String shortLabel = null;
+            String longLabel = null;
+            String shortcutId = null;
+            if (shortcut != null) {
+                shortLabel = clean(shortcut.getShortLabel());
+                longLabel = clean(shortcut.getLongLabel());
+                shortcutId = clean(shortcut.getId());
+            }
+            return new RankingSnapshot(shortLabel, longLabel, shortcutId, ranking.isConversation());
+        } catch (Throwable t) {
+            return new RankingSnapshot(null, null, null, false);
+        }
+    }
+
     private Notification.Action findReplyAction(Notification n) {
         Notification.Action best = findReplyActionInList(n.actions == null ? null : Arrays.asList(n.actions));
         if (best != null) return best;
-
         try {
-            List<Notification.Action> wearable = new Notification.WearableExtender(n).getActions();
-            best = findReplyActionInList(wearable);
+            return findReplyActionInList(new Notification.WearableExtender(n).getActions());
         } catch (Throwable ignored) {
+            return null;
         }
-        return best;
     }
 
     private Notification.Action findReplyActionInList(List<Notification.Action> actions) {
@@ -245,7 +284,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         return fallback;
     }
 
-    private ParsedNotification parseNotification(StatusBarNotification sbn, Notification n) {
+    private ParsedNotification parseNotification(StatusBarNotification sbn, Notification n, RankingSnapshot ranking) {
         Bundle extras = n.extras;
         String sender = null;
         String preview = null;
@@ -278,11 +317,11 @@ public class KakaoNotificationListener extends NotificationListenerService {
             }
         }
 
-        Candidate candidate = chooseCandidate(sender, preview, conversation, hiddenConversation,
-                subText, summary, info, bigTitle, extras);
-        ArrayList<String> stableIdentities = buildStableIdentityKeys(n);
+        Candidate candidate = chooseCandidate(sender, preview, ranking,
+                conversation, hiddenConversation, subText, summary, info, bigTitle, extras);
+        ArrayList<String> stableIdentities = buildStableIdentityKeys(n, ranking);
 
-        String shortcut = Build.VERSION.SDK_INT >= 26 ? clean(n.getShortcutId()) : null;
+        String notificationShortcut = Build.VERSION.SDK_INT >= 26 ? clean(n.getShortcutId()) : null;
         String channel = Build.VERSION.SDK_INT >= 26 ? clean(n.getChannelId()) : null;
         String tag = clean(sbn.getTag());
         String groupKey = clean(sbn.getGroupKey());
@@ -292,6 +331,10 @@ public class KakaoNotificationListener extends NotificationListenerService {
                 + "\n방 후보=" + safe(candidate.value)
                 + "\n후보 신뢰도=" + confidenceLabel(candidate.confidence)
                 + "\n후보 출처=" + safe(candidate.source)
+                + "\nrankingConversation=" + ranking.isConversation
+                + "\nrankingShortcut.shortLabel=" + safe(ranking.shortLabel)
+                + "\nrankingShortcut.longLabel=" + safe(ranking.longLabel)
+                + "\nrankingShortcut.id=" + safe(ranking.shortcutId)
                 + "\nconversationTitle=" + safe(conversation)
                 + "\nhiddenConversationTitle=" + safe(hiddenConversation)
                 + "\nsubText=" + safe(subText)
@@ -299,7 +342,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
                 + "\ninfo=" + safe(info)
                 + "\nbigTitle=" + safe(bigTitle)
                 + "\nmessageBundle sender=" + safe(messageBundleSender)
-                + "\nshortcutId=" + safe(shortcut)
+                + "\nnotification.shortcutId=" + safe(notificationShortcut)
                 + "\ntag=" + safe(tag)
                 + "\nnotificationId=" + sbn.getId()
                 + "\ngroupKey=" + safe(groupKey)
@@ -312,12 +355,23 @@ public class KakaoNotificationListener extends NotificationListenerService {
                 candidate.source, stableIdentities, metadata);
     }
 
-    private Candidate chooseCandidate(String sender, String preview,
-                                      String conversation, String hiddenConversation,
-                                      String subText, String summary,
-                                      String info, String bigTitle,
+    private Candidate chooseCandidate(String sender,
+                                      String preview,
+                                      RankingSnapshot ranking,
+                                      String conversation,
+                                      String hiddenConversation,
+                                      String subText,
+                                      String summary,
+                                      String info,
+                                      String bigTitle,
                                       Bundle extras) {
-        String value = usableCandidate(sender, preview, conversation);
+        String value = usableCandidate(sender, preview, ranking.shortLabel);
+        if (value != null) return new Candidate(value, CONFIDENCE_HIGH, "system conversation shortcut");
+
+        value = usableCandidate(sender, preview, ranking.longLabel);
+        if (value != null) return new Candidate(value, CONFIDENCE_HIGH, "system conversation shortcut long label");
+
+        value = usableCandidate(sender, preview, conversation);
         if (value != null) return new Candidate(value, CONFIDENCE_HIGH, "conversationTitle");
 
         value = usableCandidate(sender, preview, hiddenConversation);
@@ -394,8 +448,12 @@ public class KakaoNotificationListener extends NotificationListenerService {
         return null;
     }
 
-    private ArrayList<String> buildStableIdentityKeys(Notification n) {
+    private ArrayList<String> buildStableIdentityKeys(Notification n, RankingSnapshot ranking) {
         LinkedHashSet<String> keys = new LinkedHashSet<>();
+        String rankingShortcut = clean(ranking.shortcutId);
+        if (rankingShortcut != null && !looksGeneric(rankingShortcut)) {
+            keys.add("kakao-shortcut:" + rankingShortcut);
+        }
         if (Build.VERSION.SDK_INT >= 26) {
             String shortcut = clean(n.getShortcutId());
             if (shortcut != null && !looksGeneric(shortcut)) {
@@ -542,8 +600,11 @@ public class KakaoNotificationListener extends NotificationListenerService {
 
     static ArrayList<SessionEntry> candidateSessionEntries() {
         ArrayList<SessionEntry> result = new ArrayList<>();
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
         for (SessionEntry entry : recentSessionEntries()) {
-            if (entry.suggestedRoom != null && entry.confidence >= CONFIDENCE_MEDIUM) result.add(entry);
+            if (entry.suggestedRoom == null || entry.confidence < CONFIDENCE_MEDIUM) continue;
+            String key = normalize(entry.suggestedRoom);
+            if (seen.add(key)) result.add(entry);
         }
         return result;
     }
@@ -604,14 +665,13 @@ public class KakaoNotificationListener extends NotificationListenerService {
             return false;
         }
 
-        // 저장된 안정 식별자가 있다면 현재 활성 알림에서 검증 세션을 복구할 기회를 준다.
         requestRefresh();
         ReplyTarget target = findTarget(requested);
         if (target == null || !target.verified) {
-            lastSendError = "확인된 실시간 답장 세션 없음 · 최근 알림에서 대상 방을 다시 연결해줘";
+            lastSendError = "확인된 실시간 답장 세션 없음 · 대상 방 알림을 다시 연결해줘";
             return false;
         }
-        if (!normalize(requested).equals(normalize(target.label))) {
+        if (!same(requested, target.label)) {
             lastSendError = "안전 차단: 선택 방과 검증 세션 이름이 다름";
             return false;
         }
@@ -623,7 +683,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
             return false;
         }
 
-        if (target.remoteInputs.length == 0) {
+        if (target.remoteInputs.length == 0 || target.pendingIntent == null) {
             lastSendError = "카카오 답장 입력 정보가 없음";
             return false;
         }
@@ -657,6 +717,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         StringBuilder sb = new StringBuilder();
         sb.append("앱 버전: ").append(BuildConfig.VERSION_NAME);
         sb.append("\n라우팅 정책: FAIL-CLOSED / 확인된 세션만 전송");
+        sb.append("\n방 감지: Android Ranking conversation shortcut 우선");
         sb.append("\n알림 리스너: ").append(isListenerConnected() ? "연결됨" : "연결 대기");
         sb.append("\n검증된 실시간 방 세션: ").append(liveLabels().size()).append("개");
         sb.append("\n저장 자동복구 식별자: ").append(Prefs.bindingCount(context)).append("개");
@@ -705,6 +766,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         } else if (target.candidateRoom != null) {
             sb.append(" · 후보 ").append(target.candidateRoom)
                     .append(" [").append(confidenceLabel(target.candidateConfidence)).append("]");
+            if (target.candidateSource != null) sb.append(" · ").append(candidateSourceLabel(target.candidateSource));
         } else {
             sb.append(" · 방 이름 미확인");
         }
@@ -730,6 +792,14 @@ public class KakaoNotificationListener extends NotificationListenerService {
         return "없음";
     }
 
+    private static String candidateSourceLabel(String source) {
+        if (source == null) return "출처 없음";
+        if (source.startsWith("system conversation shortcut")) return "안드로이드 대화방 정보";
+        if (source.contains("conversationTitle")) return "카카오 대화 제목";
+        if (source.equals("subText") || source.equals("summary")) return "카카오 알림 보조 제목";
+        return source;
+    }
+
     private static boolean same(String a, String b) {
         return a != null && b != null && normalize(a).equals(normalize(b));
     }
@@ -747,6 +817,20 @@ public class KakaoNotificationListener extends NotificationListenerService {
 
     private static String safe(String s) {
         return s == null || s.trim().isEmpty() ? "-" : s;
+    }
+
+    private static class RankingSnapshot {
+        final String shortLabel;
+        final String longLabel;
+        final String shortcutId;
+        final boolean isConversation;
+
+        RankingSnapshot(String shortLabel, String longLabel, String shortcutId, boolean isConversation) {
+            this.shortLabel = shortLabel;
+            this.longLabel = longLabel;
+            this.shortcutId = shortcutId;
+            this.isConversation = isConversation;
+        }
     }
 
     private static class Candidate {
@@ -770,8 +854,13 @@ public class KakaoNotificationListener extends NotificationListenerService {
         final ArrayList<String> stableIdentityKeys;
         final String metadata;
 
-        ParsedNotification(String sender, String preview, String candidateRoom, int candidateConfidence,
-                           String candidateSource, ArrayList<String> stableIdentityKeys, String metadata) {
+        ParsedNotification(String sender,
+                           String preview,
+                           String candidateRoom,
+                           int candidateConfidence,
+                           String candidateSource,
+                           ArrayList<String> stableIdentityKeys,
+                           String metadata) {
             this.sender = sender;
             this.preview = preview;
             this.candidateRoom = candidateRoom;
