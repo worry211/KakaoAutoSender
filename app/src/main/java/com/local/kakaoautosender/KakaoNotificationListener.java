@@ -3,6 +3,7 @@ package com.local.kakaoautosender;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.RemoteInput;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
@@ -19,6 +20,9 @@ public class KakaoNotificationListener extends NotificationListenerService {
     static final String KAKAO_PACKAGE = "com.kakao.talk";
     private static final Map<String, ReplyTarget> sessions = new ConcurrentHashMap<>();
     private static volatile KakaoNotificationListener instance;
+    private static volatile ReplyTarget latestReplyTarget;
+    private static volatile String latestSender;
+    private static volatile String latestPreview;
 
     static class ReplyTarget {
         final String label;
@@ -63,8 +67,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
             for (StatusBarNotification sbn : active) {
                 if (sbn != null && KAKAO_PACKAGE.equals(sbn.getPackageName())) capture(sbn);
             }
-        } catch (Throwable ignored) {
-        }
+        } catch (Throwable ignored) {}
     }
 
     private void capture(StatusBarNotification sbn) {
@@ -74,17 +77,22 @@ public class KakaoNotificationListener extends NotificationListenerService {
         Notification.Action replyAction = findReplyAction(n);
         if (replyAction == null) return;
 
+        String sender = clean(n.extras == null ? null : n.extras.getCharSequence(Notification.EXTRA_TITLE));
+        String preview = clean(n.extras == null ? null : n.extras.getCharSequence(Notification.EXTRA_TEXT));
+        latestReplyTarget = new ReplyTarget("", replyAction.actionIntent, replyAction.getRemoteInputs());
+        latestSender = sender;
+        latestPreview = preview;
+
         String room = extractRoomLabel(n);
         if (room == null) {
-            String sender = clean(n.extras == null ? null : n.extras.getCharSequence(Notification.EXTRA_TITLE));
             Prefs.setStatus(this, sender == null
-                    ? "답장 세션 감지됨 · 방 이름을 아직 확인하지 못함"
-                    : "답장 세션 감지됨 · 보낸사람 " + sender + " · 방 이름 확인 대기");
+                    ? "카카오 답장 세션 감지됨 · 방 이름 자동확인 실패"
+                    : "카카오 답장 세션 감지됨 · 보낸사람 " + sender + " · 수동 연결 가능");
+            sendBroadcast(new Intent("com.local.kakaoautosender.SESSIONS_UPDATED").setPackage(getPackageName()));
             return;
         }
 
-        sessions.put(normalize(room), new ReplyTarget(room, replyAction.actionIntent, replyAction.getRemoteInputs()));
-        Prefs.addRecentLabel(this, room);
+        bindTarget(room, latestReplyTarget);
         Prefs.setStatus(this, "카카오톡 방 세션 감지: " + room);
         sendBroadcast(new Intent("com.local.kakaoautosender.SESSIONS_UPDATED").setPackage(getPackageName()));
     }
@@ -95,7 +103,6 @@ public class KakaoNotificationListener extends NotificationListenerService {
             if (a == null || a.actionIntent == null) continue;
             RemoteInput[] inputs = a.getRemoteInputs();
             if (inputs == null || inputs.length == 0) continue;
-
             boolean freeForm = false;
             for (RemoteInput ri : inputs) {
                 if (ri != null && ri.getAllowFreeFormInput()) {
@@ -104,11 +111,8 @@ public class KakaoNotificationListener extends NotificationListenerService {
                 }
             }
             if (!freeForm) continue;
-
             if (fallback == null) fallback = a;
-            if (Build.VERSION.SDK_INT >= 28 && a.getSemanticAction() == Notification.Action.SEMANTIC_ACTION_REPLY) {
-                return a;
-            }
+            if (Build.VERSION.SDK_INT >= 28 && a.getSemanticAction() == Notification.Action.SEMANTIC_ACTION_REPLY) return a;
         }
         return fallback;
     }
@@ -116,34 +120,20 @@ public class KakaoNotificationListener extends NotificationListenerService {
     private String extractRoomLabel(Notification n) {
         Bundle e = n.extras;
         if (e == null) return null;
-
         String sender = clean(e.getCharSequence(Notification.EXTRA_TITLE));
         String conversation = clean(e.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE));
         String subText = clean(e.getCharSequence(Notification.EXTRA_SUB_TEXT));
         String summary = clean(e.getCharSequence(Notification.EXTRA_SUMMARY_TEXT));
-
         String room = firstUsableRoom(sender, conversation, subText, summary);
         if (room != null) return room;
-
-        // Some KakaoTalk/Android combinations duplicate the room title into the big title.
         String bigTitle = clean(e.getCharSequence(Notification.EXTRA_TITLE_BIG));
         if (bigTitle != null && !same(bigTitle, sender) && !looksGeneric(bigTitle)) return bigTitle;
-
-        // Deliberately do NOT use EXTRA_TITLE or shortcutId as a room name here.
-        // EXTRA_TITLE is normally the sender nickname in group/open-chat notifications,
-        // which caused v0.1 to display profile nicknames as if they were rooms.
         return null;
     }
 
     private String firstUsableRoom(String sender, String... candidates) {
         for (String candidate : candidates) {
-            if (candidate == null) continue;
-            if (same(candidate, sender)) continue;
-            if (looksGeneric(candidate)) continue;
-            return candidate;
-        }
-        for (String candidate : candidates) {
-            if (candidate == null || looksGeneric(candidate)) continue;
+            if (candidate == null || same(candidate, sender) || looksGeneric(candidate)) continue;
             return candidate;
         }
         return null;
@@ -151,10 +141,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
 
     private static boolean looksGeneric(String s) {
         String n = normalize(s);
-        return n.equals("카카오톡")
-                || n.equals("kakaotalk")
-                || n.equals("새 메시지")
-                || n.equals("new message")
+        return n.equals("카카오톡") || n.equals("kakaotalk") || n.equals("새 메시지") || n.equals("new message")
                 || n.matches("^[0-9]+개의? (메시지|채팅|대화).*$");
     }
 
@@ -173,14 +160,43 @@ public class KakaoNotificationListener extends NotificationListenerService {
         return s == null ? "" : s.trim().toLowerCase(Locale.ROOT);
     }
 
+    private void bindTarget(String room, ReplyTarget source) {
+        if (room == null || room.trim().isEmpty() || source == null) return;
+        ReplyTarget bound = new ReplyTarget(room.trim(), source.pendingIntent, source.remoteInputs);
+        sessions.put(normalize(room), bound);
+        Prefs.addRecentLabel(this, room.trim());
+    }
+
+    static boolean bindLatestToRoom(Context context, String room) {
+        ReplyTarget target = latestReplyTarget;
+        String name = room == null ? "" : room.trim();
+        if (target == null || name.isEmpty()) return false;
+        ReplyTarget bound = new ReplyTarget(name, target.pendingIntent, target.remoteInputs);
+        sessions.put(normalize(name), bound);
+        Prefs.addRecentLabel(context, name);
+        Prefs.setStatus(context, "최근 카카오 세션을 방에 연결: " + name);
+        return true;
+    }
+
+    static boolean hasLatestReplyTarget() {
+        return latestReplyTarget != null;
+    }
+
+    static String latestSessionDescription() {
+        if (latestReplyTarget == null) return "최근 답장 세션 없음";
+        StringBuilder sb = new StringBuilder("최근 답장 세션");
+        if (latestSender != null) sb.append(" · 보낸사람 ").append(latestSender);
+        if (latestPreview != null) {
+            String p = latestPreview.length() > 24 ? latestPreview.substring(0, 24) + "…" : latestPreview;
+            sb.append(" · ").append(p);
+        }
+        return sb.toString();
+    }
+
     static ArrayList<String> liveLabels() {
         LinkedHashSet<String> labels = new LinkedHashSet<>();
         for (ReplyTarget t : sessions.values()) labels.add(t.label);
         return new ArrayList<>(labels);
-    }
-
-    static boolean hasLiveSession(String room) {
-        return findTarget(room) != null;
     }
 
     static void requestRefresh() {
@@ -188,12 +204,10 @@ public class KakaoNotificationListener extends NotificationListenerService {
         if (s != null) s.rebuildFromActiveNotifications();
     }
 
-    static boolean sendToRoom(android.content.Context context, String room, String message) {
+    static boolean sendToRoom(Context context, String room, String message) {
         if (message == null || message.trim().isEmpty()) return false;
-        requestRefresh();
         ReplyTarget target = findTarget(room);
         if (target == null) return false;
-
         try {
             Bundle results = new Bundle();
             for (RemoteInput ri : target.remoteInputs) {
@@ -216,7 +230,6 @@ public class KakaoNotificationListener extends NotificationListenerService {
         if (key.isEmpty()) return null;
         ReplyTarget exact = sessions.get(key);
         if (exact != null) return exact;
-
         for (Map.Entry<String, ReplyTarget> e : sessions.entrySet()) {
             if (e.getKey().contains(key) || key.contains(e.getKey())) return e.getValue();
         }
