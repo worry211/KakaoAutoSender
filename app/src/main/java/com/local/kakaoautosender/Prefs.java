@@ -31,9 +31,10 @@ final class Prefs {
     static final String KEY_EVENT_LOG = "event_log";
 
     private static final String KEY_LABEL_SCHEMA_VERSION = "label_schema_version";
-    private static final int LABEL_SCHEMA_VERSION = 4;
+    private static final int LABEL_SCHEMA_VERSION = 5;
     private static final String BINDING_PREFIX = "binding.";
-    private static final int MAX_LOG_CHARS = 12000;
+    private static final String CONFIRMED_PREFIX = "confirmed.";
+    private static final int MAX_LOG_CHARS = 16000;
 
     private Prefs() {}
 
@@ -47,15 +48,17 @@ final class Prefs {
         if (oldVersion >= LABEL_SCHEMA_VERSION) return;
 
         SharedPreferences.Editor e = prefs.edit().remove(KEY_RECENT_LABELS);
-        if (oldVersion < 4) {
-            // v0.3까지는 notification-id/channel-id처럼 여러 방에서 재사용될 수 있는 약한 키가
-            // 저장될 수 있었다. 엉뚱한 방으로 보내는 것보다 한 번 다시 연결하도록 초기화한다.
+        if (oldVersion < 5) {
+            // v0.4까지는 자동 추정 방 이름과 notification tag를 영구 연결에 사용할 수 있었다.
+            // 오배송 가능성이 있으므로 기존 연결을 신뢰하지 않고 전부 폐기한 뒤 사용자가 다시 확인하게 한다.
             for (String key : prefs.getAll().keySet()) {
-                if (key.startsWith(BINDING_PREFIX)) e.remove(key);
+                if (key.startsWith(BINDING_PREFIX) || key.startsWith(CONFIRMED_PREFIX)) e.remove(key);
             }
+            e.putBoolean(KEY_ACTIVE, false);
+            e.putLong(KEY_NEXT_AT, 0L);
         }
         e.putInt(KEY_LABEL_SCHEMA_VERSION, LABEL_SCHEMA_VERSION).apply();
-        appendLog(c, "방 연결 스키마 갱신: 안전한 식별자만 사용");
+        appendLog(c, "v0.5 안전 라우팅 마이그레이션: 기존 방 연결 폐기 · 재확인 필요");
     }
 
     static void addRecentLabel(Context c, String label) {
@@ -91,20 +94,27 @@ final class Prefs {
         if (added > 0) {
             e.apply();
             addRecentLabel(c, alias);
-            appendLog(c, "연결 규칙 저장: " + alias + " (안전 식별자 " + added + "개)");
+            appendLog(c, "검증된 자동복구 규칙 저장: " + alias + " (안전 식별자 " + added + "개)");
         }
     }
 
     static String aliasForIdentity(Context c, List<String> identityKeys) {
         ensureLabelSchema(c);
-        if (identityKeys == null) return null;
+        if (identityKeys == null || identityKeys.isEmpty()) return null;
         SharedPreferences prefs = p(c);
+        String found = null;
         for (String key : identityKeys) {
             if (key == null || key.trim().isEmpty()) continue;
             String alias = prefs.getString(BINDING_PREFIX + digest(key), null);
-            if (alias != null && !alias.trim().isEmpty()) return alias.trim();
+            if (alias == null || alias.trim().isEmpty()) continue;
+            alias = alias.trim();
+            if (found != null && !found.equalsIgnoreCase(alias)) {
+                appendLog(c, "자동복구 식별자 충돌 감지 · 자동 연결 거부");
+                return null;
+            }
+            found = alias;
         }
-        return null;
+        return found;
     }
 
     static boolean hasBindingForAlias(Context c, String alias) {
@@ -119,6 +129,25 @@ final class Prefs {
         return false;
     }
 
+    static boolean removeBindingsForAlias(Context c, String alias) {
+        ensureLabelSchema(c);
+        if (alias == null || alias.trim().isEmpty()) return false;
+        String wanted = alias.trim();
+        SharedPreferences prefs = p(c);
+        SharedPreferences.Editor e = prefs.edit();
+        boolean removed = false;
+        for (Map.Entry<String, ?> entry : prefs.getAll().entrySet()) {
+            if (!entry.getKey().startsWith(BINDING_PREFIX)) continue;
+            Object value = entry.getValue();
+            if (value instanceof String && wanted.equalsIgnoreCase(((String) value).trim())) {
+                e.remove(entry.getKey());
+                removed = true;
+            }
+        }
+        if (removed) e.apply();
+        return removed;
+    }
+
     static int bindingCount(Context c) {
         ensureLabelSchema(c);
         int count = 0;
@@ -128,14 +157,32 @@ final class Prefs {
         return count;
     }
 
+    static void markRoomConfirmed(Context c, String room) {
+        ensureLabelSchema(c);
+        if (room == null || room.trim().isEmpty()) return;
+        p(c).edit().putLong(CONFIRMED_PREFIX + digest(room.trim().toLowerCase()), System.currentTimeMillis()).apply();
+    }
+
+    static boolean isRoomConfirmed(Context c, String room) {
+        ensureLabelSchema(c);
+        if (room == null || room.trim().isEmpty()) return false;
+        return p(c).contains(CONFIRMED_PREFIX + digest(room.trim().toLowerCase()));
+    }
+
+    static void clearRoomConfirmed(Context c, String room) {
+        ensureLabelSchema(c);
+        if (room == null || room.trim().isEmpty()) return;
+        p(c).edit().remove(CONFIRMED_PREFIX + digest(room.trim().toLowerCase())).apply();
+    }
+
     static void clearBindingsAndLabels(Context c) {
         SharedPreferences prefs = p(c);
         SharedPreferences.Editor e = prefs.edit().remove(KEY_RECENT_LABELS);
         for (String key : prefs.getAll().keySet()) {
-            if (key.startsWith(BINDING_PREFIX)) e.remove(key);
+            if (key.startsWith(BINDING_PREFIX) || key.startsWith(CONFIRMED_PREFIX)) e.remove(key);
         }
         e.apply();
-        appendLog(c, "저장된 방 연결 규칙 초기화");
+        appendLog(c, "저장된 방 연결/확인 규칙 초기화");
     }
 
     static int getTodayCount(Context c) {

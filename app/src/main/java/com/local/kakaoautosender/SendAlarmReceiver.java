@@ -19,6 +19,9 @@ public class SendAlarmReceiver extends BroadcastReceiver {
 
         executor.execute(() -> {
             try {
+                // v0.5 안전 라우팅 마이그레이션이 아직 안 됐다면 전송 판단보다 먼저 실행한다.
+                Prefs.ensureLabelSchema(app);
+
                 if (!Prefs.p(app).getBoolean(Prefs.KEY_ACTIVE, false)) {
                     SendScheduler.cancel(app);
                     return;
@@ -51,17 +54,16 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                         new ComponentName(app, KakaoNotificationListener.class));
 
                 boolean sent = false;
-                String failureReason = "현재 답장 세션 없음";
-                for (int i = 0; i < 6 && !sent; i++) {
-                    KakaoNotificationListener.requestRefresh();
+                String failureReason = "확인된 답장 세션 없음";
+                for (int i = 0; i < 3 && !sent; i++) {
                     sent = KakaoNotificationListener.sendToRoom(app, room, message);
                     if (!sent) {
                         failureReason = KakaoNotificationListener.lastSendError();
                         if (failureReason == null || failureReason.trim().isEmpty()) {
-                            failureReason = "현재 답장 세션 없음";
+                            failureReason = "확인된 답장 세션 없음";
                         }
                         try {
-                            Thread.sleep(450L);
+                            Thread.sleep(500L);
                         } catch (InterruptedException ignored) {
                             Thread.currentThread().interrupt();
                             break;
@@ -75,8 +77,8 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 } else {
                     int streak = Prefs.recordFailure(app);
                     String recovery = KakaoNotificationListener.hasStoredBinding(app, room)
-                            ? "저장 연결은 유지됨 · 같은 방의 새 카카오 알림이 오면 세션 자동복구"
-                            : "대상 방의 새 알림을 받은 뒤 방 연결 필요";
+                            ? "검증된 자동복구키 있음 · 같은 방의 새 알림으로 세션 복구 대기"
+                            : "대상 방의 새 알림을 받은 뒤 직접 다시 연결 필요";
                     Prefs.setStatus(app, "자동전송 실패: " + failureReason + " · 연속 " + streak + "회 · " + recovery);
                 }
 
