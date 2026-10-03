@@ -25,6 +25,12 @@ android {
         }
     }
 
+    lint {
+        // MainActivityV2 uses the flagged registerReceiver overload only on API < 33;
+        // API 33+ explicitly uses RECEIVER_NOT_EXPORTED. Lint does not fully model that guard here.
+        disable 'UnspecifiedRegisterReceiverFlag'
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
