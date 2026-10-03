@@ -17,6 +17,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -30,8 +31,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public class KakaoNotificationListener extends NotificationListenerService {
     static final String KAKAO_PACKAGE = "com.kakao.talk";
     static final String ACTION_SESSIONS_UPDATED = "com.local.kakaoautosender.SESSIONS_UPDATED";
-    private static final int MAX_RECENT_TARGETS = 16;
+    private static final int MAX_RECENT_TARGETS = 20;
+    private static final int CONFIDENCE_LOW = 1;
+    private static final int CONFIDENCE_MEDIUM = 2;
+    private static final int CONFIDENCE_HIGH = 3;
 
+    // sessions에는 사용자가 직접 확인했거나, 사용자가 확인한 안정 식별자로 복구된 세션만 들어간다.
     private static final Map<String, ReplyTarget> sessions = new ConcurrentHashMap<>();
     private static final LinkedHashMap<String, ReplyTarget> recentTargets = new LinkedHashMap<>();
     private static final Object recentLock = new Object();
@@ -39,15 +44,20 @@ public class KakaoNotificationListener extends NotificationListenerService {
     private static volatile KakaoNotificationListener instance;
     private static volatile ReplyTarget latestReplyTarget;
     private static volatile String latestMetadataSummary = "아직 카카오톡 알림을 분석하지 못함";
+    private static volatile long latestMetadataPostTime = 0L;
     private static volatile String lastSendError = "";
 
     static class SessionEntry {
         final String token;
         final String description;
+        final String suggestedRoom;
+        final int confidence;
 
-        SessionEntry(String token, String description) {
+        SessionEntry(String token, String description, String suggestedRoom, int confidence) {
             this.token = token;
             this.description = description;
+            this.suggestedRoom = suggestedRoom;
+            this.confidence = confidence;
         }
     }
 
@@ -56,35 +66,48 @@ public class KakaoNotificationListener extends NotificationListenerService {
         final PendingIntent pendingIntent;
         final RemoteInput[] remoteInputs;
         final long capturedAt;
+        final long notificationPostTime;
         final String token;
         final String sender;
         final String preview;
-        final String autoRoom;
-        final ArrayList<String> identityKeys;
+        final String candidateRoom;
+        final int candidateConfidence;
+        final String candidateSource;
+        final ArrayList<String> stableIdentityKeys;
+        final boolean verified;
 
         ReplyTarget(String label,
                     PendingIntent pendingIntent,
                     RemoteInput[] remoteInputs,
                     long capturedAt,
+                    long notificationPostTime,
                     String token,
                     String sender,
                     String preview,
-                    String autoRoom,
-                    ArrayList<String> identityKeys) {
+                    String candidateRoom,
+                    int candidateConfidence,
+                    String candidateSource,
+                    ArrayList<String> stableIdentityKeys,
+                    boolean verified) {
             this.label = label == null ? "" : label;
             this.pendingIntent = pendingIntent;
             this.remoteInputs = remoteInputs == null ? new RemoteInput[0] : remoteInputs;
             this.capturedAt = capturedAt;
+            this.notificationPostTime = notificationPostTime;
             this.token = token;
             this.sender = sender;
             this.preview = preview;
-            this.autoRoom = autoRoom;
-            this.identityKeys = identityKeys == null ? new ArrayList<>() : new ArrayList<>(identityKeys);
+            this.candidateRoom = candidateRoom;
+            this.candidateConfidence = candidateConfidence;
+            this.candidateSource = candidateSource;
+            this.stableIdentityKeys = stableIdentityKeys == null ? new ArrayList<>() : new ArrayList<>(stableIdentityKeys);
+            this.verified = verified;
         }
 
-        ReplyTarget withLabel(String room) {
-            return new ReplyTarget(room, pendingIntent, remoteInputs, System.currentTimeMillis(), token,
-                    sender, preview, autoRoom, identityKeys);
+        ReplyTarget verifiedAs(String room) {
+            return new ReplyTarget(room, pendingIntent, remoteInputs, System.currentTimeMillis(), notificationPostTime,
+                    token, sender, preview, candidateRoom, candidateConfidence, candidateSource,
+                    stableIdentityKeys, true);
         }
     }
 
@@ -93,7 +116,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         super.onListenerConnected();
         instance = this;
         Prefs.ensureLabelSchema(this);
-        Prefs.setStatus(this, "알림 리스너 연결됨");
+        Prefs.setStatus(this, "알림 리스너 연결됨 · 안전 라우팅 모드");
         rebuildFromActiveNotifications();
         broadcastUpdated();
     }
@@ -114,13 +137,14 @@ public class KakaoNotificationListener extends NotificationListenerService {
     @Override
     public void onNotificationRemoved(StatusBarNotification sbn) {
         super.onNotificationRemoved(sbn);
-        // 카카오가 알림을 지워도 PendingIntent가 잠시 더 유효할 수 있으므로 즉시 세션을 지우지 않는다.
+        // PendingIntent가 잠시 더 유효할 수 있으므로 제거 이벤트만으로 검증 세션을 지우지 않는다.
     }
 
     private void rebuildFromActiveNotifications() {
         try {
             StatusBarNotification[] active = getActiveNotifications();
-            if (active == null) return;
+            if (active == null || active.length == 0) return;
+            Arrays.sort(active, Comparator.comparingLong(StatusBarNotification::getPostTime));
             for (StatusBarNotification sbn : active) {
                 if (sbn != null && KAKAO_PACKAGE.equals(sbn.getPackageName())) capture(sbn);
             }
@@ -134,7 +158,10 @@ public class KakaoNotificationListener extends NotificationListenerService {
         if (n == null) return;
 
         ParsedNotification parsed = parseNotification(sbn, n);
-        latestMetadataSummary = parsed.metadata;
+        if (sbn.getPostTime() >= latestMetadataPostTime) {
+            latestMetadataPostTime = sbn.getPostTime();
+            latestMetadataSummary = parsed.metadata;
+        }
 
         Notification.Action replyAction = findReplyAction(n);
         if (replyAction == null) {
@@ -143,32 +170,37 @@ public class KakaoNotificationListener extends NotificationListenerService {
             return;
         }
 
-        String mappedAlias = Prefs.aliasForIdentity(this, parsed.identityKeys);
-        String chosenRoom = mappedAlias != null ? mappedAlias : parsed.autoRoom;
         String token = sbn.getKey() + "|" + sbn.getPostTime();
-
         ReplyTarget target = new ReplyTarget(
-                chosenRoom == null ? "" : chosenRoom,
+                "",
                 replyAction.actionIntent,
                 replyAction.getRemoteInputs(),
                 System.currentTimeMillis(),
+                sbn.getPostTime(),
                 token,
                 parsed.sender,
                 parsed.preview,
-                parsed.autoRoom,
-                parsed.identityKeys);
+                parsed.candidateRoom,
+                parsed.candidateConfidence,
+                parsed.candidateSource,
+                parsed.stableIdentityKeys,
+                false);
 
-        latestReplyTarget = target;
-        rememberRecent(target);
-
-        if (chosenRoom != null && !chosenRoom.trim().isEmpty()) {
-            bindTarget(this, chosenRoom, target, mappedAlias == null);
-            String source = mappedAlias != null ? "저장 연결 규칙" : "자동 감지";
-            Prefs.setStatus(this, "카카오 방 세션 연결: " + chosenRoom + " · " + source);
+        String mappedAlias = Prefs.aliasForIdentity(this, parsed.stableIdentityKeys);
+        if (mappedAlias != null) {
+            target = bindTarget(this, mappedAlias, target, false);
+            Prefs.setStatus(this, "검증된 방 연결 자동복구: " + mappedAlias);
+        } else if (parsed.candidateRoom != null) {
+            Prefs.setStatus(this, "카카오 알림 감지 · 후보 '" + parsed.candidateRoom
+                    + "' (" + confidenceLabel(parsed.candidateConfidence) + ") · 확인 전에는 전송하지 않음");
         } else {
-            Prefs.setStatus(this, parsed.sender == null
-                    ? "카카오 답장 세션 감지됨 · 방 이름 자동확인 실패 · 최근 알림에서 직접 연결 가능"
-                    : "카카오 답장 세션 감지됨 · 보낸사람 " + parsed.sender + " · 최근 알림에서 직접 연결 가능");
+            Prefs.setStatus(this, "카카오 답장 세션 감지됨 · 방 후보 없음 · 최근 알림에서 직접 연결 필요");
+        }
+
+        rememberRecent(target);
+        ReplyTarget latest = latestReplyTarget;
+        if (latest == null || target.notificationPostTime >= latest.notificationPostTime) {
+            latestReplyTarget = target;
         }
         broadcastUpdated();
     }
@@ -246,9 +278,9 @@ public class KakaoNotificationListener extends NotificationListenerService {
             }
         }
 
-        String autoRoom = firstUsableRoom(sender, preview,
-                conversation, hiddenConversation, subText, summary, info, bigTitle);
-        ArrayList<String> identities = buildIdentityKeys(sbn, n);
+        Candidate candidate = chooseCandidate(sender, preview, conversation, hiddenConversation,
+                subText, summary, info, bigTitle, extras);
+        ArrayList<String> stableIdentities = buildStableIdentityKeys(n);
 
         String shortcut = Build.VERSION.SDK_INT >= 26 ? clean(n.getShortcutId()) : null;
         String channel = Build.VERSION.SDK_INT >= 26 ? clean(n.getChannelId()) : null;
@@ -257,11 +289,14 @@ public class KakaoNotificationListener extends NotificationListenerService {
 
         String metadata = "보낸사람=" + safe(sender)
                 + "\n메시지=" + safe(preview)
-                + "\n자동 방 후보=" + safe(autoRoom)
+                + "\n방 후보=" + safe(candidate.value)
+                + "\n후보 신뢰도=" + confidenceLabel(candidate.confidence)
+                + "\n후보 출처=" + safe(candidate.source)
                 + "\nconversationTitle=" + safe(conversation)
                 + "\nhiddenConversationTitle=" + safe(hiddenConversation)
                 + "\nsubText=" + safe(subText)
                 + "\nsummary=" + safe(summary)
+                + "\ninfo=" + safe(info)
                 + "\nbigTitle=" + safe(bigTitle)
                 + "\nmessageBundle sender=" + safe(messageBundleSender)
                 + "\nshortcutId=" + safe(shortcut)
@@ -270,10 +305,72 @@ public class KakaoNotificationListener extends NotificationListenerService {
                 + "\ngroupKey=" + safe(groupKey)
                 + "\nchannelId=" + safe(channel)
                 + "\ncategory=" + safe(n.category)
-                + "\n영구 식별자 수=" + identities.size()
+                + "\n안전 자동복구 키 수=" + stableIdentities.size()
                 + "\n\n[extras 요약]\n" + summarizeExtras(extras);
 
-        return new ParsedNotification(sender, preview, autoRoom, identities, metadata);
+        return new ParsedNotification(sender, preview, candidate.value, candidate.confidence,
+                candidate.source, stableIdentities, metadata);
+    }
+
+    private Candidate chooseCandidate(String sender, String preview,
+                                      String conversation, String hiddenConversation,
+                                      String subText, String summary,
+                                      String info, String bigTitle,
+                                      Bundle extras) {
+        String value = usableCandidate(sender, preview, conversation);
+        if (value != null) return new Candidate(value, CONFIDENCE_HIGH, "conversationTitle");
+
+        value = usableCandidate(sender, preview, hiddenConversation);
+        if (value != null) return new Candidate(value, CONFIDENCE_HIGH, "hiddenConversationTitle");
+
+        value = usableCandidate(sender, preview, subText);
+        if (value != null) return new Candidate(value, CONFIDENCE_MEDIUM, "subText");
+
+        value = usableCandidate(sender, preview, summary);
+        if (value != null) return new Candidate(value, CONFIDENCE_MEDIUM, "summary");
+
+        String heuristic = heuristicExtraCandidate(extras, sender, preview);
+        if (heuristic != null) return new Candidate(heuristic, CONFIDENCE_LOW, "extras heuristic");
+
+        value = usableCandidate(sender, preview, bigTitle);
+        if (value != null) return new Candidate(value, CONFIDENCE_LOW, "bigTitle");
+
+        value = usableCandidate(sender, preview, info);
+        if (value != null) return new Candidate(value, CONFIDENCE_LOW, "info");
+
+        return new Candidate(null, 0, "none");
+    }
+
+    private String usableCandidate(String sender, String preview, String candidate) {
+        if (candidate == null) return null;
+        if (same(candidate, sender) || same(candidate, preview) || looksGeneric(candidate)) return null;
+        return candidate;
+    }
+
+    private String heuristicExtraCandidate(Bundle extras, String sender, String preview) {
+        if (extras == null) return null;
+        try {
+            ArrayList<String> keys = new ArrayList<>(extras.keySet());
+            Collections.sort(keys);
+            for (String key : keys) {
+                if (key == null) continue;
+                String lower = key.toLowerCase(Locale.ROOT);
+                if (!(lower.contains("room") || lower.contains("conversation")
+                        || lower.contains("chat") || lower.contains("group")
+                        || lower.endsWith("title"))) continue;
+                Object raw;
+                try {
+                    raw = extras.get(key);
+                } catch (Throwable ignored) {
+                    continue;
+                }
+                if (!(raw instanceof CharSequence)) continue;
+                String value = usableCandidate(sender, preview, clean((CharSequence) raw));
+                if (value != null) return value;
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
     }
 
     private MessageSnapshot readLastMessagingStyleBundle(Bundle extras) {
@@ -297,31 +394,15 @@ public class KakaoNotificationListener extends NotificationListenerService {
         return null;
     }
 
-    private ArrayList<String> buildIdentityKeys(StatusBarNotification sbn, Notification n) {
+    private ArrayList<String> buildStableIdentityKeys(Notification n) {
         LinkedHashSet<String> keys = new LinkedHashSet<>();
-
         if (Build.VERSION.SDK_INT >= 26) {
             String shortcut = clean(n.getShortcutId());
-            if (shortcut != null && !looksGeneric(shortcut)) keys.add("shortcut:" + shortcut);
+            if (shortcut != null && !looksGeneric(shortcut)) {
+                keys.add("kakao-shortcut:" + shortcut);
+            }
         }
-
-        String tag = clean(sbn.getTag());
-        if (tag != null && !looksGeneric(tag)) keys.add("tag:" + tag);
-
-        // id 단독, channelId 단독은 여러 방에서 재사용될 수 있어 영구 연결 키로 쓰지 않는다.
-        // tag가 있을 때만 id와 묶은 보조 키를 추가한다.
-        if (tag != null) keys.add("tag-id:" + tag + "|" + sbn.getId());
-
         return new ArrayList<>(keys);
-    }
-
-    private String firstUsableRoom(String sender, String preview, String... candidates) {
-        for (String candidate : candidates) {
-            if (candidate == null) continue;
-            if (same(candidate, sender) || same(candidate, preview) || looksGeneric(candidate)) continue;
-            return candidate;
-        }
-        return null;
     }
 
     private static boolean looksGeneric(String s) {
@@ -347,7 +428,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
             StringBuilder sb = new StringBuilder();
             int count = 0;
             for (String key : sorted) {
-                if (count >= 24) {
+                if (count >= 28) {
                     sb.append("\n…");
                     break;
                 }
@@ -366,7 +447,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
                 } else {
                     rendered = "<" + value.getClass().getSimpleName() + ">";
                 }
-                if (rendered.length() > 120) rendered = rendered.substring(0, 120) + "…";
+                if (rendered.length() > 140) rendered = rendered.substring(0, 140) + "…";
                 if (sb.length() > 0) sb.append("\n");
                 sb.append(key).append("=").append(rendered);
                 count++;
@@ -379,6 +460,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
 
     private void rememberRecent(ReplyTarget target) {
         synchronized (recentLock) {
+            recentTargets.remove(target.token);
             recentTargets.put(target.token, target);
             while (recentTargets.size() > MAX_RECENT_TARGETS) {
                 Iterator<String> it = recentTargets.keySet().iterator();
@@ -389,24 +471,27 @@ public class KakaoNotificationListener extends NotificationListenerService {
         }
     }
 
-    private static void bindTarget(Context context, String room, ReplyTarget source, boolean persistIdentity) {
-        if (room == null || room.trim().isEmpty() || source == null) return;
+    private static ReplyTarget bindTarget(Context context, String room, ReplyTarget source, boolean persistIdentity) {
+        if (room == null || room.trim().isEmpty() || source == null) return source;
         String name = room.trim();
-        ReplyTarget bound = source.withLabel(name);
+        ReplyTarget bound = source.verifiedAs(name);
         sessions.put(normalize(name), bound);
         Prefs.addRecentLabel(context, name);
-        if (persistIdentity && !bound.identityKeys.isEmpty()) {
-            Prefs.bindIdentity(context, name, bound.identityKeys);
+        Prefs.markRoomConfirmed(context, name);
+        if (persistIdentity && !bound.stableIdentityKeys.isEmpty()) {
+            Prefs.bindIdentity(context, name, bound.stableIdentityKeys);
         }
+        return bound;
     }
 
     static boolean bindLatestToRoom(Context context, String room) {
         ReplyTarget target = latestReplyTarget;
         String name = room == null ? "" : room.trim();
         if (target == null || name.isEmpty()) return false;
-        bindTarget(context, name, target, true);
-        String persistence = target.identityKeys.isEmpty() ? "현재 세션만 연결" : "자동복구 식별자 저장됨";
-        Prefs.setStatus(context, "최근 카카오 세션을 방에 연결: " + name + " · " + persistence);
+        ReplyTarget bound = bindTarget(context, name, target, true);
+        rememberBoundReplacement(bound);
+        latestReplyTarget = bound;
+        Prefs.setStatus(context, "최근 알림을 직접 확인해 방에 연결: " + name + persistenceText(bound));
         return true;
     }
 
@@ -417,10 +502,29 @@ public class KakaoNotificationListener extends NotificationListenerService {
             target = recentTargets.get(token);
         }
         if (target == null) return false;
-        bindTarget(context, room.trim(), target, true);
-        String persistence = target.identityKeys.isEmpty() ? "현재 세션만 연결" : "자동복구 식별자 저장됨";
-        Prefs.setStatus(context, "선택한 카카오 알림을 방에 연결: " + room.trim() + " · " + persistence);
+        ReplyTarget bound = bindTarget(context, room.trim(), target, true);
+        rememberBoundReplacement(bound);
+        ReplyTarget latest = latestReplyTarget;
+        if (latest != null && latest.token.equals(bound.token)) latestReplyTarget = bound;
+        Prefs.setStatus(context, "선택한 카카오 알림을 방에 연결: " + room.trim() + persistenceText(bound));
         return true;
+    }
+
+    private static void rememberBoundReplacement(ReplyTarget bound) {
+        if (bound == null) return;
+        synchronized (recentLock) {
+            if (recentTargets.containsKey(bound.token)) recentTargets.put(bound.token, bound);
+        }
+    }
+
+    static boolean unbindRoom(Context context, String room) {
+        String key = normalize(room);
+        if (key.isEmpty()) return false;
+        boolean removed = sessions.remove(key) != null;
+        boolean removedStored = Prefs.removeBindingsForAlias(context, room);
+        Prefs.clearRoomConfirmed(context, room);
+        Prefs.setStatus(context, "방 연결 해제: " + room + (removedStored ? " · 자동복구 규칙 삭제" : ""));
+        return removed || removedStored;
     }
 
     static ArrayList<SessionEntry> recentSessionEntries() {
@@ -430,7 +534,17 @@ public class KakaoNotificationListener extends NotificationListenerService {
         }
         Collections.reverse(values);
         ArrayList<SessionEntry> result = new ArrayList<>();
-        for (ReplyTarget target : values) result.add(new SessionEntry(target.token, describe(target)));
+        for (ReplyTarget target : values) {
+            result.add(new SessionEntry(target.token, describe(target), target.candidateRoom, target.candidateConfidence));
+        }
+        return result;
+    }
+
+    static ArrayList<SessionEntry> candidateSessionEntries() {
+        ArrayList<SessionEntry> result = new ArrayList<>();
+        for (SessionEntry entry : recentSessionEntries()) {
+            if (entry.suggestedRoom != null && entry.confidence >= CONFIDENCE_MEDIUM) result.add(entry);
+        }
         return result;
     }
 
@@ -446,13 +560,14 @@ public class KakaoNotificationListener extends NotificationListenerService {
     static ArrayList<String> liveLabels() {
         LinkedHashSet<String> labels = new LinkedHashSet<>();
         for (ReplyTarget target : sessions.values()) {
-            if (target.label != null && !target.label.trim().isEmpty()) labels.add(target.label);
+            if (target.verified && target.label != null && !target.label.trim().isEmpty()) labels.add(target.label);
         }
         return new ArrayList<>(labels);
     }
 
     static boolean hasLiveSession(String room) {
-        return findTarget(room) != null;
+        ReplyTarget target = findTarget(room);
+        return target != null && target.verified;
     }
 
     static boolean hasStoredBinding(Context context, String room) {
@@ -479,15 +594,32 @@ public class KakaoNotificationListener extends NotificationListenerService {
 
     static boolean sendToRoom(Context context, String room, String message) {
         lastSendError = "";
+        String requested = room == null ? "" : room.trim();
+        if (requested.isEmpty()) {
+            lastSendError = "대상 방이 비어 있음";
+            return false;
+        }
         if (message == null || message.trim().isEmpty()) {
             lastSendError = "보낼 메시지가 비어 있음";
             return false;
         }
 
+        // 저장된 안정 식별자가 있다면 현재 활성 알림에서 검증 세션을 복구할 기회를 준다.
         requestRefresh();
-        ReplyTarget target = findTarget(room);
-        if (target == null) {
-            lastSendError = "현재 사용 가능한 답장 세션 없음";
+        ReplyTarget target = findTarget(requested);
+        if (target == null || !target.verified) {
+            lastSendError = "확인된 실시간 답장 세션 없음 · 최근 알림에서 대상 방을 다시 연결해줘";
+            return false;
+        }
+        if (!normalize(requested).equals(normalize(target.label))) {
+            lastSendError = "안전 차단: 선택 방과 검증 세션 이름이 다름";
+            return false;
+        }
+
+        String mapped = Prefs.aliasForIdentity(context, target.stableIdentityKeys);
+        if (mapped != null && !same(mapped, requested)) {
+            sessions.remove(normalize(requested));
+            lastSendError = "안전 차단: 저장된 방 식별자 충돌 감지";
             return false;
         }
 
@@ -508,7 +640,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
             return true;
         } catch (PendingIntent.CanceledException e) {
             sessions.remove(normalize(target.label));
-            lastSendError = "카카오 답장 세션 만료됨";
+            lastSendError = "카카오 답장 세션 만료됨 · 새 알림에서 다시 연결 필요";
             return false;
         } catch (Throwable t) {
             lastSendError = "전송 오류: " + t.getClass().getSimpleName();
@@ -524,17 +656,20 @@ public class KakaoNotificationListener extends NotificationListenerService {
         String room = selectedRoom == null ? "" : selectedRoom.trim();
         StringBuilder sb = new StringBuilder();
         sb.append("앱 버전: ").append(BuildConfig.VERSION_NAME);
+        sb.append("\n라우팅 정책: FAIL-CLOSED / 확인된 세션만 전송");
         sb.append("\n알림 리스너: ").append(isListenerConnected() ? "연결됨" : "연결 대기");
-        sb.append("\n실시간 방 세션: ").append(liveLabels().size()).append("개");
-        sb.append("\n저장 연결 식별자: ").append(Prefs.bindingCount(context)).append("개");
+        sb.append("\n검증된 실시간 방 세션: ").append(liveLabels().size()).append("개");
+        sb.append("\n저장 자동복구 식별자: ").append(Prefs.bindingCount(context)).append("개");
         sb.append("\n최근 답장 세션: ").append(recentSessionEntries().size()).append("개");
+        sb.append("\n감지 후보(중간 이상): ").append(candidateSessionEntries().size()).append("개");
         if (!room.isEmpty()) {
             sb.append("\n선택 방: ").append(room);
-            sb.append("\n선택 방 실시간 세션: ").append(hasLiveSession(room) ? "있음" : "없음");
-            sb.append("\n선택 방 저장 연결: ").append(hasStoredBinding(context, room) ? "있음" : "없음");
+            sb.append("\n선택 방 실시간 검증: ").append(hasLiveSession(room) ? "있음" : "없음");
+            sb.append("\n선택 방 자동복구 규칙: ").append(hasStoredBinding(context, room) ? "있음" : "없음");
+            sb.append("\n선택 방 사용자 확인 기록: ").append(Prefs.isRoomConfirmed(context, room) ? "있음" : "없음");
         }
         sb.append("\n\n[최근 카카오 알림 분석]\n").append(latestMetadataSummary);
-        sb.append("\n\n[최근 동작 기록]\n").append(Prefs.recentLog(context, 12));
+        sb.append("\n\n[최근 동작 기록]\n").append(Prefs.recentLog(context, 16));
         return sb.toString();
     }
 
@@ -545,6 +680,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         }
         latestReplyTarget = null;
         latestMetadataSummary = "초기화됨 · 새 카카오톡 알림 대기";
+        latestMetadataPostTime = 0L;
         lastSendError = "";
         Prefs.clearBindingsAndLabels(context);
         Prefs.setStatus(context, "카카오 방 연결 정보 초기화 완료");
@@ -561,18 +697,37 @@ public class KakaoNotificationListener extends NotificationListenerService {
     }
 
     private static String describe(ReplyTarget target) {
-        String time = new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date(target.capturedAt));
+        long timeValue = target.notificationPostTime > 0 ? target.notificationPostTime : target.capturedAt;
+        String time = new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date(timeValue));
         StringBuilder sb = new StringBuilder(time);
-        if (target.label != null && !target.label.trim().isEmpty()) sb.append(" · 연결됨 ").append(target.label);
-        else if (target.autoRoom != null) sb.append(" · 후보 ").append(target.autoRoom);
-        else sb.append(" · 방 이름 미확인");
-        if (target.sender != null) sb.append(" · ").append(target.sender);
+        if (target.verified && target.label != null && !target.label.trim().isEmpty()) {
+            sb.append(" · 확인됨 ").append(target.label);
+        } else if (target.candidateRoom != null) {
+            sb.append(" · 후보 ").append(target.candidateRoom)
+                    .append(" [").append(confidenceLabel(target.candidateConfidence)).append("]");
+        } else {
+            sb.append(" · 방 이름 미확인");
+        }
+        if (target.sender != null) sb.append(" · 보낸사람 ").append(target.sender);
         if (target.preview != null) {
-            String p = target.preview.length() > 28 ? target.preview.substring(0, 28) + "…" : target.preview;
+            String p = target.preview.length() > 34 ? target.preview.substring(0, 34) + "…" : target.preview;
             sb.append(" · ").append(p);
         }
-        if (target.identityKeys.isEmpty()) sb.append(" · 자동복구키 없음");
+        if (target.stableIdentityKeys.isEmpty()) sb.append(" · 자동복구키 없음");
         return sb.toString();
+    }
+
+    private static String persistenceText(ReplyTarget target) {
+        return target.stableIdentityKeys.isEmpty()
+                ? " · 현재 세션만 사용"
+                : " · 안전 자동복구키 저장";
+    }
+
+    private static String confidenceLabel(int confidence) {
+        if (confidence >= CONFIDENCE_HIGH) return "높음";
+        if (confidence >= CONFIDENCE_MEDIUM) return "중간";
+        if (confidence >= CONFIDENCE_LOW) return "낮음";
+        return "없음";
     }
 
     private static boolean same(String a, String b) {
@@ -582,7 +737,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
     private static String clean(CharSequence cs) {
         if (cs == null) return null;
         String s = cs.toString().trim();
-        if (s.isEmpty() || s.length() > 200) return null;
+        if (s.isEmpty() || s.length() > 220) return null;
         return s;
     }
 
@@ -594,19 +749,35 @@ public class KakaoNotificationListener extends NotificationListenerService {
         return s == null || s.trim().isEmpty() ? "-" : s;
     }
 
+    private static class Candidate {
+        final String value;
+        final int confidence;
+        final String source;
+
+        Candidate(String value, int confidence, String source) {
+            this.value = value;
+            this.confidence = confidence;
+            this.source = source;
+        }
+    }
+
     private static class ParsedNotification {
         final String sender;
         final String preview;
-        final String autoRoom;
-        final ArrayList<String> identityKeys;
+        final String candidateRoom;
+        final int candidateConfidence;
+        final String candidateSource;
+        final ArrayList<String> stableIdentityKeys;
         final String metadata;
 
-        ParsedNotification(String sender, String preview, String autoRoom,
-                           ArrayList<String> identityKeys, String metadata) {
+        ParsedNotification(String sender, String preview, String candidateRoom, int candidateConfidence,
+                           String candidateSource, ArrayList<String> stableIdentityKeys, String metadata) {
             this.sender = sender;
             this.preview = preview;
-            this.autoRoom = autoRoom;
-            this.identityKeys = identityKeys;
+            this.candidateRoom = candidateRoom;
+            this.candidateConfidence = candidateConfidence;
+            this.candidateSource = candidateSource;
+            this.stableIdentityKeys = stableIdentityKeys;
             this.metadata = metadata;
         }
     }
