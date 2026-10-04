@@ -145,7 +145,9 @@ final class VoiceRoomStore {
     static synchronized Room manualCheckDue(Context context, long now) {
         Room best = null;
         for (Room room : list(context)) {
-            if (!room.enabled || !"CHECK_DUE".equals(room.status)) continue;
+            // Pausing a room excludes it from unattended automation only. Explicit user checks
+            // remain available so setup and recovery can be tested without re-enabling the room.
+            if (!"CHECK_DUE".equals(room.status)) continue;
             long due = room.nextCheckAt <= 0 ? now : room.nextCheckAt;
             if (best == null || due < (best.nextCheckAt <= 0 ? now : best.nextCheckAt)) best = room;
         }
