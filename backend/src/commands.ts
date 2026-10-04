@@ -57,10 +57,7 @@ export const commands = [
         string("memo", "고객 메모", false),
       ]),
       sub("info", "라이선스 상세 상태", [ref()]),
-      sub("search", "메모 / LIC ID 검색", [
-        string("query", "검색어"),
-        page(),
-      ]),
+      sub("search", "메모 / LIC ID 검색", [string("query", "검색어"), page()]),
       sub("list", "라이선스 목록", [
         string("status", "상태 필터", false, [
           "UNUSED",
@@ -81,7 +78,10 @@ export const commands = [
       sub("suspend", "라이선스 일시 정지", [ref(), reason()]),
       sub("resume", "정지 해제", [ref()]),
       sub("revoke", "라이선스 취소 (확인 필요)", [ref(), reason()]),
-      sub("reset-device", "기기 변경용 새 키 발급 (확인 필요)", [ref(), reason()]),
+      sub("reset-device", "기기 변경용 새 키 발급 (확인 필요)", [
+        ref(),
+        reason(),
+      ]),
       sub("replace-unused-key", "분실한 미사용 키 교체", [ref()]),
       sub("delete", "삭제 표시 / 사용 차단 (확인 필요)", [ref(), reason()]),
       sub("note", "판매자 관리 메모 수정", [ref(), string("memo", "메모")]),
