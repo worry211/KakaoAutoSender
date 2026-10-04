@@ -26,6 +26,7 @@ const bool = (name: string) => ({
   required: true,
 });
 const ref = () => string("key-or-id", "KM 키 또는 LIC ID");
+const page = () => integer("page", "페이지", false, 1, 100000);
 const days = () =>
   string("duration", "사용 기간", true, [
     "7d",
@@ -35,7 +36,7 @@ const days = () =>
     "365d",
     "permanent",
   ]);
-const reason = () => string("reason", "처리 사유");
+const reason = (required = true) => string("reason", "처리 사유", required);
 const sub = (name: string, description: string, options: unknown[] = []) => ({
   type: 1,
   name,
@@ -49,18 +50,19 @@ export const commands = [
     default_member_permissions: "0",
     contexts: [0],
     options: [
-      sub("create", "새 일회용 키 발급", [
+      sub("help", "판매자 명령어 사용법"),
+      sub("create", "새 일회용 라이선스 키 발급", [
         days(),
         integer("quantity", "수량 (1–10)", false, 1, 10),
         string("memo", "고객 메모", false),
       ]),
-      sub("info", "라이선스 상세", [ref()]),
-      sub("search", "메모 / ID 검색", [
+      sub("info", "라이선스 상세 상태", [ref()]),
+      sub("search", "메모 / LIC ID 검색", [
         string("query", "검색어"),
-        integer("page", "페이지", false),
+        page(),
       ]),
-      sub("list", "목록", [
-        string("status", "상태", false, [
+      sub("list", "라이선스 목록", [
+        string("status", "상태 필터", false, [
           "UNUSED",
           "ACTIVE",
           "EXPIRED",
@@ -68,17 +70,22 @@ export const commands = [
           "REVOKED",
           "DELETED",
         ]),
-        integer("page", "페이지", false),
+        page(),
       ]),
+      sub("expiring", "곧 만료되는 라이선스", [
+        integer("days", "앞으로 며칠 이내 (기본 7일)", false, 1, 90),
+        page(),
+      ]),
+      sub("history", "라이선스 변경 이력 / 감사 로그", [ref(), page()]),
       sub("extend", "기간 연장", [ref(), days()]),
-      sub("suspend", "정지", [ref(), reason()]),
+      sub("suspend", "라이선스 일시 정지", [ref(), reason()]),
       sub("resume", "정지 해제", [ref()]),
-      sub("revoke", "취소 (확인 필요)", [ref(), reason()]),
-      sub("reset-device", "새 기기 키 발급 (확인 필요)", [ref(), reason()]),
+      sub("revoke", "라이선스 취소 (확인 필요)", [ref(), reason()]),
+      sub("reset-device", "기기 변경용 새 키 발급 (확인 필요)", [ref(), reason()]),
       sub("replace-unused-key", "분실한 미사용 키 교체", [ref()]),
-      sub("delete", "삭제 표시 (확인 필요)", [ref(), reason()]),
-      sub("note", "관리 메모", [ref(), string("memo", "메모")]),
-      sub("stats", "판매 현황"),
+      sub("delete", "삭제 표시 / 사용 차단 (확인 필요)", [ref(), reason()]),
+      sub("note", "판매자 관리 메모 수정", [ref(), string("memo", "메모")]),
+      sub("stats", "판매 / 라이선스 현황 요약"),
     ],
   },
   {
@@ -87,25 +94,26 @@ export const commands = [
     default_member_permissions: "0",
     contexts: [0],
     options: [
-      sub("status", "운영 현황"),
+      sub("help", "운영 명령어 사용법"),
+      sub("status", "서비스 운영 현황"),
       sub("maintenance", "점검 모드", [
         bool("enabled"),
-        string("message", "고객 안내"),
+        string("message", "고객 안내 (켜는 경우 권장)", false),
       ]),
-      sub("min-version", "최소 versionCode", [
+      sub("min-version", "최소 지원 versionCode", [
         integer("version", "Android versionCode", true, 20, 99999999),
       ]),
-      sub("latest-version", "최신 versionCode", [
+      sub("latest-version", "최신 versionCode / 다운로드 URL", [
         integer("version", "Android versionCode", true, 20, 99999999),
         string("url", "HTTPS 다운로드 URL"),
       ]),
-      sub("kill-switch", "전체 전송 중단 (확인 필요)", [
+      sub("kill-switch", "전체 자동전송 긴급 중단 (확인 필요)", [
         bool("enabled"),
-        reason(),
+        reason(false),
       ]),
-      sub("policy", "확인 주기 / 오프라인 유예", [
+      sub("policy", "서버 확인 주기 / 오프라인 유예", [
         integer("heartbeat", "확인 주기 초", true, 30, 300),
-        integer("grace", "유예 초", true, 0, 600),
+        integer("grace", "오프라인 유예 초", true, 0, 600),
       ]),
     ],
   },
