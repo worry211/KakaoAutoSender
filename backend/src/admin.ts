@@ -61,15 +61,18 @@ export async function admin(
   authorize(env, actor);
   const t = now();
   if (group === "system") {
+    if (action === "help") return { kind: "system_help" };
     const c = await config(env);
-    if (action === "status") return c;
+    if (action === "status") return { kind: "system_status", ...c };
     const next = { ...c };
     if (action === "maintenance" || action === "kill-switch") {
       if (typeof p.enabled !== "boolean") throw new ApiError("INVALID");
-      next[action === "maintenance" ? "maintenance" : "kill_switch"] = p.enabled
-        ? 1
-        : 0;
-      next.message = String(p.message ?? p.reason ?? "").slice(0, 300);
+      const isMaintenance = action === "maintenance";
+      next[isMaintenance ? "maintenance" : "kill_switch"] = p.enabled ? 1 : 0;
+      const supplied = String(p.message ?? p.reason ?? "").trim().slice(0, 300);
+      next.message = p.enabled
+        ? supplied || (isMaintenance ? "서비스 점검 중입니다." : "안전 점검으로 자동전송이 일시 중지되었습니다.")
+        : "";
     } else if (action === "min-version" || action === "latest-version") {
       if (!/^\d{1,8}$/.test(String(p.version)) || Number(p.version) < 20)
         throw new ApiError("INVALID_VERSION");
@@ -131,9 +134,10 @@ export async function admin(
       ),
     ]);
     if (rs[0].meta.changes !== 1) throw new ApiError("CONFLICT", 409);
-    return next;
+    return { kind: "system_status", ...next };
   }
   if (group !== "license") throw new ApiError("INVALID_COMMAND");
+  if (action === "help") return { kind: "license_help" };
   if (action === "create") {
     const n = p.quantity ?? 1,
       seconds = duration(p.duration);
@@ -173,18 +177,22 @@ export async function admin(
   if (action === "stats") {
     return env.DB.prepare(
       `SELECT count(*) AS total,
-   sum(status='UNUSED') AS unused,sum(status='ACTIVE' AND (expires_at IS NULL OR expires_at>?)) AS active,
-   sum(status='ACTIVE' AND expires_at<=?) AS expired,sum(status='SUSPENDED') AS suspended,
-   sum(status='REVOKED') AS revoked,sum(status='DELETED') AS deleted,
-   sum(activated_at>=?) AS activated_today,sum(created_at>=?) AS created_today,
-   sum(status='ACTIVE' AND expires_at>? AND expires_at<=?) AS expiring_7d,
-   sum(status='ACTIVE' AND last_seen_at>=?) AS recently_seen
+   coalesce(sum(status='UNUSED'),0) AS unused,
+   coalesce(sum(status='ACTIVE' AND (expires_at IS NULL OR expires_at>?)),0) AS active,
+   coalesce(sum(status='ACTIVE' AND expires_at<=?),0) AS expired,
+   coalesce(sum(status='SUSPENDED'),0) AS suspended,
+   coalesce(sum(status='REVOKED'),0) AS revoked,
+   coalesce(sum(status='DELETED'),0) AS deleted,
+   coalesce(sum(activated_at>=?),0) AS activated_today,
+   coalesce(sum(created_at>=?),0) AS created_today,
+   coalesce(sum(status='ACTIVE' AND expires_at>? AND expires_at<=?),0) AS expiring_7d,
+   coalesce(sum(status='ACTIVE' AND last_seen_at>=?),0) AS recently_seen
    FROM licenses`,
     )
       .bind(t, t, t - (t % 86400), t - (t % 86400), t, t + 7 * 86400, t - 86400)
       .first();
   }
-  if (action === "list" || action === "search") {
+  if (action === "list" || action === "search" || action === "expiring") {
     const page = p.page ?? 1;
     if (!Number.isInteger(page) || page < 1 || page > 100000)
       throw new ApiError("INVALID_PAGE");
@@ -195,6 +203,12 @@ export async function admin(
         "(license_id LIKE ? ESCAPE '\\' OR customer_memo LIKE ? ESCAPE '\\' OR admin_memo LIKE ? ESCAPE '\\')";
       const q = "%" + String(p.query ?? "").replaceAll(/[%_\\]/g, "\\$&") + "%";
       args = [q, q, q];
+    } else if (action === "expiring") {
+      const windowDays = p.days ?? 7;
+      if (!Number.isInteger(windowDays) || windowDays < 1 || windowDays > 90)
+        throw new ApiError("INVALID_DURATION");
+      where = "status='ACTIVE' AND expires_at>? AND expires_at<=?";
+      args = [t, t + windowDays * 86400];
     } else if (p.status) {
       if (
         ![
@@ -216,11 +230,13 @@ export async function admin(
       args = [["ACTIVE", "EXPIRED"].includes(p.status) ? t : p.status];
     }
     const rs = await env.DB.prepare(
-      `SELECT * FROM licenses WHERE ${where} ORDER BY created_at DESC,license_id LIMIT 6 OFFSET ?`,
+      `SELECT * FROM licenses WHERE ${where} ORDER BY ${action === "expiring" ? "expires_at ASC" : "created_at DESC,license_id"} LIMIT 6 OFFSET ?`,
     )
       .bind(...args, (page - 1) * 5)
       .all<Row>();
     return {
+      kind: action === "expiring" ? "expiring" : "license_list",
+      days: action === "expiring" ? p.days ?? 7 : undefined,
       page,
       has_more: rs.results.length > 5,
       licenses: rs.results.slice(0, 5).map(support),
@@ -228,6 +244,23 @@ export async function admin(
   }
   const l = await lookup(env, String(p["key-or-id"] ?? ""));
   if (action === "info") return support(l);
+  if (action === "history") {
+    const page = p.page ?? 1;
+    if (!Number.isInteger(page) || page < 1 || page > 100000)
+      throw new ApiError("INVALID_PAGE");
+    const rs = await env.DB.prepare(
+      "SELECT event_id,timestamp,admin_discord_id,action,reason FROM audit_events WHERE license_id=? ORDER BY timestamp DESC,event_id DESC LIMIT 11 OFFSET ?",
+    )
+      .bind(l.license_id, (page - 1) * 10)
+      .all<Row>();
+    return {
+      kind: "history",
+      license_id: l.license_id,
+      page,
+      has_more: rs.results.length > 10,
+      events: rs.results.slice(0, 10),
+    };
+  }
   const set: string[] = [],
     args: any[] = [],
     reason = String(p.reason ?? "").slice(0, 500);
