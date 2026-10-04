@@ -29,6 +29,21 @@ public class KakaoUiPolicyTest {
         assertFalse(KakaoUiPolicy.isOpenChatUrl(""));
     }
 
+    @Test public void voiceRoomNameUsesRoomTitleAndFallback() {
+        assertEquals("1", KakaoUiPolicy.voiceRoomName("1"));
+        assertEquals("게임 거래방", KakaoUiPolicy.voiceRoomName("  게임   거래방  "));
+        assertEquals("보이스룸", KakaoUiPolicy.voiceRoomName("   "));
+    }
+
+    @Test public void voiceRoomNameIsCappedAtThirtyCodePoints() {
+        String value = "123456789012345678901234567890EXTRA";
+        assertEquals("123456789012345678901234567890", KakaoUiPolicy.voiceRoomName(value));
+        String emoji = "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀끝";
+        String capped = KakaoUiPolicy.voiceRoomName(emoji);
+        assertEquals(30, capped.codePointCount(0, capped.length()));
+        assertFalse(capped.endsWith("끝"));
+    }
+
     @Test public void retryBackoffIsBounded() {
         assertEquals(60_000L, KakaoUiPolicy.retryDelayMs(1));
         assertEquals(180_000L, KakaoUiPolicy.retryDelayMs(2));
