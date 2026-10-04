@@ -47,7 +47,7 @@ jobs:
           gradle --no-daemon
           :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
           :voiceroom:testDebugUnitTest :voiceroom:lintDebug :voiceroom:assembleDebug
-      - name: Validate minified release using ephemeral CI fixture
+      - name: Validate minified releases using ephemeral CI fixture
         env:
           ANDROID_API_BASE_URL: https://license.example.com
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release-smoke.jks
@@ -56,7 +56,9 @@ jobs:
           ANDROID_KEY_PASSWORD: smoke-password
         run: |
           keytool -genkeypair -keystore "$ANDROID_KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -keypass "$ANDROID_KEY_PASSWORD" -alias smoke -keyalg RSA -keysize 2048 -validity 2 -dname "CN=CI smoke only"
-          gradle --no-daemon :app:validateReleaseConfiguration :app:assembleRelease :app:lintRelease
+          gradle --no-daemon \
+            :app:validateReleaseConfiguration :app:assembleRelease :app:lintRelease \
+            :voiceroom:validateReleaseConfiguration :voiceroom:assembleRelease :voiceroom:lintRelease
       - uses: actions/upload-artifact@v4
         with:
           name: KakaoAutoSender-debug-apk
