@@ -40,15 +40,14 @@ public sealed class VoiceRoomCoordinator : IDisposable
     public async Task<KakaoPcAutomation.Result> LiveCheckAsync(RoomState room) =>
         await RunExclusiveAsync(() =>
         {
-            var preflight = PrepareRoom(room);
-            var result = preflight.Success ? _kakao.EnsureVoiceRoom(room) : preflight;
+            var result = ProcessRoom(room);
             ApplyResult(room, result, manual: true);
             Save();
             StateChanged?.Invoke();
             return result;
         });
 
-    public void StartAll()
+    public async Task StartAllAsync()
     {
         var enabled = _state.Rooms.Where(r => r.Enabled).ToList();
         if (enabled.Count == 0) throw new InvalidOperationException("관리 ON 방이 없어.");
@@ -57,16 +56,52 @@ public sealed class VoiceRoomCoordinator : IDisposable
         if (missingLinks.Count > 0)
             throw new InvalidOperationException("오픈채팅 링크 등록이 먼저 필요해: " + string.Join(", ", missingLinks));
 
-        var unverified = enabled.Where(r => !r.LiveVerified).Select(r => r.Title).ToList();
-        if (unverified.Count > 0) throw new InvalidOperationException("실제 점검이 먼저 필요해: " + string.Join(", ", unverified));
         _state.ManagerActive = true;
         PowerPolicy.SetKeepSystemAwake(true);
-        _state.LastStatus = "Windows 보이스룸 자동관리 시작 · 링크/소개화면 우선 진입 · PC 절전만 방지, 모니터 OFF 허용";
         var now = DateTimeOffset.Now;
         foreach (var room in enabled)
-            room.NextCheckAt ??= now.AddSeconds(3);
+        {
+            room.NextCheckAt = now;
+            if (!room.LiveVerified)
+            {
+                room.Status = "BOOTSTRAP_PENDING";
+                room.LastError = "";
+                room.LastDiagnostic = "전체 시작 · 자동 부트스트랩 대기";
+                room.Failures = 0;
+            }
+        }
+        _state.LastStatus = $"자동관리 시작 · {enabled.Count}개 방을 안전점검 없이 자동 부트스트랩 중";
         Save();
         StateChanged?.Invoke();
+
+        await RunExclusiveAsync(() =>
+        {
+            if (DesktopSession.IsLocked())
+            {
+                foreach (var room in enabled.Where(r => !r.LiveVerified))
+                    room.Status = "WAITING_UNLOCK";
+                _state.LastStatus = "Windows 잠금 상태 · 잠금 해제 즉시 자동 부트스트랩 재개";
+                Save();
+                StateChanged?.Invoke();
+                return true;
+            }
+
+            foreach (var room in enabled)
+            {
+                if (!_state.ManagerActive) break;
+                room.Status = room.LiveVerified ? "CHECK_DUE" : "BOOTSTRAPPING";
+                room.LastError = "";
+                room.LastDiagnostic = room.LiveVerified ? "즉시 상태 확인 중" : "방 진입 → 보이스룸 생성/검증 자동 진행 중";
+                Save();
+                StateChanged?.Invoke();
+
+                var result = ProcessRoom(room);
+                ApplyResult(room, result, manual: false);
+                Save();
+                StateChanged?.Invoke();
+            }
+            return true;
+        });
     }
 
     public void StopAll()
@@ -85,29 +120,39 @@ public sealed class VoiceRoomCoordinator : IDisposable
         {
             if (DesktopSession.IsLocked())
             {
-                _state.LastStatus = "Windows 잠금 상태라 자동화를 대기 중 · 모니터 OFF는 가능하지만 세션 잠금은 불가";
+                foreach (var room in _state.Rooms.Where(r => r.Enabled && !r.LiveVerified))
+                    room.Status = "WAITING_UNLOCK";
+                _state.LastStatus = "Windows 잠금 상태라 대기 중 · 잠금 해제 후 자동 재개";
                 Save();
                 StateChanged?.Invoke();
                 return;
             }
 
             var due = _state.Rooms
-                .Where(r => r.Enabled && r.LiveVerified && (r.NextCheckAt is null || r.NextCheckAt <= DateTimeOffset.Now))
-                .OrderBy(r => r.NextCheckAt ?? DateTimeOffset.MinValue)
+                .Where(r => r.Enabled && (r.NextCheckAt is null || r.NextCheckAt <= DateTimeOffset.Now))
+                .OrderBy(r => r.LiveVerified ? 1 : 0)
+                .ThenBy(r => r.NextCheckAt ?? DateTimeOffset.MinValue)
                 .FirstOrDefault();
+
             if (due is not null)
             {
-                if (DesktopSession.IdleFor() < TimeSpan.FromSeconds(30))
+                // Routine checks should avoid stealing focus while the user is actively working.
+                // Initial bootstrap is user-requested by pressing Start All, so it must not be blocked by idle time.
+                if (due.LiveVerified && DesktopSession.IdleFor() < TimeSpan.FromSeconds(30))
                 {
                     due.NextCheckAt = DateTimeOffset.Now.AddMinutes(1);
-                    _state.LastStatus = due.Title + " · PC 사용 중이라 자동 점검을 1분 미룸";
+                    _state.LastStatus = due.Title + " · 기존 보룸 정기점검만 1분 미룸 · 신규 부트스트랩은 미루지 않음";
                     Save();
                     StateChanged?.Invoke();
                     return;
                 }
 
-                var preflight = PrepareRoom(due);
-                var result = preflight.Success ? _kakao.EnsureVoiceRoom(due) : preflight;
+                due.Status = due.LiveVerified ? "CHECK_DUE" : "BOOTSTRAPPING";
+                due.LastDiagnostic = due.LiveVerified ? "자동 정기점검 중" : "자동 부트스트랩 중";
+                Save();
+                StateChanged?.Invoke();
+
+                var result = ProcessRoom(due);
                 ApplyResult(due, result, manual: false);
                 Save();
                 StateChanged?.Invoke();
@@ -144,10 +189,16 @@ public sealed class VoiceRoomCoordinator : IDisposable
         }
     }
 
+    private KakaoPcAutomation.Result ProcessRoom(RoomState room)
+    {
+        var preflight = PrepareRoom(room);
+        return preflight.Success ? _kakao.EnsureVoiceRoom(room) : preflight;
+    }
+
     private KakaoPcAutomation.Result PrepareRoom(RoomState room)
     {
         if (DesktopSession.IsLocked())
-            return new(false, "Windows 잠금 상태 · 정상 잠금 해제 후 다시 시도");
+            return new(false, "Windows 잠금 상태 · 정상 잠금 해제 후 자동 재시도");
 
         if (!OpenChatLinkRegistry.IsSupported(room.OpenChatUrl))
             return new(false, "오픈채팅 링크 미등록 · 링크 설정에서 https://open.kakao.com/o/... 링크를 등록해");
@@ -156,12 +207,11 @@ public sealed class VoiceRoomCoordinator : IDisposable
         if (!launch.Success) return launch;
         Thread.Sleep(500);
 
-        // Reuse a room context only while the actual Kakao chat surface is still visible.
-        if (OpenChatLinkRegistry.IsRecentlyVerifiedEntry(room.Title, TimeSpan.FromSeconds(20)) &&
-            (KakaoSurfaceLocator.FindExactChat(room.Title) != IntPtr.Zero || KakaoSurfaceLocator.TryFindChatComposer(out _)))
-            return new(true, "최근 링크 진입 + 실제 채팅 surface 검증 재사용");
+        // A verified entry token is a short-lived room-session contract. Do not throw it away
+        // just because this Kakao build custom-renders its composer and exposes no RICHEDIT/UIA node.
+        if (OpenChatLinkRegistry.IsRecentlyVerifiedEntry(room.Title, TimeSpan.FromSeconds(30)))
+            return new(true, "최근 링크/CTA 진입 세션 재사용 · 같은 작업에서 방 재검색 생략");
 
-        // 1) Link/browser handoff. Some environments jump directly into the actual chat.
         var link = OpenChatLinkLauncher.TryOpen(room);
         if (link.Success)
         {
@@ -169,8 +219,6 @@ public sealed class VoiceRoomCoordinator : IDisposable
             return new(true, link.Diagnostic);
         }
 
-        // 2) Kakao PC often stops on the OpenChat cover/profile surface. Treat that as a normal
-        // intermediate state and enter the already-joined room exactly like the mobile flow.
         var preview = KakaoOpenChatPreviewBridge.TryEnter(room.Title);
         if (preview.Success)
         {
@@ -178,7 +226,6 @@ public sealed class VoiceRoomCoordinator : IDisposable
             return new(true, link.Diagnostic + " → " + preview.Diagnostic);
         }
 
-        // 3) Last resort: verified Win32 search. Never trust the search action without exact title proof.
         var navigation = _win32.OpenRoom(room.Title);
         if (navigation.Success)
         {
@@ -197,6 +244,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
     {
         var now = DateTimeOffset.Now;
         room.LastDiagnostic = result.Status;
+
         if (result.Success && result.Active)
         {
             room.LiveVerified = true;
@@ -222,7 +270,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
             room.SpeakerMuted = result.SpeakerMuted;
             if (result.AudioRepaired) _state.AudioRepairs++;
             _state.LastStatus = room.Title + (result.Created
-                ? " · 새 보이스룸 생성/활성 확인"
+                ? " · 새 보이스룸 생성/활성 확인 · 자동관리 진입"
                 : room.StartedAt is null
                     ? " · 기존 보이스룸 활성 확인 · 시작시각 미확인이라 10분 재점검"
                     : " · 보이스룸 활성 확인");
@@ -231,7 +279,17 @@ public sealed class VoiceRoomCoordinator : IDisposable
 
         if (result.Success)
         {
-            room.Status = manual ? "PROBE_OK" : room.Status;
+            room.LastError = "";
+            room.Failures = 0;
+            if (manual)
+            {
+                room.Status = "PROBE_OK";
+            }
+            else
+            {
+                room.Status = "BOOTSTRAP_PENDING";
+                room.NextCheckAt = now.AddSeconds(15);
+            }
             _state.LastStatus = room.Title + " · " + result.Status;
             return;
         }
@@ -239,8 +297,8 @@ public sealed class VoiceRoomCoordinator : IDisposable
         room.Failures++;
         room.Status = manual ? "MANUAL_ERROR" : "ERROR";
         room.LastError = result.Status;
-        room.NextCheckAt = now.Add(RetryDelay(room.Failures));
-        _state.LastStatus = room.Title + " · " + result.Status;
+        room.NextCheckAt = now.Add(RetryDelay(room.Failures, room.LiveVerified));
+        _state.LastStatus = room.Title + " · " + result.Status + (manual ? "" : " · 자동 재시도 예약");
     }
 
     private static DateTimeOffset NextActiveCheck(DateTimeOffset startedAt, DateTimeOffset now)
@@ -259,14 +317,29 @@ public sealed class VoiceRoomCoordinator : IDisposable
         finally { _singleFlight.Release(); }
     }
 
-    private static TimeSpan RetryDelay(int failures) => failures switch
+    private static TimeSpan RetryDelay(int failures, bool alreadyVerified)
     {
-        <= 1 => TimeSpan.FromMinutes(1),
-        2 => TimeSpan.FromMinutes(3),
-        3 => TimeSpan.FromMinutes(10),
-        4 => TimeSpan.FromMinutes(30),
-        _ => TimeSpan.FromHours(1)
-    };
+        if (!alreadyVerified)
+        {
+            return failures switch
+            {
+                <= 1 => TimeSpan.FromSeconds(10),
+                2 => TimeSpan.FromSeconds(30),
+                3 => TimeSpan.FromMinutes(1),
+                4 => TimeSpan.FromMinutes(3),
+                _ => TimeSpan.FromMinutes(10)
+            };
+        }
+
+        return failures switch
+        {
+            <= 1 => TimeSpan.FromMinutes(1),
+            2 => TimeSpan.FromMinutes(3),
+            3 => TimeSpan.FromMinutes(10),
+            4 => TimeSpan.FromMinutes(30),
+            _ => TimeSpan.FromHours(1)
+        };
+    }
 
     public void Dispose()
     {
