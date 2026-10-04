@@ -39,7 +39,7 @@ final class ReliabilityTiming {
     static long nextEffectiveDueAt(Context context) {
         long min = Long.MAX_VALUE;
         for (MultiRoomStore.Profile p : MultiRoomStore.list(context)) {
-            if (!isRunnable(p)) continue;
+            if (!isRunnable(context, p)) continue;
             long due = effectiveDueAt(p);
             if (due > 0L) min = Math.min(min, due);
         }
@@ -49,7 +49,7 @@ final class ReliabilityTiming {
     static ArrayList<MultiRoomStore.Profile> due(Context context, long now) {
         ArrayList<MultiRoomStore.Profile> result = new ArrayList<>();
         for (MultiRoomStore.Profile p : MultiRoomStore.list(context)) {
-            if (!isRunnable(p)) continue;
+            if (!isRunnable(context, p)) continue;
             long effective = effectiveDueAt(p);
             if (effective > 0L && effective <= now + DUE_TOLERANCE_MS) result.add(p);
         }
@@ -94,7 +94,7 @@ final class ReliabilityTiming {
         return (int) Math.max(1L, (millis + 999L) / 1_000L);
     }
 
-    private static boolean isRunnable(MultiRoomStore.Profile p) {
-        return p != null && p.enabled && p.message != null && !p.message.trim().isEmpty();
+    private static boolean isRunnable(Context context, MultiRoomStore.Profile p) {
+        return p != null && p.enabled && RoomMediaStore.hasPayload(context, p);
     }
 }

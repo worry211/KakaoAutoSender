@@ -7,7 +7,6 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 
-import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -19,10 +18,19 @@ final class KakaoMessageSender {
     private KakaoMessageSender() {}
 
     static boolean send(Context context, String room, String message, RoomMediaStore.Media media) {
+        if (!LicenseManager.isUsable(context)) {
+            lastError = LicenseManager.verifyStored(context).message;
+            return false;
+        }
         if (media == null || !media.hasImage()) {
             boolean ok = KakaoNotificationListener.sendToRoom(context, room, message);
             lastError = ok ? "" : KakaoNotificationListener.lastSendError();
             return ok;
+        }
+
+        if (!media.mime.toLowerCase(Locale.ROOT).startsWith("image/") || media.mime.contains("*")) {
+            lastError = "사진 형식을 확인할 수 없습니다. 사진을 다시 선택하세요.";
+            return false;
         }
 
         lastError = "";
@@ -57,7 +65,7 @@ final class KakaoMessageSender {
         Uri uri;
         try {
             uri = Uri.parse(media.uri);
-            if (uri.getScheme() == null) throw new IllegalArgumentException("missing scheme");
+            if (!"content".equals(uri.getScheme())) throw new IllegalArgumentException("SAF content URI required");
         } catch (Throwable t) {
             lastError = "선택한 사진 주소가 유효하지 않음";
             return false;
@@ -80,7 +88,7 @@ final class KakaoMessageSender {
         }
 
         if (dataInput == null) {
-            lastError = "현재 카카오 답장 세션은 사진 첨부를 지원하지 않음 · 텍스트는 보내지 않았어";
+            lastError = "현재 카카오톡 알림 답장 방식에서는 이 방에 사진 자동전송을 지원하지 않습니다.";
             return false;
         }
 
@@ -104,7 +112,10 @@ final class KakaoMessageSender {
             fillIn.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             context.grantUriPermission(KakaoNotificationListener.KAKAO_PACKAGE, uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            target.pendingIntent.send(context, 0, fillIn);
+            synchronized (DeliveryGate.LOCK) {
+                if (!DeliveryGate.allowed(context)) { lastError = "전송 중단 · 라이선스 또는 자동전송 상태를 확인하세요."; return false; }
+                target.pendingIntent.send(context, 0, fillIn);
+            }
             lastError = "";
             return true;
         } catch (PendingIntent.CanceledException e) {
@@ -125,15 +136,7 @@ final class KakaoMessageSender {
 
     @SuppressWarnings("unchecked")
     private static KakaoNotificationListener.ReplyTarget findTarget(String room) {
-        try {
-            Method m = KakaoNotificationListener.class.getDeclaredMethod("findTarget", String.class);
-            m.setAccessible(true);
-            Object value = m.invoke(null, room);
-            return value instanceof KakaoNotificationListener.ReplyTarget
-                    ? (KakaoNotificationListener.ReplyTarget) value : null;
-        } catch (Throwable ignored) {
-            return null;
-        }
+        return KakaoNotificationListener.findTarget(room);
     }
 
     static boolean matchesMime(String allowed, String actual) {

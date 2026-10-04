@@ -78,7 +78,7 @@ public class MainActivityV4 extends Activity {
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = text("카톡 자동전송", 28, true);
+        TextView title = text("카톡매크로", 28, true);
         header.addView(title, weight());
         TextView version = pill("v" + appVersion(), Color.rgb(56, 61, 72));
         header.addView(version);
@@ -179,9 +179,12 @@ public class MainActivityV4 extends Activity {
 
         masterStatus.setText(active ? "● 자동전송 실행 중" : "● 자동전송 중지됨");
         masterStatus.setTextColor(active ? Color.rgb(91, 224, 147) : Color.rgb(213, 216, 223));
-        systemStatus.setText("알림 " + (access ? "허용" : "권한 필요")
+        systemStatus.setText("라이선스 " + LicenseManager.shortStatus(this) + "\n" + LicenseManager.updateNotice(this)
+                + "\n알림 접근 " + (access ? "✓" : "권한 필요")
                 + "  ·  리스너 " + (listener ? "정상" : "대기")
-                + (Build.VERSION.SDK_INT >= 31 ? "  ·  지정시각 " + (exact ? "정확" : "근사") : ""));
+                + (Build.VERSION.SDK_INT >= 31 ? "  ·  정확한 알람 " + (exact ? "✓" : "선택사항 · 근사") : "")
+                + "\n카카오 방 연결 " + profiles.size() + "개"
+                + "\n카카오 알림은 켜두세요. 소리·진동·팝업만 끌 수 있습니다.");
         startButton.setEnabled(!active);
         stopButton.setEnabled(active);
 
@@ -386,7 +389,7 @@ public class MainActivityV4 extends Activity {
         MultiRoomStore.Profile p = profile.copy();
         p.enabled = !p.enabled;
         if (!p.enabled) p.nextAt = 0L;
-        else if (Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false) && !p.message.trim().isEmpty()) {
+        else if (Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false) && RoomMediaStore.hasPayload(this, p)) {
             p.nextAt = MultiRoomStore.computeNextAt(p, System.currentTimeMillis());
         }
         MultiRoomStore.upsert(this, p);
@@ -396,7 +399,7 @@ public class MainActivityV4 extends Activity {
     }
 
     private void testRoom(MultiRoomStore.Profile p) {
-        if (p.message == null || p.message.trim().isEmpty()) {
+        if (!RoomMediaStore.hasPayload(this, p)) {
             toast("메시지가 비어 있어. 편집에서 먼저 입력해줘.");
             return;
         }
@@ -408,17 +411,23 @@ public class MainActivityV4 extends Activity {
                 .setTitle(p.title())
                 .setMessage("지금 1회 전송할까?\n\n" + p.message)
                 .setPositiveButton("전송", (d, w) -> {
-                    boolean ok = KakaoNotificationListener.sendToRoom(this, p.room, p.message);
+                    LicenseManager.runAuthorized(this, () -> {
+                    boolean ok = KakaoMessageSender.send(this, p.room, p.message, RoomMediaStore.get(this, p.room));
                     Prefs.setStatus(this, ok ? "수동 전송 성공: " + p.title()
-                            : "수동 전송 실패: " + p.title() + " · " + KakaoNotificationListener.lastSendError());
-                    toast(ok ? "전송 성공" : "전송 실패: " + KakaoNotificationListener.lastSendError());
+                            : "수동 전송 실패: " + p.title() + " · " + KakaoMessageSender.lastError());
+                    toast(ok ? "전송 성공" : "전송 실패: " + KakaoMessageSender.lastError());
                     refreshUi();
+                    });
                 })
                 .setNegativeButton("취소", null)
                 .show();
     }
 
     private void startAll() {
+        LicenseManager.runAuthorized(this, this::startAuthorized);
+    }
+
+    private void startAuthorized() {
         if (!isNotificationAccessEnabled()) {
             toast("알림 접근 권한부터 허용해줘.");
             return;
@@ -427,7 +436,7 @@ public class MainActivityV4 extends Activity {
         int usable = 0;
         int ready = 0;
         for (MultiRoomStore.Profile p : profiles) {
-            if (!p.enabled || p.message == null || p.message.trim().isEmpty()) continue;
+            if (!p.enabled || !RoomMediaStore.hasPayload(this, p)) continue;
             usable++;
             if (KakaoNotificationListener.hasLiveSession(p.room)) ready++;
         }
@@ -435,7 +444,10 @@ public class MainActivityV4 extends Activity {
             toast("사용 중이고 메시지가 저장된 방이 없어.");
             return;
         }
-        Prefs.p(this).edit().putBoolean(Prefs.KEY_ACTIVE, true).apply();
+        synchronized (DeliveryGate.LOCK) {
+            if (!LicenseManager.isUsable(this)) { LicenseManager.route(this); return; }
+            Prefs.p(this).edit().putBoolean(Prefs.KEY_ACTIVE, true).commit();
+        }
         MultiRoomStore.setAllNextFromNow(this);
         SendScheduler.scheduleNext(this);
         Prefs.setStatus(this, "전체 자동전송 시작 · " + usable + "개 방 · 즉시 연결 " + ready + "개");
@@ -444,8 +456,7 @@ public class MainActivityV4 extends Activity {
     }
 
     private void stopAll() {
-        Prefs.p(this).edit().putBoolean(Prefs.KEY_ACTIVE, false).apply();
-        SendScheduler.cancel(this);
+        DeliveryGate.stop(this);
         Prefs.setStatus(this, "전체 자동전송 즉시 중단");
         refreshUi();
         toast("모든 자동전송 예약을 중단했어.");
@@ -466,21 +477,15 @@ public class MainActivityV4 extends Activity {
     }
 
     private void showDiagnostics() {
-        StringBuilder sb = new StringBuilder(KakaoNotificationListener.diagnostics(this, ""));
-        sb.append("\n\n[방별 상태]");
-        for (MultiRoomStore.Profile p : MultiRoomStore.list(this)) {
-            sb.append("\n• ").append(p.title())
-                    .append(" / ").append(MultiRoomStore.scheduleSummary(p))
-                    .append(" / ").append(p.enabled ? "사용" : "중지")
-                    .append(" / ").append(p.unlimited() ? "무제한" : p.todayCount + "/" + p.dailyLimit)
-                    .append(" / next=").append(p.nextAt > 0 ? formatDateTime(p.nextAt) : "-")
-                    .append(" / 실패=").append(p.failureStreak);
-        }
+        StringBuilder sb = new StringBuilder(LicenseManager.diagnostic(this));
         TextView body = text(sb.toString(), 12, false);
         body.setTextIsSelectable(true);
         body.setPadding(dp(14), dp(10), dp(14), dp(10));
         ScrollView sc = new ScrollView(this); sc.addView(body);
-        new AlertDialog.Builder(this).setTitle("진단 정보").setView(sc).setNegativeButton("닫기", null).show();
+        new AlertDialog.Builder(this).setTitle("진단 정보").setView(sc).setPositiveButton("지원 정보 공유", (d,w) -> {
+            Intent share = new Intent(Intent.ACTION_SEND); share.setType("text/plain");
+            share.putExtra(Intent.EXTRA_TEXT, LicenseManager.diagnostic(this)); startActivity(Intent.createChooser(share,"지원 정보 공유"));
+        }).setNegativeButton("닫기", null).show();
     }
 
     private void resetBindings() {

@@ -45,6 +45,7 @@ public class RoomEditorActivity extends Activity {
     private TextView connectionStatus;
     private TextView nextPreview;
     private TextView imageStatus;
+    private android.widget.ImageView imagePreview;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -96,6 +97,11 @@ public class RoomEditorActivity extends Activity {
 
         root.addView(section("사진 첨부 · 선택"), top(22));
         LinearLayout imageCard = card(Color.rgb(28, 31, 37));
+        imagePreview = new android.widget.ImageView(this);
+        imagePreview.setAdjustViewBounds(true);
+        imagePreview.setMaxHeight(dp(160));
+        imagePreview.setContentDescription("선택한 사진 미리보기");
+        imageCard.addView(imagePreview);
         imageStatus = text("사진 없음", 13, true);
         imageCard.addView(imageStatus);
         LinearLayout imageButtons = new LinearLayout(this);
@@ -149,7 +155,7 @@ public class RoomEditorActivity extends Activity {
                 refreshNextPreview();
             });
             LinearLayout.LayoutParams lp = weight();
-            if (i > 0) lp.leftMargin = dp(5);
+            if (i > 0) { lp.leftMargin = dp(5); }
             presets.addView(b, lp);
         }
         intervalBox.addView(presets, top(7));
@@ -277,9 +283,34 @@ public class RoomEditorActivity extends Activity {
         if (imageStatus == null) return;
         RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
         if (!media.hasImage()) {
+            imagePreview.setImageDrawable(null);
+            imagePreview.setVisibility(View.GONE);
             imageStatus.setText("사진 없음 · 텍스트만 전송");
             imageStatus.setTextColor(Color.rgb(174, 180, 191));
         } else {
+            imagePreview.setVisibility(View.VISIBLE);
+            final String expectedUri = media.uri;
+            new Thread(() -> {
+                android.graphics.Bitmap bitmap = null;
+                try {
+                    android.graphics.BitmapFactory.Options options = new android.graphics.BitmapFactory.Options();
+                    options.inJustDecodeBounds = true;
+                    Uri uri = Uri.parse(expectedUri);
+                    try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+                        android.graphics.BitmapFactory.decodeStream(in, null, options);
+                    }
+                    options.inSampleSize = 1;
+                    while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > 320) options.inSampleSize *= 2;
+                    options.inJustDecodeBounds = false;
+                    try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+                        bitmap = android.graphics.BitmapFactory.decodeStream(in, null, options);
+                    }
+                } catch (Exception ignored) { }
+                final android.graphics.Bitmap result = bitmap;
+                runOnUiThread(() -> {
+                    if (!isDestroyed() && RoomMediaStore.get(this, routeAlias).uri.equals(expectedUri)) imagePreview.setImageBitmap(result);
+                });
+            }, "photo-preview").start();
             String name = media.name.trim().isEmpty() ? "선택한 사진" : media.name;
             imageStatus.setText("● 사진 첨부 · " + name);
             imageStatus.setTextColor(Color.rgb(143, 190, 255));
@@ -318,9 +349,9 @@ public class RoomEditorActivity extends Activity {
         }
 
         boolean active = Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false);
-        if (active && p.enabled && !p.message.trim().isEmpty()) {
+        if (active && p.enabled && RoomMediaStore.hasPayload(this, p)) {
             p.nextAt = MultiRoomStore.computeNextAt(p, System.currentTimeMillis());
-        } else if (!p.enabled || p.message.trim().isEmpty()) {
+        } else if (!p.enabled || !RoomMediaStore.hasPayload(this, p)) {
             p.nextAt = 0L;
         }
 
@@ -340,7 +371,7 @@ public class RoomEditorActivity extends Activity {
     private void testSend() {
         if (!saveProfile(false)) return;
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
-        if (p == null || p.message.trim().isEmpty()) {
+        if (!RoomMediaStore.hasPayload(this, p)) {
             toast("보낼 메시지를 입력해줘.");
             return;
         }
@@ -354,12 +385,14 @@ public class RoomEditorActivity extends Activity {
                 .setTitle(p.title())
                 .setMessage("지금 1회 전송할까?\n\n" + p.message + mediaLine)
                 .setPositiveButton("전송", (d, w) -> {
+                    LicenseManager.runAuthorized(this, () -> {
                     boolean ok = KakaoMessageSender.send(this, routeAlias, p.message, media);
                     String error = KakaoMessageSender.lastError();
                     Prefs.setStatus(this, ok ? "수동 전송 성공: " + p.title()
                             : "수동 전송 실패: " + p.title() + " · " + error);
                     toast(ok ? "전송 성공" : "전송 실패: " + error);
                     refreshConnection();
+                    });
                 })
                 .setNegativeButton("취소", null)
                 .show();

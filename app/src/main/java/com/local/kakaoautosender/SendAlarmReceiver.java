@@ -19,11 +19,12 @@ public class SendAlarmReceiver extends BroadcastReceiver {
         final Context app = context.getApplicationContext();
 
         executor.execute(() -> {
+            DeliveryGate.scheduled(true);
             try {
                 Prefs.ensureLabelSchema(app);
                 MultiRoomStore.ensureMigrated(app);
 
-                if (!LicenseManager.isUsable(app)) {
+                if (!LicenseManager.validate(app).valid) {
                     Prefs.p(app).edit().putBoolean(Prefs.KEY_ACTIVE, false).apply();
                     SendScheduler.cancel(app);
                     Prefs.setStatus(app, "라이선스 인증 필요 · 자동전송 중단");
@@ -32,6 +33,12 @@ public class SendAlarmReceiver extends BroadcastReceiver {
 
                 if (!Prefs.p(app).getBoolean(Prefs.KEY_ACTIVE, false)) {
                     SendScheduler.cancel(app);
+                    return;
+                }
+
+                long fence = Prefs.p(app).getLong("dispatch_not_before_v2", 0L);
+                if (fence > System.currentTimeMillis()) {
+                    SendScheduler.scheduleAt(app, fence);
                     return;
                 }
 
@@ -47,7 +54,7 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 }
 
                 MultiRoomStore.Profile profile = due.get(0);
-                if (!profile.enabled || profile.room.trim().isEmpty() || profile.message.trim().isEmpty()) {
+                if (!profile.enabled || profile.room.trim().isEmpty() || !RoomMediaStore.hasPayload(app, profile)) {
                     SendScheduler.scheduleNext(app);
                     return;
                 }
@@ -68,9 +75,14 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                     attempted = true;
 
                     long reservedNext = MultiRoomStore.computeNextAt(profile, System.currentTimeMillis());
-                    MultiRoomStore.Profile reserved = profile.copy();
-                    reserved.nextAt = reservedNext;
-                    MultiRoomStore.upsert(app, reserved);
+                    if (!MultiRoomStore.reserveExecution(app, profile, reservedNext)) {
+                        SendScheduler.scheduleNext(app);
+                        return;
+                    }
+                    // A duplicate alarm/process restart cannot dispatch another room immediately.
+                    if (!Prefs.p(app).edit().putLong("dispatch_not_before_v2", System.currentTimeMillis() + 5_000L).commit()) {
+                        throw new IllegalStateException("Dispatch fence persistence failed");
+                    }
 
                     RoomMediaStore.Media media = RoomMediaStore.get(app, profile.room);
                     for (int i = 0; i < 3 && !sent; i++) {
@@ -118,6 +130,7 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 if (attempted) {
                     long gap = ReliabilityTiming.roomGapMillis();
                     long minimumAfterCurrentRoom = nowAfter + gap;
+                    Prefs.p(app).edit().putLong("dispatch_not_before_v2", minimumAfterCurrentRoom).commit();
                     if (scheduledAt < minimumAfterCurrentRoom) {
                         scheduledAt = minimumAfterCurrentRoom;
                         gapSeconds = ReliabilityTiming.secondsCeil(gap);
@@ -140,6 +153,7 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 Prefs.setStatus(app, "자동전송 내부 오류: " + t.getClass().getSimpleName());
                 SendScheduler.scheduleNext(app);
             } finally {
+                DeliveryGate.scheduled(false);
                 result.finish();
             }
         });

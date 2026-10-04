@@ -8,6 +8,21 @@ on:
       - main
   workflow_dispatch:
 jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: node scripts/secret-scan.mjs --self-test
+      - run: node scripts/secret-scan.mjs
+      - run: npm ci && npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
+        working-directory: backend
   build:
     runs-on: ubuntu-latest
     steps:
@@ -21,6 +36,16 @@ jobs:
           gradle-version: '8.9'
       - name: Test, lint and build
         run: ANDROID_HOME=/usr/local/lib/android/sdk ANDROID_SDK_ROOT=/usr/local/lib/android/sdk gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: Validate minified release using ephemeral CI fixture
+        env:
+          ANDROID_API_BASE_URL: https://license.example.com
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release-smoke.jks
+          ANDROID_KEYSTORE_PASSWORD: smoke-password
+          ANDROID_KEY_ALIAS: smoke
+          ANDROID_KEY_PASSWORD: smoke-password
+        run: |
+          keytool -genkeypair -keystore "$ANDROID_KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -keypass "$ANDROID_KEY_PASSWORD" -alias smoke -keyalg RSA -keysize 2048 -validity 2 -dname "CN=CI smoke only"
+          gradle --no-daemon :app:validateReleaseConfiguration :app:assembleRelease :app:lintRelease
       - uses: actions/upload-artifact@v4
         with:
           name: KakaoAutoSender-debug-apk

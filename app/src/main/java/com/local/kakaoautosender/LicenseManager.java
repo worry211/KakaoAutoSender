@@ -1,164 +1,399 @@
 package com.local.kakaoautosender;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
-import android.util.Base64;
-
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.Date;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import javax.net.ssl.HttpsURLConnection;
 import org.json.JSONObject;
 
-import java.nio.charset.StandardCharsets;
-import java.security.KeyFactory;
-import java.security.MessageDigest;
-import java.security.PublicKey;
-import java.security.Signature;
-import java.security.spec.X509EncodedKeySpec;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
-import java.util.UUID;
-
+/** Single commercial entitlement service. No KAS1 verifier or offline bypass exists. */
 final class LicenseManager {
-    private static final String PREF_LICENSE = "license_text_v1";
-    private static final String PREF_INSTALL_ID = "license_install_id_v1";
-    private static final String PREF_MAX_WALL_TIME = "license_max_wall_time_v1";
-    private static final long CLOCK_ROLLBACK_TOLERANCE_MS = 5 * 60_000L;
-    private static final String PUBLIC_KEY_B64 = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEZJeBNrx2xGcHMKrJqOtsOWivO4A0g9Ln6qfrUECWCG9tSfSlCbHFK5k6D1y7eZVDvA0RxOnpC0B2IOuKSM+f5g==";
+  private static final ExecutorService NETWORK = Executors.newSingleThreadExecutor();
+  private static final Handler MAIN = new Handler(Looper.getMainLooper());
+  private static final java.util.concurrent.locks.ReentrantLock REQUEST_LOCK =
+      new java.util.concurrent.locks.ReentrantLock();
+  private static final ThreadLocal<Long> DEADLINE = new ThreadLocal<>();
 
-    static final class Verification {
-        final boolean valid;
-        final String message;
-        final String licenseId;
-        final String customer;
-        final long expiresAtSeconds;
+  interface Callback {
+    void done(Verification v);
+  }
 
-        Verification(boolean valid, String message, String licenseId, String customer, long expiresAtSeconds) {
-            this.valid = valid;
-            this.message = message == null ? "" : message;
-            this.licenseId = licenseId == null ? "" : licenseId;
-            this.customer = customer == null ? "" : customer;
-            this.expiresAtSeconds = expiresAtSeconds;
-        }
+  static final class Verification {
+    final boolean valid;
+    final String message, licenseId, state;
+    final long expiresAtSeconds;
 
-        String expiryLabel() {
-            if (!valid) return "인증 안 됨";
-            if (expiresAtSeconds <= 0L) return "영구 라이선스";
-            return new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.KOREA)
-                    .format(new Date(expiresAtSeconds * 1000L)) + " 만료";
-        }
+    Verification(boolean valid, String state, String message, String id, long expiry) {
+      this.valid = valid;
+      this.state = state;
+      this.message = message;
+      licenseId = id;
+      expiresAtSeconds = expiry;
     }
 
-    private LicenseManager() {}
+    String expiryLabel() {
+      if (!valid) return message;
+      if (expiresAtSeconds <= 0) return "영구 라이선스";
+      return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.KOREA)
+              .format(new Date(expiresAtSeconds * 1000L))
+          + " 만료";
+    }
+  }
 
-    static String deviceCode(Context context) {
-        try {
-            SharedPreferences prefs = Prefs.p(context);
-            String androidId = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID);
-            if (androidId == null || androidId.trim().isEmpty()) {
-                androidId = prefs.getString(PREF_INSTALL_ID, "");
-                if (androidId == null || androidId.trim().isEmpty()) {
-                    androidId = UUID.randomUUID().toString();
-                    prefs.edit().putString(PREF_INSTALL_ID, androidId).apply();
-                }
+  private LicenseManager() {}
+
+  private static SharedPreferences p(Context c) {
+    return c.getSharedPreferences("entitlement_v2", Context.MODE_PRIVATE);
+  }
+
+  private static int boot(Context c) {
+    return Settings.Global.getInt(c.getContentResolver(), Settings.Global.BOOT_COUNT, -1);
+  }
+
+  static Verification verifyStored(Context c) {
+    SharedPreferences p = p(c);
+    String state = p.getString("state", "INVALID");
+    long expiry = p.getLong("expiry", 0), elapsed = SystemClock.elapsedRealtime();
+    boolean valid =
+        EntitlementPolicy.usable(
+            state,
+            elapsed,
+            p.getLong("validated_elapsed", -1),
+            boot(c),
+            p.getInt("validated_boot", -2),
+            p.getLong("server_time", 0),
+            expiry,
+            p.getLong("grace", 600));
+    boolean leaseEnded = "ACTIVE".equals(state) && !valid;
+    if (leaseEnded)
+      state =
+          expiry > 0
+                  && p.getInt("validated_boot", -2) == boot(c)
+                  && p.getLong("server_time", 0)
+                          + Math.max(0, elapsed - p.getLong("validated_elapsed", elapsed)) / 1000
+                      >= expiry
+              ? "EXPIRED"
+              : "NETWORK";
+    return new Verification(
+        valid,
+        state,
+        valid
+            ? "라이선스 정상"
+            : leaseEnded
+                ? EntitlementPolicy.message(state)
+                : p.getString("message", EntitlementPolicy.message(state)),
+        p.getString("license_id", ""),
+        expiry);
+  }
+
+  static boolean isUsable(Context c) {
+    return verifyStored(c).valid;
+  }
+
+  static String shortStatus(Context c) {
+    Verification v = verifyStored(c);
+    if (!v.valid) return v.message;
+    long remaining = v.expiresAtSeconds - estimatedServerTime(c);
+    if (v.expiresAtSeconds > 0 && remaining < 86400) return "라이선스가 24시간 이내 만료됩니다.";
+    if (v.expiresAtSeconds > 0 && remaining < 7 * 86400)
+      return "라이선스가 " + Math.max(1, (remaining + 86399) / 86400) + "일 후 만료됩니다.";
+    return "정상 · " + v.expiryLabel();
+  }
+
+  static long heartbeatMillis(Context c) {
+    return Math.max(30, Math.min(300, p(c).getLong("heartbeat", 60))) * 1000L;
+  }
+
+  static long estimatedServerTime(Context c) {
+    SharedPreferences p = p(c);
+    if (p.getInt("time_boot", -2) == boot(c) && p.getLong("time_elapsed", -1) >= 0)
+      return p.getLong("time_server", 0)
+          + Math.max(0, SystemClock.elapsedRealtime() - p.getLong("time_elapsed", 0)) / 1000;
+    return System.currentTimeMillis() / 1000;
+  }
+
+  static void checkAsync(Context context, Callback callback) {
+    Context app = context.getApplicationContext();
+    NETWORK.execute(
+        () -> {
+          Verification v = validate(app);
+          MAIN.post(() -> callback.done(v));
+        });
+  }
+
+  static void activateAsync(Context context, String key, Callback callback) {
+    Context app = context.getApplicationContext();
+    NETWORK.execute(
+        () -> {
+          Verification v;
+          try {
+            JSONObject b =
+                body()
+                    .put("key", key.trim().toUpperCase(java.util.Locale.ROOT))
+                    .put("public_key", InstallIdentity.publicKey());
+            JSONObject r = request(app, "/api/v1/activate", b, "");
+            if ("ACTIVE".equals(r.optString("state"))) {
+              accept(app, r);
+              v = verifyStored(app);
+            } else {
+              v =
+                  new Verification(
+                      false,
+                      r.optString("state", "INVALID"),
+                      EntitlementPolicy.message(r.optString("state")),
+                      "",
+                      0);
             }
-            String raw = "KAS-DEVICE-v1|" + context.getPackageName() + "|" + androidId.trim();
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(raw.getBytes(StandardCharsets.UTF_8));
-            StringBuilder compact = new StringBuilder();
-            for (int i = 0; i < 10; i++) compact.append(String.format(Locale.ROOT, "%02X", digest[i]));
-            String s = compact.toString();
-            return s.substring(0, 5) + "-" + s.substring(5, 10) + "-" + s.substring(10, 15) + "-" + s.substring(15, 20);
-        } catch (Throwable t) {
-            return "DEVICE-CODE-ERROR";
+          } catch (Exception e) {
+            v = new Verification(false, "NETWORK", EntitlementPolicy.message("NETWORK"), "", 0);
+          }
+          final Verification result = v;
+          MAIN.post(() -> callback.done(result));
+        });
+  }
+
+  static Verification validate(Context c) {
+    if (Looper.myLooper() == Looper.getMainLooper())
+      throw new IllegalStateException("Network entitlement checks require worker thread");
+    boolean acquired = false;
+    try {
+      // A queued foreground request must not hold an alarm receiver indefinitely.
+      acquired = REQUEST_LOCK.tryLock(250, java.util.concurrent.TimeUnit.MILLISECONDS);
+      if (!acquired) {
+        Verification cached = verifyStored(c);
+        if (!cached.valid && "ACTIVE".equals(p(c).getString("state", "")))
+          lockout(c, cached.state, "");
+        return cached;
+      }
+      DEADLINE.set(SystemClock.elapsedRealtime() + 4500L);
+      return validateInternal(c);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return verifyStored(c);
+    } finally {
+      DEADLINE.remove();
+      if (acquired) REQUEST_LOCK.unlock();
+    }
+  }
+
+  private static Verification validateInternal(Context c) {
+    if (Looper.myLooper() == Looper.getMainLooper())
+      throw new IllegalStateException("Network entitlement checks require worker thread");
+    try {
+      String[] tokens = InstallIdentity.tokens(c);
+      JSONObject r;
+      if (tokens[0].isEmpty()) r = recover(c);
+      else {
+        r = request(c, "/api/v1/heartbeat", body(), tokens[0]);
+        if ("ACCESS_EXPIRED".equals(r.optString("state")))
+          r = request(c, "/api/v1/session/refresh", body(), tokens[1]);
+        if ("INVALID".equals(r.optString("state"))) r = recover(c);
+      }
+      String state = r.getString("state");
+      if ("ACTIVE".equals(state)) {
+        accept(c, r);
+        return verifyStored(c);
+      }
+      if (isTemporary(state)) throw new java.io.IOException("temporary");
+      lockout(c, state, r.optString("message", ""));
+      return verifyStored(c);
+    } catch (Exception e) {
+      p(c).edit().putString("last_error", "NETWORK").apply();
+      Verification cached = verifyStored(c);
+      if (cached.valid) return cached;
+      // Network failure never erases authoritative SUSPENDED/REVOKED/etc.
+      if ("ACTIVE".equals(p(c).getString("state", ""))) lockout(c, cached.state, "");
+      return verifyStored(c);
+    }
+  }
+
+  private static JSONObject recover(Context c) throws Exception {
+    return request(
+        c, "/api/v1/session/recover", body().put("public_key", InstallIdentity.publicKey()), "");
+  }
+
+  private static JSONObject body() throws Exception {
+    return new JSONObject().put("app_version", BuildConfig.VERSION_CODE);
+  }
+
+  private static boolean isTemporary(String s) {
+    return "SERVER_ERROR".equals(s)
+        || "RATE_LIMITED".equals(s)
+        || "REPLAY".equals(s)
+        || "INVALID_PROOF".equals(s);
+  }
+
+  private static JSONObject request(Context c, String path, JSONObject b, String token)
+      throws Exception {
+    return request(c, path, b, token, true);
+  }
+
+  private static JSONObject request(
+      Context c, String path, JSONObject b, String token, boolean retryClock) throws Exception {
+    String base = BuildConfig.API_BASE_URL;
+    if (!base.startsWith("https://") || base.endsWith("/"))
+      throw new java.io.IOException("endpoint");
+    String raw = b.toString(), ts = Long.toString(estimatedServerTime(c));
+    String nonce = UUID.randomUUID().toString().replace("-", "");
+    String canonical =
+        "KM1\nPOST\n"
+            + path
+            + "\n"
+            + ts
+            + "\n"
+            + nonce
+            + "\n"
+            + InstallIdentity.sha(raw)
+            + "\n"
+            + InstallIdentity.sha(token);
+    HttpsURLConnection conn = (HttpsURLConnection) new URL(base + path).openConnection();
+    long remaining = DEADLINE.get() == null ? 4500 : DEADLINE.get() - SystemClock.elapsedRealtime();
+    if (remaining < 100) throw new java.io.IOException("deadline");
+    int timeout = (int) Math.max(50, Math.min(1500, remaining / 2));
+    conn.setConnectTimeout(timeout);
+    conn.setReadTimeout(timeout);
+    conn.setInstanceFollowRedirects(false);
+    conn.setRequestMethod("POST");
+    conn.setDoOutput(true);
+    conn.setRequestProperty("Content-Type", "application/json");
+    conn.setRequestProperty("X-Install-Time", ts);
+    conn.setRequestProperty("X-Install-Nonce", nonce);
+    conn.setRequestProperty("X-Install-Signature", InstallIdentity.sign(canonical));
+    if (!token.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + token);
+    try {
+      byte[] bytes = raw.getBytes(StandardCharsets.UTF_8);
+      conn.setFixedLengthStreamingMode(bytes.length);
+      try (java.io.OutputStream out = conn.getOutputStream()) {
+        out.write(bytes);
+      }
+      int status = conn.getResponseCode();
+      if (status >= 500 || status == 429) throw new java.io.IOException("server");
+      if (status >= 300 && status < 400) throw new java.io.IOException("redirect");
+      InputStream stream = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+      if (stream == null) throw new java.io.IOException("body");
+      ByteArrayOutputStream out = new ByteArrayOutputStream();
+      try (InputStream in = stream) {
+        byte[] chunk = new byte[1024];
+        int n;
+        while ((n = in.read(chunk)) != -1) {
+          if (out.size() + n > 16384) throw new java.io.IOException("body_size");
+          out.write(chunk, 0, n);
         }
+      }
+      JSONObject r = new JSONObject(out.toString("UTF-8"));
+      if (r.has("server_time"))
+        p(c).edit()
+            .putLong("time_server", r.getLong("server_time"))
+            .putLong("time_elapsed", SystemClock.elapsedRealtime())
+            .putInt("time_boot", boot(c))
+            .commit();
+      if (retryClock && "INVALID_PROOF".equals(r.optString("state")) && r.has("server_time")) {
+        conn.disconnect();
+        return request(c, path, b, token, false);
+      }
+      return r;
+    } finally {
+      conn.disconnect();
     }
+  }
 
-    static Verification activate(Context context, String licenseText) {
-        Verification result = verifyText(context, licenseText, true);
-        if (result.valid) {
-            Prefs.p(context).edit().putString(PREF_LICENSE, licenseText.trim()).apply();
-            Prefs.setStatus(context, "라이선스 인증 완료 · " + result.expiryLabel());
-        }
-        return result;
+  private static void accept(Context c, JSONObject r) throws Exception {
+    long expiry = r.isNull("expires_at") ? 0 : r.getLong("expires_at");
+    if (r.has("access_token"))
+      InstallIdentity.saveTokens(c, r.getString("access_token"), r.getString("refresh_token"));
+    if (!p(c).edit()
+        .putString("state", "ACTIVE")
+        .putString("message", "라이선스 정상")
+        .putString("license_id", r.getString("license_id"))
+        .putLong("expiry", expiry)
+        .putLong("server_time", r.getLong("server_time"))
+        .putLong("validated_elapsed", SystemClock.elapsedRealtime())
+        .putInt("validated_boot", boot(c))
+        .putLong("grace", Math.max(0, Math.min(600, r.getLong("grace_seconds"))))
+        .putLong("heartbeat", Math.max(30, Math.min(300, r.getLong("heartbeat_seconds"))))
+        .putLong("latest_version", r.optLong("latest_version", BuildConfig.VERSION_CODE))
+        .putString("download_url", r.optString("download_url", ""))
+        .putString("last_error", "")
+        .commit()) throw new java.io.IOException("storage");
+    c.sendBroadcast(
+        new Intent(KakaoNotificationListener.ACTION_SESSIONS_UPDATED)
+            .setPackage(c.getPackageName()));
+  }
+
+  static void lockout(Context c, String state, String serverMessage) {
+    String message = EntitlementPolicy.message(state);
+    if ("MAINTENANCE".equals(state) && !serverMessage.isEmpty()) message += "\n" + serverMessage;
+    synchronized (DeliveryGate.LOCK) {
+      p(c).edit()
+          .putString("state", state)
+          .putString("message", message)
+          .putString("last_error", state)
+          .remove("validated_elapsed")
+          .commit();
+      DeliveryGate.stop(c);
     }
-
-    static Verification verifyStored(Context context) {
-        String license = Prefs.p(context).getString(PREF_LICENSE, "");
-        return verifyText(context, license, true);
+    // Clear access; retain encrypted installation refresh credential for renewal/resume.
+    String[] tokens = InstallIdentity.tokens(c);
+    try {
+      InstallIdentity.saveTokens(c, "", tokens[1]);
+    } catch (Exception ignored) {
+      p(c).edit().remove("tokens").commit();
     }
+    Prefs.setStatus(c, message);
+    Context app = c.getApplicationContext();
+    MAIN.post(
+        () -> {
+          if (app instanceof KakaoMacroApplication) ((KakaoMacroApplication) app).routeLockout();
+        });
+  }
 
-    static boolean isUsable(Context context) {
-        return verifyStored(context).valid;
-    }
+  static void runAuthorized(Activity a, Runnable action) {
+    checkAsync(
+        a,
+        v -> {
+          if (a.isFinishing()) return;
+          if (v.valid && isUsable(a)) action.run();
+          else route(a);
+        });
+  }
 
-    static void clear(Context context) {
-        Prefs.p(context).edit().remove(PREF_LICENSE).apply();
-    }
+  static void route(Activity a) {
+    Intent i = new Intent(a, LicenseActivity.class);
+    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+    a.startActivity(i);
+    a.finish();
+  }
 
-    static String shortStatus(Context context) {
-        Verification v = verifyStored(context);
-        return v.valid ? v.expiryLabel() : v.message;
-    }
+  static String diagnostic(Context c) {
+    SharedPreferences p = p(c);
+    return "앱 버전: "
+        + BuildConfig.VERSION_NAME
+        + "\n지원 코드: "
+        + p.getString("license_id", "미등록")
+        + "\n상태: "
+        + p.getString("state", "INVALID")
+        + "\n마지막 서버 확인 (UTC epoch): "
+        + p.getLong("server_time", 0)
+        + "\n오류: "
+        + p.getString("last_error", "");
+  }
 
-    private static Verification verifyText(Context context, String text, boolean updateClock) {
-        if (text == null || text.trim().isEmpty()) return invalid("라이선스 키를 입력해줘.");
-        try {
-            String[] parts = text.trim().split("\\.");
-            if (parts.length != 3 || !"KAS1".equals(parts[0])) return invalid("라이선스 형식이 올바르지 않아.");
-
-            byte[] payload = decodeUrl(parts[1]);
-            byte[] signatureBytes = decodeUrl(parts[2]);
-            Signature verifier = Signature.getInstance("SHA256withECDSA");
-            verifier.initVerify(publicKey());
-            verifier.update(payload);
-            if (!verifier.verify(signatureBytes)) return invalid("서명이 올바르지 않은 라이선스야.");
-
-            JSONObject o = new JSONObject(new String(payload, StandardCharsets.UTF_8));
-            if (o.optInt("v", 0) != 1) return invalid("지원하지 않는 라이선스 버전이야.");
-
-            String licenseId = o.optString("licenseId", "");
-            String customer = o.optString("customer", "");
-            String expectedDevice = normalizeDevice(deviceCode(context));
-            String licensedDevice = normalizeDevice(o.optString("device", ""));
-            if (!expectedDevice.equals(licensedDevice)) {
-                return invalid("이 라이선스는 이 휴대폰용이 아니야.");
-            }
-
-            long nowMs = System.currentTimeMillis();
-            long nowSec = nowMs / 1000L;
-            long issuedAt = o.optLong("issuedAt", 0L);
-            long expiresAt = o.optLong("expiresAt", 0L);
-            if (issuedAt <= 0L || issuedAt > nowSec + 24 * 60 * 60L) return invalid("발급 시간이 올바르지 않아.");
-            if (expiresAt > 0L && nowSec > expiresAt) return invalid("라이선스가 만료됐어.");
-
-            SharedPreferences prefs = Prefs.p(context);
-            long maxSeen = prefs.getLong(PREF_MAX_WALL_TIME, 0L);
-            if (maxSeen > 0L && nowMs + CLOCK_ROLLBACK_TOLERANCE_MS < maxSeen) {
-                return invalid("휴대폰 시간이 이전으로 크게 변경돼 인증을 확인할 수 없어.");
-            }
-            if (updateClock && nowMs > maxSeen) prefs.edit().putLong(PREF_MAX_WALL_TIME, nowMs).apply();
-
-            return new Verification(true, "인증됨", licenseId, customer, expiresAt);
-        } catch (Throwable t) {
-            return invalid("라이선스를 읽을 수 없어.");
-        }
-    }
-
-    private static Verification invalid(String message) {
-        return new Verification(false, message, "", "", 0L);
-    }
-
-    private static String normalizeDevice(String value) {
-        if (value == null) return "";
-        return value.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "");
-    }
-
-    private static byte[] decodeUrl(String s) {
-        return Base64.decode(s, Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING);
-    }
-
-    private static PublicKey publicKey() throws Exception {
-        byte[] der = Base64.decode(PUBLIC_KEY_B64, Base64.DEFAULT);
-        return KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(der));
-    }
+  static String updateNotice(Context c) {
+    return p(c).getLong("latest_version", 0) > BuildConfig.VERSION_CODE
+        ? "새 앱 버전이 있습니다. 판매자에게 업데이트를 문의하세요."
+        : "";
+  }
 }

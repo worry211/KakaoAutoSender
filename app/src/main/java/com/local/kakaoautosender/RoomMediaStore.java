@@ -21,11 +21,17 @@ final class RoomMediaStore {
         }
 
         boolean hasImage() {
-            return !uri.trim().isEmpty() && mime.toLowerCase().startsWith("image/");
+            // A configured URI with unknown/corrupt MIME is still a configured photo.
+            // The sender must reject it, never silently fall back to text.
+            return !uri.trim().isEmpty();
         }
     }
 
     private RoomMediaStore() {}
+
+    static boolean hasPayload(Context c, MultiRoomStore.Profile p) {
+        return p != null && ((p.message != null && !p.message.trim().isEmpty()) || get(c, p.room).hasImage());
+    }
 
     static Media get(Context context, String room) {
         String key = key(room);

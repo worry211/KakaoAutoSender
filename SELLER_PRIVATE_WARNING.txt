@@ -1,5 +1,5 @@
 PRIVATE SELLER MATERIAL
 
-Do not include the license signing private key in this repository, APK, release artifact, buyer package, or support message.
+Do not include Worker peppers, Discord tokens, Cloudflare tokens, Android release keystores or passwords in this repository, APK, buyer package, logs or support messages.
 
-Only the seller-side offline key generator may hold the signing private key. The Android app must contain only the verification public key.
+Commercial v2 uses one-time server activation, not the legacy offline signer. Only allowed Discord sellers can issue licenses. See docs/COMMERCIAL_DEPLOYMENT.md. Keep the stable Android release-signing key private and backed up; it must not be generated afresh for each customer release.

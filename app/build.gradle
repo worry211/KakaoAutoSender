@@ -10,22 +10,28 @@ android {
         applicationId 'com.local.kakaoautosender'
         minSdk 26
         targetSdk 35
-        versionCode 12
-        versionName '1.2.0'
+        versionCode 20
+        versionName '2.0.0'
+        def apiUrl = System.getenv('ANDROID_API_BASE_URL') ?: 'https://license.invalid'
+        if (!(apiUrl ==~ /https:\/\/[A-Za-z0-9.-]+(:[0-9]+)?/)) {
+            throw new GradleException('ANDROID_API_BASE_URL must be an HTTPS origin without a trailing slash')
+        }
+        buildConfigField 'String', 'API_BASE_URL', '"' + apiUrl + '"'
     }
 
     buildFeatures {
         buildConfig true
     }
+    testOptions { unitTests.includeAndroidResources = true }
 
     signingConfigs {
         release {
-            def ksPath = System.getenv('KAS_KEYSTORE_PATH')
+            def ksPath = System.getenv('ANDROID_KEYSTORE_PATH')
             if (ksPath != null && !ksPath.trim().isEmpty()) {
                 storeFile file(ksPath)
-                storePassword System.getenv('KAS_KEYSTORE_PASSWORD')
-                keyAlias System.getenv('KAS_KEY_ALIAS')
-                keyPassword System.getenv('KAS_KEY_PASSWORD')
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
             }
         }
     }
@@ -33,7 +39,8 @@ android {
     buildTypes {
         release {
             signingConfig signingConfigs.release
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -44,6 +51,21 @@ android {
     }
 }
 
+tasks.register('validateReleaseConfiguration') {
+    doLast {
+        ['ANDROID_API_BASE_URL', 'ANDROID_KEYSTORE_PATH', 'ANDROID_KEYSTORE_PASSWORD',
+         'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD'].each { name ->
+            if (!System.getenv(name)?.trim()) throw new GradleException('Missing release variable: ' + name)
+        }
+        if (System.getenv('ANDROID_API_BASE_URL').contains('.invalid')) throw new GradleException('Configure the production API origin')
+        if (!file(System.getenv('ANDROID_KEYSTORE_PATH')).exists()) throw new GradleException('Release keystore does not exist')
+    }
+}
+tasks.configureEach { task ->
+    if (task.name == 'preReleaseBuild') task.dependsOn 'validateReleaseConfiguration'
+}
+
 dependencies {
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
 }

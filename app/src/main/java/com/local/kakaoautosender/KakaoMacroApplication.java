@@ -2,54 +2,89 @@ package com.local.kakaoautosender;
 
 import android.app.Activity;
 import android.app.Application;
-import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import java.util.HashSet;
 
-public class KakaoMacroApplication extends Application implements Application.ActivityLifecycleCallbacks {
-    private final Handler handler = new Handler(Looper.getMainLooper());
-    private Activity currentActivity;
-    private final Runnable guard = new Runnable() {
-        @Override public void run() {
-            Activity a = currentActivity;
-            if (a != null && !(a instanceof LicenseActivity) && !LicenseManager.isUsable(a)) {
-                Prefs.p(a).edit().putBoolean(Prefs.KEY_ACTIVE, false).apply();
-                SendScheduler.cancel(a);
-                Intent i = new Intent(a, LicenseActivity.class);
-                i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-                a.startActivity(i);
-                a.finish();
-            }
-            handler.postDelayed(this, 15_000L);
-        }
-    };
+public class KakaoMacroApplication extends Application
+    implements Application.ActivityLifecycleCallbacks {
+  private final Handler handler = new Handler(Looper.getMainLooper());
+  private final HashSet<Activity> activities = new HashSet<>();
+  private Activity foreground;
+  private boolean checking;
+  private final Runnable heartbeat = () -> checkForeground();
 
-    @Override public void onCreate() {
-        super.onCreate();
-        registerActivityLifecycleCallbacks(this);
-        handler.post(guard);
-    }
+  @Override
+  public void onCreate() {
+    super.onCreate();
+    Prefs.p(this)
+        .edit()
+        .remove("license_text_v1")
+        .remove("license_install_id_v1")
+        .remove("license_max_wall_time_v1")
+        .apply();
+    registerActivityLifecycleCallbacks(this);
+  }
 
-    @Override public void onActivityResumed(Activity activity) {
-        currentActivity = activity;
-        if (!(activity instanceof LicenseActivity) && !LicenseManager.isUsable(activity)) {
-            Prefs.p(activity).edit().putBoolean(Prefs.KEY_ACTIVE, false).apply();
-            SendScheduler.cancel(activity);
-            Intent i = new Intent(activity, LicenseActivity.class);
-            i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            activity.startActivity(i);
-            activity.finish();
-        }
-    }
+  private void checkForeground() {
+    handler.removeCallbacks(heartbeat);
+    if (foreground == null || checking) return;
+    checking = true;
+    LicenseManager.checkAsync(
+        this,
+        v -> {
+          checking = false;
+          if (foreground != null && !(foreground instanceof LicenseActivity) && !v.valid)
+            routeLockout();
+          else if (foreground instanceof LicenseActivity && v.valid) {
+            Activity a = foreground;
+            a.startActivity(new android.content.Intent(a, MainActivityV4.class));
+            a.finish();
+          }
+          if (foreground != null)
+            handler.postDelayed(heartbeat, LicenseManager.heartbeatMillis(this));
+        });
+  }
 
-    @Override public void onActivityPaused(Activity activity) {
-        if (currentActivity == activity) currentActivity = null;
-    }
+  void routeLockout() {
+    if (foreground == null || foreground instanceof LicenseActivity) return;
+    Activity current = foreground;
+    LicenseManager.route(current);
+    for (Activity a : new HashSet<>(activities)) if (!(a instanceof LicenseActivity)) a.finish();
+  }
 
-    @Override public void onActivityCreated(Activity activity, Bundle savedInstanceState) {}
-    @Override public void onActivityStarted(Activity activity) {}
-    @Override public void onActivityStopped(Activity activity) {}
-    @Override public void onActivitySaveInstanceState(Activity activity, Bundle outState) {}
-    @Override public void onActivityDestroyed(Activity activity) {}
+  @Override
+  public void onActivityResumed(Activity a) {
+    foreground = a;
+    LicenseManager.Verification cached = LicenseManager.verifyStored(this);
+    if (!(a instanceof LicenseActivity) && !cached.valid && !"NETWORK".equals(cached.state))
+      routeLockout();
+    checkForeground();
+  }
+
+  @Override
+  public void onActivityPaused(Activity a) {
+    if (foreground == a) foreground = null;
+    handler.removeCallbacks(heartbeat);
+  }
+
+  @Override
+  public void onActivityCreated(Activity a, Bundle b) {
+    activities.add(a);
+  }
+
+  @Override
+  public void onActivityDestroyed(Activity a) {
+    activities.remove(a);
+  }
+
+  @Override
+  public void onActivityStarted(Activity a) {}
+
+  @Override
+  public void onActivityStopped(Activity a) {}
+
+  @Override
+  public void onActivitySaveInstanceState(Activity a, Bundle b) {}
 }

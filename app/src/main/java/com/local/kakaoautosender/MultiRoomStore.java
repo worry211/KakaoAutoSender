@@ -41,6 +41,8 @@ final class MultiRoomStore {
         int failureStreak;
         long lastSuccessAt;
         String lastStatus;
+        String executionId;
+        String completedExecutionId;
 
         Profile(String room) {
             this.room = safe(room).trim();
@@ -58,6 +60,8 @@ final class MultiRoomStore {
             this.failureStreak = 0;
             this.lastSuccessAt = 0L;
             this.lastStatus = "아직 전송 기록 없음";
+            this.executionId = "";
+            this.completedExecutionId = "";
         }
 
         Profile copy() {
@@ -76,6 +80,8 @@ final class MultiRoomStore {
             p.failureStreak = failureStreak;
             p.lastSuccessAt = lastSuccessAt;
             p.lastStatus = lastStatus;
+            p.executionId = executionId;
+            p.completedExecutionId = completedExecutionId;
             return p;
         }
 
@@ -189,7 +195,7 @@ final class MultiRoomStore {
         for (Profile p : profiles) {
             sanitize(p);
             normalizeDailyCount(p);
-            p.nextAt = isRunnable(p) ? computeNextAt(p, now) : 0L;
+            p.nextAt = isRunnable(context, p) ? computeNextAt(p, now) : 0L;
         }
         writeRaw(context, profiles);
     }
@@ -201,7 +207,7 @@ final class MultiRoomStore {
         for (Profile p : profiles) {
             sanitize(p);
             normalizeDailyCount(p);
-            if (!isRunnable(p)) p.nextAt = 0L;
+            if (!isRunnable(context, p)) p.nextAt = 0L;
             else if (p.nextAt <= now) p.nextAt = computeNextAt(p, now);
         }
         writeRaw(context, profiles);
@@ -210,7 +216,7 @@ final class MultiRoomStore {
     static synchronized long nextDueAt(Context context) {
         long min = Long.MAX_VALUE;
         for (Profile p : list(context)) {
-            if (!isRunnable(p) || p.nextAt <= 0L) continue;
+            if (!isRunnable(context, p) || p.nextAt <= 0L) continue;
             min = Math.min(min, p.nextAt);
         }
         return min == Long.MAX_VALUE ? 0L : min;
@@ -219,7 +225,7 @@ final class MultiRoomStore {
     static synchronized ArrayList<Profile> due(Context context, long now) {
         ArrayList<Profile> result = new ArrayList<>();
         for (Profile p : list(context)) {
-            if (!isRunnable(p)) continue;
+            if (!isRunnable(context, p)) continue;
             if (p.nextAt > 0L && p.nextAt <= now + 2_000L) result.add(p);
         }
         result.sort(Comparator.comparingLong(a -> a.nextAt));
@@ -278,6 +284,8 @@ final class MultiRoomStore {
 
     static synchronized void markSuccess(Context context, String room, long nextAt, String status) {
         mutate(context, room, p -> {
+            if (!p.executionId.isEmpty() && p.executionId.equals(p.completedExecutionId)) return;
+            p.completedExecutionId = p.executionId;
             normalizeDailyCount(p);
             p.todayCount++;
             p.failureStreak = 0;
@@ -285,6 +293,19 @@ final class MultiRoomStore {
             p.nextAt = nextAt;
             p.lastStatus = safe(status);
         });
+    }
+
+    static synchronized boolean reserveExecution(Context context, Profile expected, long nextAt) {
+        Profile current = get(context, expected.room);
+        if (current == null || !current.enabled || current.nextAt != expected.nextAt
+                || !current.message.equals(expected.message)
+                || current.intervalMinutes != expected.intervalMinutes
+                || !current.dailyTimes.equals(expected.dailyTimes)
+                || !current.scheduleMode.equals(expected.scheduleMode)) return false;
+        current.nextAt = nextAt;
+        current.executionId = java.util.UUID.randomUUID().toString();
+        upsert(context, current); // Synchronous commit must succeed before Kakao is touched.
+        return true;
     }
 
     static synchronized void markFailure(Context context, String room, long nextAt, String status) {
@@ -313,7 +334,7 @@ final class MultiRoomStore {
     static synchronized int readyCount(Context context) {
         int n = 0;
         for (Profile p : list(context)) {
-            if (p.enabled && !p.message.trim().isEmpty() && KakaoNotificationListener.hasLiveSession(p.room)) n++;
+            if (p.enabled && RoomMediaStore.hasPayload(context, p) && KakaoNotificationListener.hasLiveSession(p.room)) n++;
         }
         return n;
     }
@@ -333,8 +354,8 @@ final class MultiRoomStore {
         writeRaw(context, profiles);
     }
 
-    private static boolean isRunnable(Profile p) {
-        return p != null && p.enabled && !safe(p.message).trim().isEmpty();
+    private static boolean isRunnable(Context context, Profile p) {
+        return p != null && p.enabled && RoomMediaStore.hasPayload(context, p);
     }
 
     private static Profile sanitize(Profile p) {
@@ -412,6 +433,8 @@ final class MultiRoomStore {
                 p.failureStreak = o.optInt("failureStreak", 0);
                 p.lastSuccessAt = o.optLong("lastSuccessAt", 0L);
                 p.lastStatus = o.optString("lastStatus", "아직 전송 기록 없음");
+                p.executionId = o.optString("executionId", "");
+                p.completedExecutionId = o.optString("completedExecutionId", "");
                 result.add(sanitize(p));
             }
         } catch (Throwable t) {
@@ -442,11 +465,16 @@ final class MultiRoomStore {
                 o.put("failureStreak", p.failureStreak);
                 o.put("lastSuccessAt", p.lastSuccessAt);
                 o.put("lastStatus", p.lastStatus);
+                o.put("executionId", p.executionId);
+                o.put("completedExecutionId", p.completedExecutionId);
                 arr.put(o);
             }
-            Prefs.p(context).edit().putString(KEY_PROFILES, arr.toString()).apply();
+        if (!Prefs.p(context).edit().putString(KEY_PROFILES, arr.toString()).commit()) {
+            throw new IllegalStateException("Schedule state could not be persisted");
+        }
         } catch (Throwable t) {
             Prefs.appendLog(context, "다중방 설정 저장 실패: " + t.getClass().getSimpleName());
+            throw new IllegalStateException("Schedule persistence failed", t);
         }
     }
 
