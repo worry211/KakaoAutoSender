@@ -47,11 +47,15 @@ public class BootReceiver extends BroadcastReceiver {
             room.lastError = reason + "으로 안전 점검이 중단됨";
         } else if (manual) {
             room.status = "MANUAL_ERROR";
-            room.lastError = reason + "으로 실제 점검이 중단됨 · 자동으로 다시 실행하지 않음";
-        } else {
+            room.lastError = reason + "으로 실제 점검이 중단됨 · 사용자가 다시 실행해야 함";
+        } else if (room.enabled && room.liveCheckPassed) {
             room.status = "CHECK_DUE";
-            room.lastError = reason + "으로 이전 자동관리 작업이 중단됨 · 자동 재시도 예정";
+            room.lastError = reason + "으로 이전 자동작업이 중단됨 · 자동 재시도 예정";
             room.nextCheckAt = System.currentTimeMillis() + 15_000L;
+        } else {
+            room.status = "NEW";
+            room.lastError = reason + " 이후 방 검증 상태를 확인해줘";
+            room.nextCheckAt = 0L;
         }
         VoiceRoomStore.update(context, room);
     }
