@@ -9,6 +9,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -98,23 +99,27 @@ final class Prefs {
         }
     }
 
-    static String aliasForIdentity(Context c, List<String> identityKeys) {
+    static ArrayList<String> aliasesForIdentity(Context c, List<String> identityKeys) {
         ensureLabelSchema(c);
-        if (identityKeys == null || identityKeys.isEmpty()) return null;
+        LinkedHashSet<String> aliases = new LinkedHashSet<>();
+        if (identityKeys == null || identityKeys.isEmpty()) return new ArrayList<>();
         SharedPreferences prefs = p(c);
-        String found = null;
         for (String key : identityKeys) {
             if (key == null || key.trim().isEmpty()) continue;
             String alias = prefs.getString(BINDING_PREFIX + digest(key), null);
-            if (alias == null || alias.trim().isEmpty()) continue;
-            alias = alias.trim();
-            if (found != null && !found.equalsIgnoreCase(alias)) {
-                appendLog(c, "자동복구 식별자 충돌 감지 · 자동 연결 거부");
-                return null;
-            }
-            found = alias;
+            if (alias != null && !alias.trim().isEmpty()) aliases.add(alias.trim());
         }
-        return found;
+        return new ArrayList<>(aliases);
+    }
+
+    static String aliasForIdentity(Context c, List<String> identityKeys) {
+        ArrayList<String> aliases = aliasesForIdentity(c, identityKeys);
+        if (aliases.isEmpty()) return null;
+        if (aliases.size() > 1) {
+            appendLog(c, "자동복구 식별자 충돌 감지 · 자동 연결 거부");
+            return null;
+        }
+        return aliases.get(0);
     }
 
     static boolean hasBindingForAlias(Context c, String alias) {
@@ -127,6 +132,24 @@ final class Prefs {
             if (value instanceof String && wanted.equalsIgnoreCase(((String) value).trim())) return true;
         }
         return false;
+    }
+
+    static String bindingHintForAlias(Context c, String alias) {
+        ensureLabelSchema(c);
+        if (alias == null || alias.trim().isEmpty()) return "";
+        String wanted = alias.trim();
+        ArrayList<String> matches = new ArrayList<>();
+        for (Map.Entry<String, ?> entry : p(c).getAll().entrySet()) {
+            if (!entry.getKey().startsWith(BINDING_PREFIX)) continue;
+            Object value = entry.getValue();
+            if (value instanceof String && wanted.equalsIgnoreCase(((String) value).trim())) {
+                matches.add(entry.getKey().substring(BINDING_PREFIX.length()));
+            }
+        }
+        if (matches.isEmpty()) return "";
+        Collections.sort(matches);
+        String value = matches.get(0).toUpperCase();
+        return value.length() <= 6 ? value : value.substring(0, 6);
     }
 
     static boolean removeBindingsForAlias(Context c, String alias) {
@@ -159,20 +182,23 @@ final class Prefs {
 
     static void markRoomConfirmed(Context c, String room) {
         ensureLabelSchema(c);
-        if (room == null || room.trim().isEmpty()) return;
-        p(c).edit().putLong(CONFIRMED_PREFIX + digest(room.trim().toLowerCase()), System.currentTimeMillis()).apply();
+        String normalized = RoomRouting.normalizeTitle(room);
+        if (normalized.isEmpty()) return;
+        p(c).edit().putLong(CONFIRMED_PREFIX + digest(normalized), System.currentTimeMillis()).apply();
     }
 
     static boolean isRoomConfirmed(Context c, String room) {
         ensureLabelSchema(c);
-        if (room == null || room.trim().isEmpty()) return false;
-        return p(c).contains(CONFIRMED_PREFIX + digest(room.trim().toLowerCase()));
+        String normalized = RoomRouting.normalizeTitle(room);
+        if (normalized.isEmpty()) return false;
+        return p(c).contains(CONFIRMED_PREFIX + digest(normalized));
     }
 
     static void clearRoomConfirmed(Context c, String room) {
         ensureLabelSchema(c);
-        if (room == null || room.trim().isEmpty()) return;
-        p(c).edit().remove(CONFIRMED_PREFIX + digest(room.trim().toLowerCase())).apply();
+        String normalized = RoomRouting.normalizeTitle(room);
+        if (normalized.isEmpty()) return;
+        p(c).edit().remove(CONFIRMED_PREFIX + digest(normalized)).apply();
     }
 
     static void clearBindingsAndLabels(Context c) {

@@ -174,8 +174,8 @@ final class KakaoMessageSender {
             lastError = "안전 차단: 선택 방과 검증 세션 이름이 다름";
             return false;
         }
-        String mapped = Prefs.aliasForIdentity(context, target.stableIdentityKeys);
-        if (mapped != null && !same(mapped, requested)) {
+        ArrayList<String> aliases = Prefs.aliasesForIdentity(context, target.stableIdentityKeys);
+        if (aliases.size() > 1 || (aliases.size() == 1 && !same(aliases.get(0), requested))) {
             lastError = "안전 차단: 저장된 방 식별자 충돌 감지";
             return false;
         }
@@ -213,6 +213,6 @@ final class KakaoMessageSender {
     }
 
     private static boolean same(String a, String b) {
-        return a != null && b != null && a.trim().equalsIgnoreCase(b.trim());
+        return RoomRouting.sameTitle(a, b);
     }
 }

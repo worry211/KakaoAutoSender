@@ -47,6 +47,7 @@ public class MainActivityV4 extends Activity {
 
     private LinearLayout roomList;
     private TextView masterStatus;
+    private TextView masterBadge;
     private TextView systemStatus;
     private TextView summaryRooms;
     private TextView summaryEnabled;
@@ -120,7 +121,8 @@ public class MainActivityV4 extends Activity {
         TextView statusCaption = text("AUTOMATION STATUS", 9, true, Color.rgb(123, 138, 168));
         statusCaption.setLetterSpacing(0.1f);
         statusHeader.addView(statusCaption, weight());
-        statusHeader.addView(pill("PROTECTED", Color.rgb(25, 49, 42), Color.rgb(122, 231, 176)));
+        masterBadge = pill("READY", Color.rgb(32, 43, 68), Color.rgb(172, 190, 255));
+        statusHeader.addView(masterBadge);
         masterCard.addView(statusHeader);
 
         masterStatus = text("", 22, true, TEXT);
@@ -132,9 +134,11 @@ public class MainActivityV4 extends Activity {
         LinearLayout masterButtons = new LinearLayout(this);
         masterButtons.setOrientation(LinearLayout.HORIZONTAL);
         startButton = primaryButton("자동전송 시작");
+        startButton.setContentDescription("전체 자동전송 시작 또는 설정 계속하기");
         startButton.setOnClickListener(v -> startAll());
         masterButtons.addView(startButton, new LinearLayout.LayoutParams(0, dp(54), 1.55f));
         stopButton = dangerSecondaryButton("전체 중단");
+        stopButton.setContentDescription("실행 중인 모든 자동전송 즉시 중단");
         stopButton.setOnClickListener(v -> stopAll());
         LinearLayout.LayoutParams stopLp = new LinearLayout.LayoutParams(0, dp(54), 1f);
         stopLp.leftMargin = dp(8);
@@ -246,22 +250,59 @@ public class MainActivityV4 extends Activity {
         boolean listener = KakaoNotificationListener.isListenerConnected();
         boolean exact = SendScheduler.canUseExact(this);
         ArrayList<MultiRoomStore.Profile> profiles = MultiRoomStore.list(this);
+        int enabled = MultiRoomStore.enabledCount(this);
+        int ready = MultiRoomStore.readyCount(this);
+        int usable = 0;
+        for (MultiRoomStore.Profile p : profiles) {
+            if (p.enabled && RoomMediaStore.hasPayload(this, p)) usable++;
+        }
 
-        masterStatus.setText(active ? "자동전송 실행 중" : "자동전송 대기");
-        masterStatus.setTextColor(active ? GREEN : TEXT);
+        if (active && usable > 0 && ready < usable) {
+            masterStatus.setText("자동전송 실행 중 · 연결 대기");
+            masterStatus.setTextColor(AMBER);
+            stylePill(masterBadge, "WAIT", Color.rgb(55, 45, 27), AMBER);
+        } else if (active) {
+            masterStatus.setText("자동전송 실행 중");
+            masterStatus.setTextColor(GREEN);
+            stylePill(masterBadge, "LIVE", Color.rgb(25, 49, 42), Color.rgb(122, 231, 176));
+        } else if (!access) {
+            masterStatus.setText("알림 접근 권한이 필요합니다");
+            masterStatus.setTextColor(AMBER);
+            stylePill(masterBadge, "SETUP", Color.rgb(55, 45, 27), AMBER);
+        } else if (!listener) {
+            masterStatus.setText("카카오 연결을 기다리는 중");
+            masterStatus.setTextColor(AMBER);
+            stylePill(masterBadge, "WAIT", Color.rgb(55, 45, 27), AMBER);
+        } else if (usable == 0) {
+            masterStatus.setText("방 설정을 완료하세요");
+            masterStatus.setTextColor(TEXT);
+            stylePill(masterBadge, "SETUP", Color.rgb(45, 49, 59), Color.rgb(180, 190, 211));
+        } else {
+            masterStatus.setText("자동전송 준비됨");
+            masterStatus.setTextColor(TEXT);
+            stylePill(masterBadge, "READY", Color.rgb(32, 43, 68), Color.rgb(172, 190, 255));
+        }
+
         StringBuilder system = new StringBuilder();
         system.append("라이선스 ").append(LicenseManager.shortStatus(this));
         system.append("  ·  알림 접근 ").append(access ? "정상" : "권한 필요");
-        system.append("  ·  리스너 ").append(listener ? "정상" : "대기");
-        if (Build.VERSION.SDK_INT >= 31) system.append("\n정확 시각 ").append(exact ? "사용 가능" : "선택사항 · 근사 시각 사용");
+        system.append("\n카카오 연결 ").append(listener ? "정상" : "대기");
+        if (Build.VERSION.SDK_INT >= 31) {
+            system.append("  ·  예약 정확도 ").append(exact ? "정확 시각" : "근사 시각");
+        }
         system.append("  ·  연결 방 ").append(profiles.size()).append("개");
         String notice = LicenseManager.updateNotice(this);
         if (notice != null && !notice.trim().isEmpty()) system.append("\n").append(notice.trim());
         systemStatus.setText(system.toString());
+        systemStatus.setTextColor(!access || !listener ? AMBER : Color.rgb(181, 191, 210));
 
         startButton.setEnabled(!active);
         stopButton.setEnabled(active);
-        startButton.setAlpha(active ? 0.46f : 1f);
+        if (active) startButton.setText("자동전송 실행 중");
+        else if (!access) startButton.setText("알림 접근 필요");
+        else if (usable == 0) startButton.setText("방 설정을 완료하세요");
+        else startButton.setText("자동전송 시작");
+        startButton.setAlpha(startButton.isEnabled() ? 1f : 0.46f);
         stopButton.setAlpha(active ? 1f : 0.46f);
 
         roomList.removeAllViews();
@@ -285,8 +326,6 @@ public class MainActivityV4 extends Activity {
             for (MultiRoomStore.Profile p : profiles) roomList.addView(roomCard(p), top(8));
         }
 
-        int ready = MultiRoomStore.readyCount(this);
-        int enabled = MultiRoomStore.enabledCount(this);
         long next = MultiRoomStore.nextDueAt(this);
         summaryRooms.setText(String.valueOf(profiles.size()));
         summaryEnabled.setText(String.valueOf(enabled));
@@ -334,6 +373,13 @@ public class MainActivityV4 extends Activity {
                 p.enabled ? Color.rgb(130, 232, 180) : Color.rgb(162, 171, 190)));
         card.addView(titleRow);
 
+        if (MultiRoomStore.sameTitleCount(this, p.actualRoomName) > 1) {
+            String hint = Prefs.bindingHintForAlias(this, p.room);
+            card.addView(text(hint.isEmpty() ? "같은 제목의 별도 방 · 현재 세션으로 구분"
+                            : "같은 제목의 별도 방 · 구분 #" + hint,
+                    10, true, hint.isEmpty() ? AMBER : Color.rgb(153, 170, 209)), top(6));
+        }
+
         String connectionText = live ? "연결됨" : stored ? "복구 대기" : "연결 필요";
         int connectionBg = live ? Color.rgb(24, 50, 42) : stored ? Color.rgb(55, 45, 27) : Color.rgb(58, 31, 36);
         int connectionFg = live ? GREEN : stored ? AMBER : RED;
@@ -361,6 +407,15 @@ public class MainActivityV4 extends Activity {
         String failure = p.failureStreak > 0 ? "  ·  최근 실패 " + p.failureStreak + "회" : "";
         TextView meta = text(count + next + failure, 11, false, Color.rgb(133, 146, 169));
         card.addView(meta, top(8));
+
+        String recent = p.lastSuccessAt > 0
+                ? "최근 성공  ·  " + formatDateTime(p.lastSuccessAt)
+                : p.failureStreak > 0
+                    ? "최근 전송 확인 필요  ·  실패 " + p.failureStreak + "회"
+                    : "최근 전송 기록 없음";
+        TextView recentView = text(recent, 10, false,
+                p.failureStreak > 0 ? AMBER : Color.rgb(112, 126, 151));
+        card.addView(recentView, top(6));
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -405,13 +460,13 @@ public class MainActivityV4 extends Activity {
 
         TextView description = text(
                 manual ? "최근 답장 가능한 카카오 알림을 확인해 직접 연결합니다."
-                        : "최근 감지된 카카오 방입니다. 검색하거나 방을 눌러 연결하세요.",
+                        : "최근 감지된 카카오 방입니다. 같은 제목도 고유 식별자가 있으면 각각 구분합니다.",
                 12, false, Color.rgb(158, 170, 194));
         content.addView(description);
 
         EditText search = new EditText(this);
         search.setSingleLine(true);
-        search.setHint("방 이름 검색");
+        search.setHint("방 이름 또는 구분 코드 검색");
         search.setHintTextColor(Color.rgb(102, 114, 137));
         search.setTextColor(TEXT);
         search.setTextSize(14);
@@ -438,9 +493,7 @@ public class MainActivityV4 extends Activity {
         if (!manual) {
             Button advanced = tertiaryButton("최근 알림에서 직접 연결");
             content.addView(advanced, top(10));
-            advanced.setOnClickListener(v -> {
-                showAdvancedManualAdd();
-            });
+            advanced.setOnClickListener(v -> showAdvancedManualAdd());
         }
 
         AlertDialog dialog = new AlertDialog.Builder(this)
@@ -459,6 +512,14 @@ public class MainActivityV4 extends Activity {
         dialog.show();
     }
 
+    private int candidateTitleCount(ArrayList<KakaoNotificationListener.SessionEntry> entries, String room) {
+        int result = 0;
+        for (KakaoNotificationListener.SessionEntry entry : entries) {
+            if (entry != null && RoomRouting.sameTitle(room, entry.suggestedRoom)) result++;
+        }
+        return result;
+    }
+
     private void renderCandidateRows(
             LinearLayout rows,
             TextView count,
@@ -467,33 +528,71 @@ public class MainActivityV4 extends Activity {
             AlertDialog dialog,
             boolean manual) {
         rows.removeAllViews();
-        String normalized = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        String normalized = RoomRouting.normalizeTitle(query);
         int shown = 0;
         for (KakaoNotificationListener.SessionEntry entry : entries) {
             String room = entry.suggestedRoom == null ? "" : entry.suggestedRoom.trim();
             if (!manual && room.isEmpty()) continue;
-            String searchable = room.toLowerCase(Locale.ROOT);
+            String searchable = RoomRouting.normalizeTitle(room + " " + entry.identityCode);
             if (!normalized.isEmpty() && !searchable.contains(normalized)) continue;
             shown++;
+
+            String mappedAlias = KakaoNotificationListener.mappedAliasForToken(this, entry.token);
+            String liveAlias = KakaoNotificationListener.liveAliasForToken(entry.token);
+            boolean conflict = KakaoNotificationListener.identityBindingConflictForToken(this, entry.token);
+            boolean duplicateTitle = candidateTitleCount(entries, room) > 1
+                    || (!room.isEmpty() && MultiRoomStore.sameTitleCount(this, room) > 0);
+            boolean recover = mappedAlias != null || liveAlias != null;
 
             LinearLayout row = card(SURFACE_2, BORDER, 14);
             row.setClickable(true);
             row.setFocusable(true);
-            boolean existing = !room.isEmpty() && !MultiRoomStore.findByActualName(this, room).isEmpty();
             LinearLayout rowTop = new LinearLayout(this);
             rowTop.setOrientation(LinearLayout.HORIZONTAL);
             rowTop.setGravity(Gravity.CENTER_VERTICAL);
             TextView name = text(room.isEmpty() ? "방 이름 미확인" : room, 15, true, TEXT);
             name.setMaxLines(2);
             rowTop.addView(name, weight());
-            rowTop.addView(pill(manual ? "확인" : existing ? "복구" : "연결",
-                    existing ? Color.rgb(25, 49, 42) : Color.rgb(29, 38, 65),
-                    existing ? GREEN : Color.rgb(180, 195, 255)));
+
+            String badge = conflict ? "식별 충돌"
+                    : recover ? "복구"
+                    : duplicateTitle && entry.persistentIdentity ? "동일 제목 · 구분됨"
+                    : duplicateTitle ? "동일 제목 · 확인 필요"
+                    : manual ? "확인" : "연결";
+            int badgeBg = conflict ? Color.rgb(58, 31, 36)
+                    : recover ? Color.rgb(25, 49, 42)
+                    : duplicateTitle && !entry.persistentIdentity ? Color.rgb(55, 45, 27)
+                    : Color.rgb(29, 38, 65);
+            int badgeFg = conflict ? RED
+                    : recover ? GREEN
+                    : duplicateTitle && !entry.persistentIdentity ? AMBER
+                    : Color.rgb(180, 195, 255);
+            rowTop.addView(pill(badge, badgeBg, badgeFg));
             row.addView(rowTop);
-            String meta = manual ? "알림에 표시된 방 이름을 확인한 뒤 연결합니다."
-                    : existing ? "기존 등록 방 · 현재 답장 연결만 복구합니다."
-                    : "새 방 후보 · 선택하면 방별 설정 화면으로 이동합니다.";
-            row.addView(text(meta, 11, false, existing ? GREEN : Color.rgb(125, 139, 166)), top(6));
+
+            String meta = conflict
+                    ? "하나의 카카오 고유 식별자가 여러 등록 방에 연결되어 있어 자동 연결을 차단합니다."
+                    : recover
+                    ? "이미 확인된 카카오 방입니다. 현재 답장 세션만 안전하게 복구합니다."
+                    : duplicateTitle && entry.persistentIdentity
+                    ? "같은 제목이지만 카카오 고유 식별자가 달라 별도 방으로 구분됩니다."
+                    : duplicateTitle
+                    ? "고유 식별자가 없어 같은 제목의 방을 확정할 수 없으면 전송을 차단합니다."
+                    : entry.persistentIdentity
+                    ? "카카오 고유 식별자 확인됨 · 재실행 후에도 안전 복구할 수 있습니다."
+                    : manual
+                    ? "알림에 표시된 방 이름을 확인한 뒤 현재 세션에 연결합니다."
+                    : "현재 알림 세션 기준 · 재연결 시 새 메시지가 필요할 수 있습니다.";
+            row.addView(text(meta, 11, false,
+                    conflict ? RED : duplicateTitle && !entry.persistentIdentity ? AMBER : Color.rgb(125, 139, 166)), top(6));
+            if (entry.observedAt > 0L) {
+                String signal = ageLabel(entry.observedAt) + " · 신뢰도 " + confidenceLabel(entry.confidence);
+                if (duplicateTitle && !entry.identityCode.isEmpty()) {
+                    signal += entry.persistentIdentity ? " · 구분 #" + entry.identityCode : " · 세션 #" + entry.identityCode;
+                }
+                row.addView(text(signal, 10, false, Color.rgb(105, 119, 145)), top(5));
+            }
+            row.setContentDescription((room.isEmpty() ? "방 이름 미확인" : room) + " · " + badge);
             final KakaoNotificationListener.SessionEntry selected = entry;
             row.setOnClickListener(v -> {
                 dialog.dismiss();
@@ -505,7 +604,7 @@ public class MainActivityV4 extends Activity {
         if (shown == 0) {
             LinearLayout empty = card(Color.rgb(14, 18, 27), Color.rgb(35, 44, 61), 14);
             empty.addView(text("검색 결과가 없습니다.", 13, true, Color.rgb(197, 207, 228)));
-            empty.addView(text("방 이름을 다시 확인하거나 검색어를 지워 주세요.", 11, false, Color.rgb(119, 132, 156)), top(5));
+            empty.addView(text("방 이름이나 구분 코드를 다시 확인하거나 검색어를 지워 주세요.", 11, false, Color.rgb(119, 132, 156)), top(5));
             rows.addView(empty, top(6));
         }
     }
@@ -516,30 +615,117 @@ public class MainActivityV4 extends Activity {
             return;
         }
         final String actualName = entry.suggestedRoom.trim();
+        String detail = actualName;
+        if ((MultiRoomStore.sameTitleCount(this, actualName) > 0) && !entry.identityCode.isEmpty()) {
+            detail += "\n" + (entry.persistentIdentity ? "구분 #" : "세션 #") + entry.identityCode;
+        }
         new AlertDialog.Builder(this)
                 .setTitle("방 연결 확인")
-                .setMessage(actualName + "\n\n이 방을 자동전송 목록에 연결할까요?")
+                .setMessage(detail + "\n\n이 카카오 방을 자동전송 목록에 연결할까요?")
                 .setPositiveButton("연결", (d, w) -> connectCandidate(entry, actualName))
                 .setNegativeButton("취소", null)
                 .show();
     }
 
     private void connectCandidate(KakaoNotificationListener.SessionEntry entry, String actualName) {
-        ArrayList<MultiRoomStore.Profile> existing = MultiRoomStore.findByActualName(this, actualName);
-        if (existing.size() == 1) {
-            MultiRoomStore.Profile p = existing.get(0);
-            boolean ok = KakaoNotificationListener.bindRecentTokenToRoom(this, entry.token, p.room);
-            if (!ok) {
-                toast("알림 세션이 만료되었습니다. 방에서 새 메시지를 받은 뒤 다시 시도해 주세요.");
-                return;
-            }
-            openEditor(p.room);
+        if (entry == null || actualName == null || actualName.trim().isEmpty()) return;
+        actualName = actualName.trim();
+
+        if (KakaoNotificationListener.identityBindingConflictForToken(this, entry.token)) {
+            connectionBlocked("방 식별자 충돌이 감지되었습니다",
+                    "같은 카카오 고유 식별자가 여러 등록 방에 연결되어 있습니다. 오배송 방지를 위해 연결하지 않았습니다. ‘연결 초기화’ 후 대상 방에서 새 메시지를 받아 다시 연결해 주세요.");
             return;
         }
 
-        String routeAlias = "route-" + UUID.randomUUID();
+        String mappedAlias = KakaoNotificationListener.mappedAliasForToken(this, entry.token);
+        if (mappedAlias != null) {
+            MultiRoomStore.Profile mapped = MultiRoomStore.get(this, mappedAlias);
+            if (mapped != null && bindAndOpen(entry, mapped)) {
+                if (!RoomRouting.sameTitle(mapped.actualRoomName, actualName)) {
+                    toast("같은 카카오 방이 다른 이름으로 감지되어 기존 등록 방으로 통합했습니다.");
+                }
+                return;
+            }
+            connectionBlocked("중복 연결을 차단했습니다",
+                    "이 카카오 방은 이미 다른 등록 정보와 연결되어 있습니다. 기존 방 설정을 확인하거나 연결 정보를 초기화한 뒤 다시 시도해 주세요.");
+            return;
+        }
+
+        String liveAlias = KakaoNotificationListener.liveAliasForToken(entry.token);
+        if (liveAlias != null) {
+            MultiRoomStore.Profile live = MultiRoomStore.get(this, liveAlias);
+            if (live != null && bindAndOpen(entry, live)) {
+                if (!RoomRouting.sameTitle(live.actualRoomName, actualName)) {
+                    toast("동일 알림 세션이 다른 이름으로 감지되어 기존 방으로 통합했습니다.");
+                }
+                return;
+            }
+            connectionBlocked("같은 방의 중복 등록을 차단했습니다",
+                    "현재 카카오 알림 세션이 이미 다른 등록 방에 연결되어 있습니다. 새 항목을 만들지 않았습니다.");
+            return;
+        }
+
+        ArrayList<MultiRoomStore.Profile> sameName = MultiRoomStore.findByActualName(this, actualName);
+        if (entry.persistentIdentity) {
+            ArrayList<MultiRoomStore.Profile> unbound = new ArrayList<>();
+            for (MultiRoomStore.Profile p : sameName) {
+                if (!KakaoNotificationListener.hasStoredBinding(this, p.room)) unbound.add(p);
+            }
+            if (unbound.size() == 1) {
+                if (bindAndOpen(entry, unbound.get(0))) return;
+                connectionBlocked("방 연결을 확인할 수 없습니다",
+                        "기존 설정과 카카오 고유 식별자가 충돌해 연결하지 않았습니다. 대상 방에서 새 메시지를 받은 뒤 다시 시도해 주세요.");
+                return;
+            }
+            if (unbound.size() > 1) {
+                connectionBlocked("같은 제목의 기존 설정이 여러 개 있습니다",
+                        "어느 설정을 이어받아야 하는지 안전하게 판단할 수 없습니다. 불필요한 중복 방을 정리한 뒤 다시 연결해 주세요.");
+                return;
+            }
+
+            String routeAlias = "route-" + entry.identityFingerprint.substring(0, Math.min(24, entry.identityFingerprint.length()));
+            MultiRoomStore.Profile deterministic = MultiRoomStore.get(this, routeAlias);
+            if (deterministic != null) {
+                if (bindAndOpen(entry, deterministic)) return;
+                connectionBlocked("방 고유 식별자 연결을 확인할 수 없습니다",
+                        "기존 방 정보와 현재 카카오 알림이 일치하지 않아 안전상 연결하지 않았습니다.");
+                return;
+            }
+            createAndOpen(entry, routeAlias, actualName);
+            return;
+        }
+
+        if (sameName.size() == 1) {
+            MultiRoomStore.Profile existing = sameName.get(0);
+            if (KakaoNotificationListener.hasStoredBinding(this, existing.room)) {
+                connectionBlocked("같은 제목의 방을 구분할 정보가 부족합니다",
+                        "기존 방에는 카카오 고유 식별자가 있지만 현재 알림에는 고유 식별자가 없습니다. 잘못된 방 전송을 막기 위해 자동 연결하지 않았습니다. 대상 방에서 새 메시지를 다시 받아 주세요.");
+                return;
+            }
+            if (bindAndOpen(entry, existing)) return;
+            connectionBlocked("방 연결을 확인할 수 없습니다",
+                    "현재 알림 세션이 다른 방과 겹쳐 보여 새 방을 만들지 않았습니다.");
+            return;
+        }
+        if (sameName.size() > 1) {
+            connectionBlocked("같은 제목의 방을 안전하게 구분할 수 없습니다",
+                    "현재 알림에는 카카오 고유 식별자가 없어 같은 제목의 여러 방 중 대상을 확정할 수 없습니다. 오배송 방지를 위해 연결을 차단했습니다.");
+            return;
+        }
+        createAndOpen(entry, "route-" + UUID.randomUUID(), actualName);
+    }
+
+    private boolean bindAndOpen(KakaoNotificationListener.SessionEntry entry, MultiRoomStore.Profile profile) {
+        if (profile == null) return false;
+        if (!KakaoNotificationListener.bindRecentTokenToRoom(this, entry.token, profile.room)) return false;
+        openEditor(profile.room);
+        return true;
+    }
+
+    private void createAndOpen(KakaoNotificationListener.SessionEntry entry, String routeAlias, String actualName) {
         if (!KakaoNotificationListener.bindRecentTokenToRoom(this, entry.token, routeAlias)) {
-            toast("알림 세션이 만료되었습니다. 방에서 새 메시지를 받은 뒤 다시 시도해 주세요.");
+            connectionBlocked("방 연결을 안전하게 완료하지 못했습니다",
+                    "알림 세션이 만료되었거나 동일 카카오 방의 중복 연결이 감지되었습니다. 대상 방에서 새 메시지를 하나 받은 뒤 다시 시도해 주세요.");
             return;
         }
         MultiRoomStore.Profile p = new MultiRoomStore.Profile(routeAlias);
@@ -547,6 +733,14 @@ public class MainActivityV4 extends Activity {
         p.displayName = actualName;
         MultiRoomStore.upsert(this, p);
         openEditor(routeAlias);
+    }
+
+    private void connectionBlocked(String title, String message) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton("확인", null)
+                .show();
     }
 
     private void showAdvancedManualAdd() {
@@ -569,20 +763,12 @@ public class MainActivityV4 extends Activity {
         if (entry.suggestedRoom != null) input.setText(entry.suggestedRoom);
         new AlertDialog.Builder(this)
                 .setTitle("방 이름 직접 확인")
-                .setMessage("오배송을 막기 위해 카카오 알림에 표시된 방 이름을 그대로 입력해 주세요.")
+                .setMessage("오배송을 막기 위해 카카오 알림에 표시된 방 이름을 그대로 입력해 주세요. 같은 제목은 고유 식별자가 있을 때만 자동으로 구분합니다.")
                 .setView(input)
                 .setPositiveButton("연결", (d, w) -> {
                     String actualName = input.getText().toString().trim();
                     if (actualName.isEmpty()) { toast("방 이름을 입력해 주세요."); return; }
-                    String routeAlias = "route-" + UUID.randomUUID();
-                    if (!KakaoNotificationListener.bindRecentTokenToRoom(this, entry.token, routeAlias)) {
-                        toast("알림 세션이 만료되었습니다."); return;
-                    }
-                    MultiRoomStore.Profile p = new MultiRoomStore.Profile(routeAlias);
-                    p.actualRoomName = actualName;
-                    p.displayName = actualName;
-                    MultiRoomStore.upsert(this, p);
-                    openEditor(routeAlias);
+                    connectCandidate(entry, actualName);
                 })
                 .setNegativeButton("취소", null)
                 .show();
@@ -638,7 +824,13 @@ public class MainActivityV4 extends Activity {
 
     private void startAuthorized() {
         if (!isNotificationAccessEnabled()) {
-            toast("알림 접근 권한을 먼저 허용해 주세요.");
+            new AlertDialog.Builder(this)
+                    .setTitle("알림 접근 권한이 필요합니다")
+                    .setMessage("카카오톡의 답장 세션을 안전하게 확인하려면 알림 접근 권한이 필요합니다. 권한을 허용한 뒤 대상 방에서 새 메시지를 하나 받아 주세요.")
+                    .setPositiveButton("권한 설정 열기", (d, w) ->
+                            startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)))
+                    .setNegativeButton("나중에", null)
+                    .show();
             return;
         }
         ArrayList<MultiRoomStore.Profile> profiles = MultiRoomStore.list(this);
@@ -650,9 +842,35 @@ public class MainActivityV4 extends Activity {
             if (KakaoNotificationListener.hasLiveSession(p.room)) ready++;
         }
         if (usable == 0) {
-            toast("사용 중이며 메시지가 저장된 방이 없습니다.");
+            AlertDialog.Builder setup = new AlertDialog.Builder(this)
+                    .setTitle("자동전송 방 설정이 필요합니다")
+                    .setMessage(profiles.isEmpty()
+                            ? "자동전송할 카카오 방을 먼저 연결하고 메시지 또는 사진과 전송 스케줄을 저장해 주세요."
+                            : "연결된 방에 메시지 또는 사진과 전송 스케줄을 저장해 주세요.")
+                    .setNegativeButton("닫기", null);
+            if (profiles.isEmpty()) {
+                setup.setPositiveButton("새 방 연결", (d, w) -> showAddCandidates());
+            } else {
+                setup.setPositiveButton("방 설정 열기", (d, w) -> openEditor(profiles.get(0).room));
+            }
+            setup.show();
             return;
         }
+        final int usableCount = usable;
+        final int readyCount = ready;
+        if (ready < usable) {
+            new AlertDialog.Builder(this)
+                    .setTitle("일부 방이 연결 대기 중입니다")
+                    .setMessage("사용할 방 " + usable + "개 중 현재 " + ready + "개가 즉시 전송 가능합니다.\n\n연결 대기 방은 해당 카카오 방에서 새 메시지를 받으면 복구됩니다.")
+                    .setPositiveButton("대기 방 포함 시작", (d, w) -> commitStart(usableCount, readyCount))
+                    .setNegativeButton("취소", null)
+                    .show();
+            return;
+        }
+        commitStart(usable, ready);
+    }
+
+    private void commitStart(int usable, int ready) {
         synchronized (DeliveryGate.LOCK) {
             if (!LicenseManager.isUsable(this)) { LicenseManager.route(this); return; }
             Prefs.p(this).edit().putBoolean(Prefs.KEY_ACTIVE, true).commit();
@@ -745,6 +963,22 @@ public class MainActivityV4 extends Activity {
         catch (Exception e) { return "?"; }
     }
 
+    private String ageLabel(long observedAt) {
+        long age = Math.max(0L, System.currentTimeMillis() - observedAt);
+        if (age < 60_000L) return "방금 감지";
+        long minutes = age / 60_000L;
+        if (minutes < 60L) return minutes + "분 전 감지";
+        long hours = minutes / 60L;
+        if (hours < 24L) return hours + "시간 전 감지";
+        return new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(observedAt)) + " 감지";
+    }
+
+    private String confidenceLabel(int confidence) {
+        if (confidence >= 3) return "높음";
+        if (confidence >= 2) return "중간";
+        return "낮음";
+    }
+
     private String formatTime(long ms) {
         return new SimpleDateFormat("HH:mm", Locale.KOREA).format(new Date(ms));
     }
@@ -793,6 +1027,13 @@ public class MainActivityV4 extends Activity {
         v.setPadding(dp(9), dp(6), dp(9), dp(6));
         v.setBackground(roundStroke(bg, Color.rgb(62, 73, 96), 14));
         return v;
+    }
+
+    private void stylePill(TextView view, String value, int bg, int fg) {
+        if (view == null) return;
+        view.setText(value);
+        view.setTextColor(fg);
+        view.setBackground(roundStroke(bg, Color.rgb(62, 73, 96), 14));
     }
 
     private TextView text(String value, int sp, boolean bold, int color) {

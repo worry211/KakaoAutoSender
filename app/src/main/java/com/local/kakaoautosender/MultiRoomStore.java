@@ -134,7 +134,7 @@ final class MultiRoomStore {
         for (Profile p : profiles) changed |= normalizeDailyCount(p);
         profiles.sort(Comparator
                 .comparing((Profile p) -> !p.enabled)
-                .thenComparing(p -> p.title().toLowerCase(Locale.ROOT)));
+                .thenComparing(p -> normalize(p.title())));
         if (changed) writeRaw(context, profiles);
         ArrayList<Profile> result = new ArrayList<>();
         for (Profile p : profiles) result.add(p.copy());
@@ -158,6 +158,10 @@ final class MultiRoomStore {
             if (normalize(p.actualRoomName).equals(wanted)) result.add(p);
         }
         return result;
+    }
+
+    static synchronized int sameTitleCount(Context context, String actualRoomName) {
+        return findByActualName(context, actualRoomName).size();
     }
 
     static synchronized void upsert(Context context, Profile profile) {
@@ -478,6 +482,6 @@ final class MultiRoomStore {
         }
     }
 
-    private static String normalize(String s) { return safe(s).trim().toLowerCase(Locale.ROOT); }
+    private static String normalize(String s) { return RoomRouting.normalizeTitle(s); }
     private static String safe(String s) { return s == null ? "" : s; }
 }

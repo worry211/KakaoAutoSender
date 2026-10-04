@@ -10,7 +10,9 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.webkit.MimeTypeMap;
@@ -57,9 +59,15 @@ public class RoomEditorActivity extends Activity {
     private LinearLayout intervalBox;
     private LinearLayout timesBox;
     private TextView connectionStatus;
+    private TextView executionStatus;
     private TextView nextPreview;
     private TextView imageStatus;
+    private TextView messageCount;
+    private TextView dirtyStatus;
+    private Button saveButton;
     private android.widget.ImageView imagePreview;
+    private boolean loading;
+    private boolean dirty;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -71,7 +79,11 @@ public class RoomEditorActivity extends Activity {
         MultiRoomStore.ensureMigrated(this);
         if (MultiRoomStore.get(this, routeAlias) == null) { finish(); return; }
         setContentView(buildUi());
+        loading = true;
         loadProfile();
+        loading = false;
+        installDirtyTracking();
+        setDirty(false);
     }
 
     @Override protected void onResume() {
@@ -80,6 +92,10 @@ public class RoomEditorActivity extends Activity {
         refreshConnection();
         refreshMedia();
         refreshNextPreview();
+    }
+
+    @Override public void onBackPressed() {
+        requestClose();
     }
 
     private View buildUi() {
@@ -124,6 +140,9 @@ public class RoomEditorActivity extends Activity {
         connectionCard.addView(connectionTop);
         connectionStatus = text("", 14, true, TEXT);
         connectionCard.addView(connectionStatus, top(12));
+        executionStatus = text("", 11, false, Color.rgb(130, 143, 166));
+        executionStatus.setLineSpacing(0, 1.14f);
+        connectionCard.addView(executionStatus, top(7));
         Button reconnect = secondaryButton("이 방 연결 다시 확인");
         reconnect.setOnClickListener(v -> reconnectRoom());
         connectionCard.addView(reconnect, top(11));
@@ -132,6 +151,9 @@ public class RoomEditorActivity extends Activity {
         root.addView(section("보낼 메시지", "실제 전송될 텍스트를 입력하세요."), top(26));
         messageInput = edit("자동으로 보낼 메시지", true);
         root.addView(messageInput, top(10));
+        messageCount = text("0자", 10, false, Color.rgb(112, 126, 151));
+        messageCount.setGravity(Gravity.END);
+        root.addView(messageCount, top(5));
 
         root.addView(section("이미지 첨부", "선택 사항 · 지원되는 카카오 답장 액션에서만 전송됩니다."), top(26));
         LinearLayout imageCard = card(SURFACE, BORDER, 18);
@@ -217,6 +239,7 @@ public class RoomEditorActivity extends Activity {
         modes.setOnCheckedChangeListener((group, checkedId) -> {
             updateScheduleVisibility();
             refreshNextPreview();
+            markDirty();
         });
 
         nextPreview = text("", 12, true, Color.rgb(164, 182, 255));
@@ -236,7 +259,10 @@ public class RoomEditorActivity extends Activity {
         unlimitedCheck = new CheckBox(this);
         unlimitedCheck.setText("무제한");
         unlimitedCheck.setTextColor(TEXT);
-        unlimitedCheck.setOnCheckedChangeListener((b, checked) -> dailyLimitInput.setEnabled(!checked));
+        unlimitedCheck.setOnCheckedChangeListener((b, checked) -> {
+            dailyLimitInput.setEnabled(!checked);
+            markDirty();
+        });
         LinearLayout.LayoutParams uLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         uLp.leftMargin = dp(12);
@@ -254,14 +280,16 @@ public class RoomEditorActivity extends Activity {
         TextView actionTitle = text("변경 사항", 11, true, Color.rgb(128, 142, 169));
         actionTitle.setLetterSpacing(0.06f);
         actionCard.addView(actionTitle);
-        Button save = primaryButton("설정 저장");
-        save.setOnClickListener(v -> saveProfile(true));
-        actionCard.addView(save, top(11));
+        dirtyStatus = text("모든 변경 사항이 저장되었습니다.", 11, false, Color.rgb(119, 132, 156));
+        actionCard.addView(dirtyStatus, top(6));
+        saveButton = primaryButton("설정 저장");
+        saveButton.setOnClickListener(v -> saveProfile(true));
+        actionCard.addView(saveButton, top(11));
         Button test = positiveSecondaryButton("지금 1회 테스트 전송");
         test.setOnClickListener(v -> testSend());
         actionCard.addView(test, top(8));
         Button back = secondaryButton("대시보드로 돌아가기");
-        back.setOnClickListener(v -> finish());
+        back.setOnClickListener(v -> requestClose());
         actionCard.addView(back, top(8));
         root.addView(actionCard, top(26));
 
@@ -269,7 +297,7 @@ public class RoomEditorActivity extends Activity {
         delete.setOnClickListener(v -> deleteProfile());
         root.addView(delete, top(10));
 
-        TextView footer = text("설정 저장 전에는 기존 자동전송 설정이 변경되지 않습니다.", 11, false, Color.rgb(105, 118, 141));
+        TextView footer = text("메시지·스케줄·사용 여부는 ‘설정 저장’ 전까지 적용되지 않습니다. 사진 첨부는 선택 즉시 이 방에 보관됩니다.", 11, false, Color.rgb(105, 118, 141));
         footer.setGravity(Gravity.CENTER);
         root.addView(footer, top(16));
         return scroll;
@@ -446,6 +474,7 @@ public class RoomEditorActivity extends Activity {
         if (active) SendScheduler.scheduleNext(this);
         Prefs.setStatus(this, "방 설정 저장: " + p.title() + " · " + MultiRoomStore.scheduleSummary(p));
         refreshNextPreview();
+        setDirty(false);
         if (notify) {
             toast("설정을 저장했습니다.");
             if (!p.fixedTimes() && p.intervalMinutes < 5 && p.unlimited()) {
@@ -456,31 +485,33 @@ public class RoomEditorActivity extends Activity {
     }
 
     private void testSend() {
-        if (!saveProfile(false)) return;
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
-        if (!RoomMediaStore.hasPayload(this, p)) {
-            toast("보낼 메시지를 입력해 주세요.");
+        if (p == null) return;
+        String draftMessage = messageInput.getText().toString();
+        RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
+        if (draftMessage.trim().isEmpty() && !media.hasImage()) {
+            toast("보낼 메시지 또는 사진을 먼저 설정해 주세요.");
             return;
         }
         if (!KakaoNotificationListener.hasLiveSession(routeAlias)) {
             toast("이 방 연결이 없습니다. 방에서 새 메시지를 받은 뒤 ‘연결 다시 확인’을 눌러 주세요.");
             return;
         }
-        RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
         String mediaLine = media.hasImage() ? "\n사진: " + (media.name.isEmpty() ? "첨부됨" : media.name) : "";
+        String draftLine = dirty
+                ? "\n\n저장하지 않은 현재 입력값으로만 테스트합니다. 자동전송 설정에는 저장되지 않습니다."
+                : "";
         new AlertDialog.Builder(this)
                 .setTitle("1회 테스트 전송")
-                .setMessage(p.title() + "\n\n" + p.message + mediaLine)
-                .setPositiveButton("전송", (d, w) -> {
-                    LicenseManager.runAuthorized(this, () -> {
-                        boolean ok = KakaoMessageSender.send(this, routeAlias, p.message, media);
-                        String error = KakaoMessageSender.lastError();
-                        Prefs.setStatus(this, ok ? "수동 전송 성공: " + p.title()
-                                : "수동 전송 실패: " + p.title() + " · " + error);
-                        toast(ok ? "테스트 전송에 성공했습니다." : "전송 실패: " + error);
-                        refreshConnection();
-                    });
-                })
+                .setMessage(p.title() + "\n\n" + (draftMessage.trim().isEmpty() ? "텍스트 없음" : draftMessage) + mediaLine + draftLine)
+                .setPositiveButton("전송", (d, w) -> LicenseManager.runAuthorized(this, () -> {
+                    boolean ok = KakaoMessageSender.send(this, routeAlias, draftMessage, media);
+                    String error = KakaoMessageSender.lastError();
+                    Prefs.setStatus(this, ok ? "수동 전송 성공: " + p.title()
+                            : "수동 전송 실패: " + p.title() + " · " + error);
+                    toast(ok ? "테스트 전송에 성공했습니다." : "전송 실패: " + error);
+                    refreshConnection();
+                }))
                 .setNegativeButton("취소", null)
                 .show();
     }
@@ -539,6 +570,20 @@ public class RoomEditorActivity extends Activity {
                 : stored ? "●  복구 대기 · 새 알림이 오면 자동 복구"
                 : "●  연결 필요 · 이 방에서 새 메시지를 받아 주세요");
         connectionStatus.setTextColor(live ? GREEN : stored ? AMBER : RED);
+        MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
+        if (executionStatus != null && p != null) {
+            if (p.lastSuccessAt > 0) {
+                executionStatus.setText("최근 성공  ·  " + new SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA).format(new Date(p.lastSuccessAt))
+                        + (p.failureStreak > 0 ? "  ·  이후 실패 " + p.failureStreak + "회" : ""));
+                executionStatus.setTextColor(p.failureStreak > 0 ? AMBER : Color.rgb(130, 143, 166));
+            } else if (p.failureStreak > 0) {
+                executionStatus.setText("최근 전송 실패 " + p.failureStreak + "회 · 테스트 전송으로 상태를 확인해 주세요.");
+                executionStatus.setTextColor(AMBER);
+            } else {
+                executionStatus.setText("아직 전송 기록이 없습니다. 저장 후 1회 테스트를 권장합니다.");
+                executionStatus.setTextColor(Color.rgb(130, 143, 166));
+            }
+        }
     }
 
     private void refreshNextPreview() {
@@ -561,6 +606,64 @@ public class RoomEditorActivity extends Activity {
         long next = MultiRoomStore.computeNextAt(temp, System.currentTimeMillis());
         if (!temp.fixedTimes()) next += ReliabilityTiming.intervalJitterMillis(temp, next);
         nextPreview.setText("다음 전송 기준  ·  " + new SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA).format(new Date(next)));
+    }
+
+    private void installDirtyTracking() {
+        TextWatcher watcher = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                updateMessageCount();
+                refreshNextPreview();
+                markDirty();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        };
+        messageInput.addTextChangedListener(watcher);
+        intervalInput.addTextChangedListener(watcher);
+        timesInput.addTextChangedListener(watcher);
+        dailyLimitInput.addTextChangedListener(watcher);
+        enabledCheck.setOnCheckedChangeListener((b, checked) -> markDirty());
+        updateMessageCount();
+    }
+
+    private void updateMessageCount() {
+        if (messageCount == null || messageInput == null) return;
+        int length = messageInput.getText() == null ? 0 : messageInput.getText().length();
+        messageCount.setText(length + "자");
+        messageCount.setTextColor(length > 1000 ? AMBER : Color.rgb(112, 126, 151));
+    }
+
+    private void markDirty() {
+        if (loading) return;
+        setDirty(true);
+    }
+
+    private void setDirty(boolean value) {
+        dirty = value;
+        if (dirtyStatus != null) {
+            dirtyStatus.setText(value ? "저장하지 않은 변경 사항이 있습니다." : "모든 변경 사항이 저장되었습니다.");
+            dirtyStatus.setTextColor(value ? AMBER : Color.rgb(119, 132, 156));
+        }
+        if (saveButton != null) {
+            saveButton.setText(value ? "변경 사항 저장" : "설정 저장됨");
+            saveButton.setAlpha(value ? 1f : 0.72f);
+        }
+    }
+
+    private void requestClose() {
+        if (!dirty) {
+            finish();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("저장하지 않은 변경 사항이 있습니다")
+                .setMessage("대시보드로 돌아가면 메시지·스케줄·사용 여부의 변경 사항이 사라집니다.")
+                .setPositiveButton("저장 후 돌아가기", (d, w) -> {
+                    if (saveProfile(true)) finish();
+                })
+                .setNeutralButton("저장하지 않기", (d, w) -> finish())
+                .setNegativeButton("계속 편집", null)
+                .show();
     }
 
     private int parseInt(String s, int fallback) {
