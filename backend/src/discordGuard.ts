@@ -18,7 +18,8 @@ export function enforceDiscordScope(raw: string, env: Env) {
   if (interaction.type === 1) return interaction;
 
   if (![2, 3].includes(interaction.type)) throw new ApiError("INVALID", 400);
-  if (interaction.guild_id !== ADMIN_GUILD_ID) throw new ApiError("FORBIDDEN", 403);
+  if (interaction.guild_id !== ADMIN_GUILD_ID)
+    throw new ApiError("FORBIDDEN", 403);
 
   // Admin commands are guild-only. Never accept a DM/user fallback identity.
   const actor = interaction.member?.user?.id;
