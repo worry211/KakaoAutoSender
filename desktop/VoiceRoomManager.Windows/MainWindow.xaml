@@ -1,8 +1,8 @@
 <Window x:Class="VoiceRoomManager.Windows.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="보이스룸 매니저 Windows" Height="760" Width="1120"
-        MinHeight="660" MinWidth="940" WindowStartupLocation="CenterScreen"
+        Title="보이스룸 매니저 Windows" Height="760" Width="1180"
+        MinHeight="660" MinWidth="980" WindowStartupLocation="CenterScreen"
         Background="{StaticResource Bg}" Foreground="White" FontFamily="Segoe UI">
     <Grid Margin="24">
         <Grid.RowDefinitions>
@@ -21,7 +21,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="보이스룸 매니저 · Windows" FontSize="30" FontWeight="Bold" Foreground="White"/>
-                <TextBlock Text="공식 Windows 카카오톡 계정을 그대로 사용 · 모바일 앱과 별도 프로그램 · Windows UI Automation 기반"
+                <TextBlock Text="오픈채팅 링크 우선 진입 · 정확한 방 제목 재검증 · 모바일 앱과 별도 프로그램"
                            Foreground="{StaticResource Muted}" FontSize="13" Margin="0,6,0,0"/>
             </StackPanel>
             <Border Grid.Column="1" Background="#151922" BorderBrush="{StaticResource Border}" BorderThickness="1"
@@ -61,7 +61,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="관리할 오픈채팅방" FontSize="21" FontWeight="Bold" Foreground="White"/>
-                <TextBlock Text="방을 선택한 뒤 안전 점검 → 실제 점검 순서로 최초 등록을 완료해."
+                <TextBlock Text="오픈채팅 링크로 먼저 진입하고, 방 이름으로 실제 대상이 맞는지 다시 검증해."
                            Foreground="{StaticResource Muted}" FontSize="12" Margin="0,4,0,0"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -81,13 +81,14 @@
                       AlternationCount="2" RowHeaderWidth="0" ColumnHeaderHeight="38"
                       HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="방 이름" Binding="{Binding Title}" Width="1.7*"/>
-                    <DataGridCheckBoxColumn Header="관리" Binding="{Binding Enabled}" Width="70"/>
-                    <DataGridTextColumn Header="상태" Binding="{Binding StatusDisplay}" Width="160"/>
-                    <DataGridTextColumn Header="남은 시간" Binding="{Binding Remaining}" Width="145"/>
-                    <DataGridCheckBoxColumn Header="실제 활성" Binding="{Binding LiveVerified}" Width="85"/>
-                    <DataGridCheckBoxColumn Header="마이크" Binding="{Binding MicMuted}" Width="72"/>
-                    <DataGridCheckBoxColumn Header="스피커" Binding="{Binding SpeakerMuted}" Width="72"/>
+                    <DataGridTextColumn Header="방 이름" Binding="{Binding Title}" Width="1.45*"/>
+                    <DataGridTextColumn Header="오픈채팅 링크" Binding="{Binding LinkDisplay}" Width="105"/>
+                    <DataGridCheckBoxColumn Header="관리" Binding="{Binding Enabled}" Width="65"/>
+                    <DataGridTextColumn Header="상태" Binding="{Binding StatusDisplay}" Width="150"/>
+                    <DataGridTextColumn Header="남은 시간" Binding="{Binding Remaining}" Width="140"/>
+                    <DataGridCheckBoxColumn Header="실제 활성" Binding="{Binding LiveVerified}" Width="82"/>
+                    <DataGridCheckBoxColumn Header="마이크" Binding="{Binding MicMuted}" Width="68"/>
+                    <DataGridCheckBoxColumn Header="스피커" Binding="{Binding SpeakerMuted}" Width="68"/>
                     <DataGridTextColumn Header="최근 동작 / 오류" Binding="{Binding OperationDetail}" Width="2.5*"/>
                 </DataGrid.Columns>
             </DataGrid>
@@ -100,11 +101,12 @@
             </Grid.ColumnDefinitions>
             <StackPanel Orientation="Horizontal">
                 <Button Content="관리 ON / OFF" Click="ToggleRoom_Click"/>
+                <Button Content="링크 설정" Click="SetLink_Click" Background="#485C78"/>
                 <Button Content="안전 점검" Click="SafeProbe_Click" Background="#53698F"/>
                 <Button Content="실제 점검" Click="LiveCheck_Click" Background="#4167AE"/>
                 <Button Content="방 삭제" Click="RemoveRoom_Click" Background="#70434B"/>
             </StackPanel>
-            <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MaxWidth="520">
+            <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MaxWidth="500">
                 <TextBlock x:Name="RuntimeStats" HorizontalAlignment="Right" Foreground="#C5CCD6" FontSize="12" TextWrapping="Wrap"/>
                 <TextBlock x:Name="LastStatus" HorizontalAlignment="Right" Foreground="{StaticResource Muted}"
                            Margin="0,4,0,0" FontSize="12" TextWrapping="Wrap" TextAlignment="Right"/>
@@ -120,7 +122,7 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="초기 설정" Foreground="{StaticResource Warn}" FontWeight="SemiBold"/>
                 <TextBlock Grid.Column="1" Margin="12,0,0,0" Foreground="{StaticResource Muted}" FontSize="12"
-                           Text="1) 방 추가  →  2) 안전 점검  →  3) 실제 점검  →  4) 관리 ON  →  5) 전체 시작"/>
+                           Text="1) 방 이름+오픈채팅 링크  →  2) 안전 점검  →  3) 실제 점검  →  4) 관리 ON  →  5) 전체 시작"/>
             </Grid>
         </Border>
     </Grid>
