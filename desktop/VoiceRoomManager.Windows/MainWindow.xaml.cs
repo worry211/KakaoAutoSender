@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     {
         _store = new StateStore(preview ? Path.Combine(Path.GetTempPath(), "VoiceRoomManagerPreview") : null);
         InitializeComponent();
+        SourceInitialized += (_, _) => WindowAppearance.Apply(this);
         _coordinator = new VoiceRoomCoordinator(_store, _kakao, !preview);
         _coordinator.StateChanged += () => Dispatcher.BeginInvoke(RefreshUi);
         Loaded += (_, _) => RefreshUi();
