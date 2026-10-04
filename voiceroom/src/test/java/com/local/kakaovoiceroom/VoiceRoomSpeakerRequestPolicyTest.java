@@ -18,10 +18,13 @@ public class VoiceRoomSpeakerRequestPolicyTest {
     @Test public void rejectActionsAreStrictAndNeverTreatAcceptAsReject() {
         assertTrue(VoiceRoomSpeakerRequestPolicy.isRejectAction("거절"));
         assertTrue(VoiceRoomSpeakerRequestPolicy.isRejectAction("스피커 요청 거부"));
+        assertTrue(VoiceRoomSpeakerRequestPolicy.isRejectAction("스피커로 참여 요청 거절"));
         assertFalse(VoiceRoomSpeakerRequestPolicy.isRejectAction("취소"));
         assertFalse(VoiceRoomSpeakerRequestPolicy.isRejectAction("수락"));
         assertTrue(VoiceRoomSpeakerRequestPolicy.isAcceptAction("스피커 요청 수락"));
         assertTrue(VoiceRoomSpeakerRequestPolicy.isAcceptAction("승인"));
+        assertTrue(VoiceRoomSpeakerRequestPolicy.isAcceptAction("스피커로 참여"));
+        assertFalse(VoiceRoomSpeakerRequestPolicy.isAcceptAction("스피커로 참여 요청 거절"));
     }
 
     @Test public void interpretsOnlyActionOrientedRequestToggleLabels() {
