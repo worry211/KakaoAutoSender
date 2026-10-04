@@ -158,7 +158,7 @@ final class LicenseManager {
               v = new Verification(false, state, EntitlementPolicy.message(state), "", 0);
             }
           } catch (Exception e) {
-            v = networkFailure(app, e);
+            v = activationNetworkFailure(app, e);
           } finally {
             DEADLINE.remove();
           }
@@ -205,6 +205,18 @@ final class LicenseManager {
       }
       return second;
     }
+  }
+
+  private static Verification activationNetworkFailure(Context c, Exception error) {
+    p(c).edit().putString("last_error", networkErrorCode(error)).apply();
+    Verification cached = verifyStored(c);
+    if (cached.valid) return cached;
+    return new Verification(
+        false,
+        "NETWORK",
+        EntitlementPolicy.message("NETWORK"),
+        cached.licenseId,
+        cached.expiresAtSeconds);
   }
 
   static Verification validate(Context c) {
