@@ -42,15 +42,13 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     private static final List<String> CREATE_SUBMIT_TERMS = Arrays.asList("만들기");
     private static final List<String> STRONG_ACTIVE_TERMS = Arrays.asList(
             "보이스룸 종료", "보이스룸 나가기", "보이스 룸 종료", "보이스 룸 나가기");
-    private static final List<String> SPEAKER_TERMS = Arrays.asList(
-            "스피커 신청", "스피커로 참여", "스피커");
-    private static final List<String> LISTENER_TERMS = Arrays.asList(
-            "리스너로 참여", "리스너", "청취자");
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private long lastStepAt;
     private String watchedRoomId = "";
     private boolean followUpScheduled;
+    private String activeEvidenceRoomId = "";
+    private int activeEvidenceCount;
 
     private final Runnable timeoutRunnable = new Runnable() {
         @Override public void run() {
@@ -70,14 +68,12 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         }
     };
 
-    @Override
-    protected void onServiceConnected() {
+    @Override protected void onServiceConnected() {
         VoiceRoomStore.setLastStatus(this, "접근성 자동화 연결됨");
         if (!VoiceRoomStore.pendingRoomId(this).isEmpty()) handler.post(this::stepPendingJob);
     }
 
-    @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {
+    @Override public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || event.getPackageName() == null) return;
         if (!KAKAO_PACKAGE.contentEquals(event.getPackageName())) return;
         if (VoiceRoomStore.pendingRoomId(this).isEmpty()) return;
@@ -98,6 +94,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         handler.removeCallbacks(timeoutRunnable);
         handler.removeCallbacks(followUpRunnable);
         followUpScheduled = false;
+        resetActiveEvidence();
         super.onDestroy();
     }
 
@@ -121,7 +118,6 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
             fail(room, stageError(room.status, "전체 작업 제한시간 초과"));
             return;
         }
-
         if (room.stageStartedAt <= 0L) {
             room.stageStartedAt = now;
             VoiceRoomStore.update(this, room);
@@ -173,7 +169,6 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                     scheduleFollowUp();
                     return;
                 }
-
                 AccessibilityNodeInfo roomNode = findRoomTitle(root, room.title);
                 if (roomNode != null && clickNodeOrParent(roomNode)) {
                     transition(room,
@@ -188,13 +183,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                 transition(room,
                         probe ? "PROBE_ROOM_VERIFIED" : "ROOM_VERIFIED",
                         room.title + " · 대상 오픈채팅방 확인 완료");
-
-                if (isActiveVoiceRoom(root)) {
-                    if (probe) finishProbe(room, "기존 보이스룸 활성 상태 인식 성공");
-                    else markActive(room, now);
-                    return;
-                }
-
+                // A normal Open Chat screen is never accepted as active VoiceRoom proof.
                 if (clickComposerAction(root)) {
                     transition(room,
                             probe ? "PROBE_ROOM_MENU" : "ROOM_MENU",
@@ -205,28 +194,23 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
             }
 
             if (roomMenu) {
-                if (isActiveVoiceRoom(root)) {
-                    if (probe) finishProbe(room, "기존 보이스룸 활성 상태 인식 성공");
-                    else markActive(room, now);
-                    return;
-                }
                 if (clickAny(root, VOICE_TERMS)) {
                     transition(room,
                             probe ? "PROBE_VOICE_MENU" : "VOICE_MENU",
-                            room.title + " · 보이스룸 화면 진입");
+                            room.title + " · 보이스룸 전용 화면 확인 중");
                 }
                 scheduleFollowUp();
                 return;
             }
 
             if (voiceMenu) {
-                if (isActiveVoiceRoom(root)) {
+                if (confirmActiveVoiceRoom(root, room)) {
                     if (probe) finishProbe(room, "기존 보이스룸 활성 상태 인식 성공");
                     else markActive(room, now);
                     return;
                 }
 
-                if (hasCreateForm(root)) {
+                if (hasCreateSheet(root)) {
                     if (probe) {
                         finishProbe(room, "보이스룸 생성 입력 화면까지 안전하게 인식 성공");
                         return;
@@ -247,7 +231,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                             ? clickAny(root, CREATE_STRONG_TERMS)
                             : clickAny(root, CREATE_WEAK_TERMS);
                     if (clicked) {
-                        transition(room, "CREATING", room.title + " · 보이스룸 생성 단계");
+                        transition(room, "CREATING", room.title + " · 보이스룸 생성 폼 진입 중");
                     }
                 }
                 scheduleFollowUp();
@@ -255,10 +239,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
             }
 
             if (creating) {
-                if (isActiveVoiceRoom(root)) {
-                    markActive(room, now);
-                    return;
-                }
+                // Never accept active-looking labels before the actual Create button is clicked.
                 AccessibilityNodeInfo nameInput = findCreateNameInput(root);
                 if (nameInput == null) {
                     scheduleFollowUp();
@@ -268,28 +249,24 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                 String current = value(nameInput.getText());
                 if (desired.equals(current)) {
                     transition(room, "CREATING_NAMED",
-                            room.title + " · 보이스룸 이름 확인 완료 · 생성 버튼 대기");
+                            room.title + " · 보이스룸 이름 확인 완료 · 만들기 버튼 대기");
                     scheduleFollowUp();
                     return;
                 }
                 if (setTextRobust(nameInput, desired)) {
                     transition(room, "CREATING_NAMED",
-                            room.title + " · 보이스룸 이름 입력 완료 · 생성 버튼 활성 대기");
+                            room.title + " · 보이스룸 이름 입력 완료 · 만들기 버튼 활성 대기");
                 }
                 scheduleFollowUp();
                 return;
             }
 
             if (named) {
-                if (isActiveVoiceRoom(root)) {
-                    markActive(room, now);
-                    return;
-                }
                 AccessibilityNodeInfo submit = bestClickableMatching(root, CREATE_SUBMIT_TERMS, true);
                 if (submit != null && submit.isEnabled()
                         && submit.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                     transition(room, "CREATING_CONFIRMING",
-                            room.title + " · 만들기 실행 후 활성 확인 중");
+                            room.title + " · 만들기 실행 완료 · 실제 보이스룸 활성 증거 확인 중");
                     scheduleFollowUp();
                     return;
                 }
@@ -298,7 +275,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
             }
 
             if (confirming) {
-                if (isActiveVoiceRoom(root)) {
+                if (confirmActiveVoiceRoom(root, room)) {
                     markActive(room, now);
                     return;
                 }
@@ -313,7 +290,10 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     }
 
     private void transition(VoiceRoomStore.Room room, String nextStatus, String message) {
-        if (!nextStatus.equals(room.status)) room.stageStartedAt = System.currentTimeMillis();
+        if (!nextStatus.equals(room.status)) {
+            room.stageStartedAt = System.currentTimeMillis();
+            resetActiveEvidence();
+        }
         room.status = nextStatus;
         room.lastError = "";
         VoiceRoomStore.update(this, room);
@@ -330,6 +310,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         if (s.contains("OPENING_KAKAO") || s.contains("OPENING_ROOM")) return 25_000L;
         if (s.contains("ROOM_VERIFIED") || s.contains("ROOM_MENU")) return 15_000L;
         if (s.contains("VOICE_MENU")) return 18_000L;
+        if (s.contains("CREATING_CONFIRMING")) return 25_000L;
         if (s.contains("CREATING_NAMED")) return 20_000L;
         if (s.contains("CREATING")) return 25_000L;
         return 18_000L;
@@ -341,24 +322,53 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         if (s.contains("OPENING_KAKAO")) base = "카카오톡은 열렸지만 대상 오픈채팅방을 확인하지 못함";
         else if (s.contains("OPENING_ROOM")) base = "방 선택 후 채팅 화면 진입을 확인하지 못함";
         else if (s.contains("ROOM_VERIFIED") || s.contains("ROOM_MENU")) base = "하단 + 메뉴에서 보이스룸 항목을 찾지 못함";
-        else if (s.contains("VOICE_MENU")) base = "보이스룸 화면에서 활성/생성 상태를 확인하지 못함";
+        else if (s.contains("VOICE_MENU")) base = "보이스룸 전용 화면에서 활성/생성 상태를 확인하지 못함";
+        else if (s.contains("CREATING_CONFIRMING")) base = "만들기 실행 뒤 실제 보이스룸 활성 증거를 확인하지 못함";
         else if (s.contains("CREATING_NAMED")) base = "보이스룸 이름 입력 후 만들기 버튼이 활성화되지 않음";
-        else if (s.contains("CREATING")) base = "보이스룸 생성 폼 처리 또는 활성 확인에 실패함";
+        else if (s.contains("CREATING")) base = "보이스룸 생성 폼 처리에 실패함";
         else base = "카카오톡 화면 인식 제한시간 초과";
         return base + " · " + detail;
     }
 
-    private boolean isActiveVoiceRoom(AccessibilityNodeInfo root) {
-        if (containsAny(root, STRONG_ACTIVE_TERMS)) return true;
-        return containsAny(root, VOICE_TERMS)
-                && containsAny(root, SPEAKER_TERMS)
-                && containsAny(root, LISTENER_TERMS);
+    /**
+     * Fail-closed activation proof. Weak menu words are never sufficient. The service must already
+     * be in VoiceRoom-specific UI (or after a confirmed Create click), must see an actionable
+     * explicit VoiceRoom exit/end control, and must see the same strong signal twice in a row.
+     */
+    private boolean confirmActiveVoiceRoom(AccessibilityNodeInfo root, VoiceRoomStore.Room room) {
+        String status = safe(room.status);
+        boolean allowedStage = "VOICE_MENU".equals(status)
+                || "PROBE_VOICE_MENU".equals(status)
+                || "CREATING_CONFIRMING".equals(status);
+        if (!allowedStage || !hasStrongActiveEvidence(root)) {
+            resetActiveEvidence();
+            return false;
+        }
+
+        if (!room.id.equals(activeEvidenceRoomId)) {
+            activeEvidenceRoomId = room.id;
+            activeEvidenceCount = 1;
+            VoiceRoomStore.setLastStatus(this, room.title + " · 보이스룸 활성 강한 증거 1/2 확인");
+            return false;
+        }
+        activeEvidenceCount += 1;
+        return activeEvidenceCount >= 2;
     }
 
-    private boolean hasCreateForm(AccessibilityNodeInfo root) {
+    private boolean hasStrongActiveEvidence(AccessibilityNodeInfo root) {
+        if (hasCreateSheet(root)) return false;
+        AccessibilityNodeInfo exit = bestClickableMatching(root, STRONG_ACTIVE_TERMS, false);
+        return exit != null && exit.isEnabled() && exit.isVisibleToUser();
+    }
+
+    private void resetActiveEvidence() {
+        activeEvidenceRoomId = "";
+        activeEvidenceCount = 0;
+    }
+
+    private boolean hasCreateSheet(AccessibilityNodeInfo root) {
         return containsAny(root, CREATE_STRONG_TERMS)
-                && findExactAny(root, new HashSet<>(CREATE_SUBMIT_TERMS)) != null
-                && findCreateNameInput(root) != null;
+                && findExactAny(root, new HashSet<>(CREATE_SUBMIT_TERMS)) != null;
     }
 
     private AccessibilityNodeInfo findCreateNameInput(AccessibilityNodeInfo root) {
@@ -415,9 +425,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         } catch (Exception ignored) {}
 
         Bundle args = new Bundle();
-        args.putCharSequence(
-                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                desired);
+        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, desired);
         try {
             if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return true;
         } catch (Exception ignored) {}
@@ -467,9 +475,12 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
 
     private void markActive(VoiceRoomStore.Room room, long now) {
         boolean manual = VoiceRoomStore.isManualPending(this);
-        boolean createdByUs = "CREATING".equals(room.status)
-                || "CREATING_NAMED".equals(room.status)
-                || "CREATING_CONFIRMING".equals(room.status);
+        boolean createdByUs = "CREATING_CONFIRMING".equals(room.status);
+        boolean existingVoiceRoom = "VOICE_MENU".equals(room.status);
+        if (!createdByUs && !existingVoiceRoom) {
+            fail(room, "활성 증거 단계가 올바르지 않아 성공 처리를 거부함");
+            return;
+        }
         if (createdByUs) room.startedAt = now;
         if (manual) {
             room.safeProbePassed = true;
@@ -482,7 +493,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         room.status = room.startedAt <= 0L ? "ACTIVE_UNKNOWN_START" : "ACTIVE";
         room.nextCheckAt = VoiceRoomTiming.nextActiveCheck(room.startedAt, now);
         VoiceRoomStore.update(this, room);
-        VoiceRoomStore.setLastStatus(this, room.title + " · 보이스룸 활성 확인");
+        VoiceRoomStore.setLastStatus(this, room.title + " · 강한 증거 2회로 보이스룸 활성 확인");
         finishPending();
     }
 
@@ -494,6 +505,9 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         if (probe) {
             room.status = "PROBE_ERROR";
         } else if (manual) {
+            room.liveCheckPassed = false;
+            room.startedAt = 0L;
+            room.nextCheckAt = 0L;
             room.status = "MANUAL_ERROR";
         } else {
             room.failures += 1;
@@ -511,15 +525,13 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         handler.removeCallbacks(followUpRunnable);
         followUpScheduled = false;
         watchedRoomId = "";
+        resetActiveEvidence();
         VoiceRoomStore.clearPending(this);
         VoiceRoomScheduler.scheduleNext(this);
 
         if (direct) {
             handler.postDelayed(this::openManager, 350L);
         } else {
-            // AUTO jobs only run when the phone was not being actively used. Leave Kakao cleanly
-            // so the user does not wake to a random chat screen. On unsecured devices we can also
-            // turn the display back off using the standard accessibility lock-screen action.
             handler.postDelayed(() -> {
                 performGlobalAction(GLOBAL_ACTION_HOME);
                 if (Build.VERSION.SDK_INT >= 28 && !isDeviceSecure()) {
@@ -607,10 +619,8 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         int cy = b.centerY() - rootBounds.top;
         int bw = b.width();
         int bh = b.height();
-
         if (cy < (int) (height * 0.70) || cx > (int) (width * 0.30)) return Long.MIN_VALUE;
         if (bw > (int) (width * 0.30) || bh > (int) (height * 0.22)) return Long.MIN_VALUE;
-
         long targetX = (long) (width * 0.09);
         long targetY = (long) (height * 0.90);
         long dx = cx - targetX;
@@ -711,11 +721,12 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                 + " · add=" + hasComposerAction(root)
                 + " · voice=" + containsAny(root, VOICE_TERMS)
                 + " · create=" + (containsAny(root, CREATE_STRONG_TERMS) || containsAny(root, CREATE_WEAK_TERMS))
-                + " · form=" + hasCreateForm(root)
+                + " · createSheet=" + hasCreateSheet(root)
                 + " · nameInput=" + (input != null)
                 + " · submit=" + (submit != null)
                 + " · submitReady=" + (submit != null && submit.isEnabled())
-                + " · active=" + isActiveVoiceRoom(root)
+                + " · activeStrong=" + hasStrongActiveEvidence(root)
+                + " · activeEvidenceCount=" + activeEvidenceCount
                 + " · entry=" + VoiceRoomStore.pendingEntry(this);
     }
 
@@ -746,6 +757,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     }
 
     private static AccessibilityNodeInfo findExactAny(AccessibilityNodeInfo root, Set<String> terms) {
+        if (root == null) return null;
         ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
         queue.add(root);
         while (!queue.isEmpty()) {
