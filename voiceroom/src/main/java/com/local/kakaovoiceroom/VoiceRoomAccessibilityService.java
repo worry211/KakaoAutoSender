@@ -27,6 +27,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     private static final long JOB_TIMEOUT_MS = VoiceRoomStore.PENDING_TIMEOUT_MS;
     private static final long STEP_DEBOUNCE_MS = 250L;
     private static final long FOLLOW_UP_MS = 550L;
+    private static final long AUDIO_TOGGLE_SETTLE_MS = 900L;
 
     private static final List<String> ROOM_READY_TERMS = Arrays.asList(
             "메시지 입력", "메시지를 입력", "메시지 입력하기", "채팅 입력", "메시지 보내기");
@@ -49,6 +50,15 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     private boolean followUpScheduled;
     private String activeEvidenceRoomId = "";
     private int activeEvidenceCount;
+    private int audioGuardPasses;
+    private long lastAudioToggleAt;
+
+    private enum ProtectionResult { SAFE, CLICKED, WAITING, UNKNOWN }
+
+    private static final class AudioControls {
+        AccessibilityNodeInfo mic;
+        AccessibilityNodeInfo speaker;
+    }
 
     private final Runnable timeoutRunnable = new Runnable() {
         @Override public void run() {
@@ -95,6 +105,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         handler.removeCallbacks(followUpRunnable);
         followUpScheduled = false;
         resetActiveEvidence();
+        resetAudioGuard();
         super.onDestroy();
     }
 
@@ -157,7 +168,8 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
             boolean creating = "CREATING".equals(status);
             boolean named = "CREATING_NAMED".equals(status);
             boolean confirming = "CREATING_CONFIRMING".equals(status);
-            boolean modalProgress = roomMenu || voiceMenu || creating || named || confirming;
+            boolean audioGuard = status.startsWith("AUDIO_GUARD_");
+            boolean modalProgress = roomMenu || voiceMenu || creating || named || confirming || audioGuard;
 
             if (stageExpired(room, now)) {
                 fail(room, stageError(status, "단계 진행 없음"));
@@ -183,7 +195,6 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                 transition(room,
                         probe ? "PROBE_ROOM_VERIFIED" : "ROOM_VERIFIED",
                         room.title + " · 대상 오픈채팅방 확인 완료");
-                // A normal Open Chat screen is never accepted as active VoiceRoom proof.
                 if (clickComposerAction(root)) {
                     transition(room,
                             probe ? "PROBE_ROOM_MENU" : "ROOM_MENU",
@@ -205,8 +216,11 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
 
             if (voiceMenu) {
                 if (confirmActiveVoiceRoom(root, room)) {
-                    if (probe) finishProbe(room, "기존 보이스룸 활성 상태 인식 성공");
-                    else markActive(room, now);
+                    if (probe) {
+                        finishProbe(room, "기존 보이스룸 활성 상태 인식 성공");
+                    } else {
+                        beginAudioGuard(root, room, now, false);
+                    }
                     return;
                 }
 
@@ -239,7 +253,6 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
             }
 
             if (creating) {
-                // Never accept active-looking labels before the actual Create button is clicked.
                 AccessibilityNodeInfo nameInput = findCreateNameInput(root);
                 if (nameInput == null) {
                     scheduleFollowUp();
@@ -276,10 +289,15 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
 
             if (confirming) {
                 if (confirmActiveVoiceRoom(root, room)) {
-                    markActive(room, now);
+                    beginAudioGuard(root, room, now, true);
                     return;
                 }
                 scheduleFollowUp();
+                return;
+            }
+
+            if (audioGuard) {
+                runAudioGuard(root, room, now);
                 return;
             }
 
@@ -293,6 +311,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         if (!nextStatus.equals(room.status)) {
             room.stageStartedAt = System.currentTimeMillis();
             resetActiveEvidence();
+            resetAudioGuard();
         }
         room.status = nextStatus;
         room.lastError = "";
@@ -310,6 +329,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         if (s.contains("OPENING_KAKAO") || s.contains("OPENING_ROOM")) return 25_000L;
         if (s.contains("ROOM_VERIFIED") || s.contains("ROOM_MENU")) return 15_000L;
         if (s.contains("VOICE_MENU")) return 18_000L;
+        if (s.contains("AUDIO_GUARD")) return 12_000L;
         if (s.contains("CREATING_CONFIRMING")) return 25_000L;
         if (s.contains("CREATING_NAMED")) return 20_000L;
         if (s.contains("CREATING")) return 25_000L;
@@ -323,6 +343,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         else if (s.contains("OPENING_ROOM")) base = "방 선택 후 채팅 화면 진입을 확인하지 못함";
         else if (s.contains("ROOM_VERIFIED") || s.contains("ROOM_MENU")) base = "하단 + 메뉴에서 보이스룸 항목을 찾지 못함";
         else if (s.contains("VOICE_MENU")) base = "보이스룸 전용 화면에서 활성/생성 상태를 확인하지 못함";
+        else if (s.contains("AUDIO_GUARD")) base = "보이스룸은 활성이나 마이크/스피커 보호 확인을 완료하지 못함";
         else if (s.contains("CREATING_CONFIRMING")) base = "만들기 실행 뒤 실제 보이스룸 활성 증거를 확인하지 못함";
         else if (s.contains("CREATING_NAMED")) base = "보이스룸 이름 입력 후 만들기 버튼이 활성화되지 않음";
         else if (s.contains("CREATING")) base = "보이스룸 생성 폼 처리에 실패함";
@@ -330,11 +351,6 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         return base + " · " + detail;
     }
 
-    /**
-     * Fail-closed activation proof. Weak menu words are never sufficient. The service must already
-     * be in VoiceRoom-specific UI (or after a confirmed Create click), must see an actionable
-     * explicit VoiceRoom exit/end control, and must see the same strong signal twice in a row.
-     */
     private boolean confirmActiveVoiceRoom(AccessibilityNodeInfo root, VoiceRoomStore.Room room) {
         String status = safe(room.status);
         boolean allowedStage = "VOICE_MENU".equals(status)
@@ -364,6 +380,167 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     private void resetActiveEvidence() {
         activeEvidenceRoomId = "";
         activeEvidenceCount = 0;
+    }
+
+    private void resetAudioGuard() {
+        audioGuardPasses = 0;
+        lastAudioToggleAt = 0L;
+    }
+
+    private void beginAudioGuard(
+            AccessibilityNodeInfo root, VoiceRoomStore.Room room, long now, boolean createdByUs) {
+        room.micMuted = false;
+        room.speakerMuted = false;
+        room.audioCheckedAt = 0L;
+        transition(room,
+                createdByUs ? "AUDIO_GUARD_CREATED" : "AUDIO_GUARD_EXISTING",
+                room.title + " · 보이스룸 활성 · 마이크/스피커 안전 확인 중");
+        runAudioGuard(root, room, now);
+    }
+
+    private void runAudioGuard(AccessibilityNodeInfo root, VoiceRoomStore.Room room, long now) {
+        if (!hasStrongActiveEvidence(root)) {
+            scheduleFollowUp();
+            return;
+        }
+
+        AudioControls controls = findAudioControls(root);
+        ProtectionResult mic = protectControl(controls.mic, true, now);
+        ProtectionResult speaker = protectControl(controls.speaker, false, now);
+
+        if (mic == ProtectionResult.SAFE) room.micMuted = true;
+        if (speaker == ProtectionResult.SAFE) room.speakerMuted = true;
+        room.audioCheckedAt = now;
+        VoiceRoomStore.update(this, room);
+
+        boolean clicked = mic == ProtectionResult.CLICKED || speaker == ProtectionResult.CLICKED;
+        boolean waiting = mic == ProtectionResult.WAITING || speaker == ProtectionResult.WAITING;
+        if (clicked || waiting) {
+            VoiceRoomStore.setLastStatus(this,
+                    room.title + " · 마이크/스피커 보호 적용 후 상태 재확인 중");
+            scheduleFollowUp();
+            return;
+        }
+
+        audioGuardPasses += 1;
+        if ((room.micMuted && room.speakerMuted) || audioGuardPasses >= 3) {
+            markActive(room, now);
+            return;
+        }
+
+        VoiceRoomStore.setLastStatus(this,
+                room.title + " · 보룸 활성 · 오디오 컨트롤 의미 확인 중 " + audioGuardPasses + "/3");
+        scheduleFollowUp();
+    }
+
+    private ProtectionResult protectControl(AccessibilityNodeInfo node, boolean microphone, long now) {
+        if (node == null || !node.isVisibleToUser() || !node.isEnabled()) {
+            return ProtectionResult.UNKNOWN;
+        }
+
+        String label = controlLabel(node);
+        VoiceRoomAudioPolicy.State state = microphone
+                ? VoiceRoomAudioPolicy.micState(label)
+                : VoiceRoomAudioPolicy.speakerState(label);
+
+        if (state == VoiceRoomAudioPolicy.State.UNKNOWN && node.isCheckable()) {
+            state = node.isChecked() ? VoiceRoomAudioPolicy.State.ON : VoiceRoomAudioPolicy.State.OFF;
+        } else if (state == VoiceRoomAudioPolicy.State.UNKNOWN && node.isSelected()) {
+            state = VoiceRoomAudioPolicy.State.ON;
+        }
+
+        if (state == VoiceRoomAudioPolicy.State.OFF) return ProtectionResult.SAFE;
+        if (state != VoiceRoomAudioPolicy.State.ON) return ProtectionResult.UNKNOWN;
+
+        if (now - lastAudioToggleAt < AUDIO_TOGGLE_SETTLE_MS) return ProtectionResult.WAITING;
+        try {
+            if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                lastAudioToggleAt = now;
+                return ProtectionResult.CLICKED;
+            }
+        } catch (Exception ignored) {}
+        return ProtectionResult.UNKNOWN;
+    }
+
+    private AudioControls findAudioControls(AccessibilityNodeInfo root) {
+        AudioControls out = new AudioControls();
+
+        for (AccessibilityNodeInfo node : findAllNodes(root)) {
+            if (!node.isVisibleToUser()) continue;
+            AccessibilityNodeInfo clickable = clickableAncestor(node);
+            if (clickable == null || !clickable.isVisibleToUser() || !clickable.isEnabled()) continue;
+            String label = controlLabel(clickable);
+            if (out.mic == null && VoiceRoomAudioPolicy.micState(label) != VoiceRoomAudioPolicy.State.UNKNOWN) {
+                out.mic = clickable;
+            }
+            if (out.speaker == null
+                    && VoiceRoomAudioPolicy.speakerState(label) != VoiceRoomAudioPolicy.State.UNKNOWN) {
+                out.speaker = clickable;
+            }
+        }
+
+        if (out.mic != null && out.speaker != null) return out;
+
+        AccessibilityNodeInfo exit = bestClickableMatching(root, STRONG_ACTIVE_TERMS, false);
+        if (exit == null) return out;
+        Rect exitBounds = new Rect();
+        exit.getBoundsInScreen(exitBounds);
+        if (exitBounds.isEmpty()) return out;
+
+        AccessibilityNodeInfo ancestor = exit.getParent();
+        for (int depth = 0; depth < 5 && ancestor != null; depth++) {
+            AccessibilityNodeInfo nearestLeft = null;
+            AccessibilityNodeInfo secondLeft = null;
+            long nearestDx = Long.MAX_VALUE;
+            long secondDx = Long.MAX_VALUE;
+            long exitArea = Math.max(1L, (long) exitBounds.width() * exitBounds.height());
+
+            for (AccessibilityNodeInfo candidate : findAllNodes(ancestor)) {
+                if (candidate == exit || !candidate.isClickable()
+                        || !candidate.isVisibleToUser() || !candidate.isEnabled()) continue;
+                Rect b = new Rect();
+                candidate.getBoundsInScreen(b);
+                if (b.isEmpty()) continue;
+                long area = Math.max(1L, (long) b.width() * b.height());
+                if (area < exitArea / 5L || area > exitArea * 5L) continue;
+                if (Math.abs(b.centerY() - exitBounds.centerY()) > Math.max(80, exitBounds.height() * 2)) continue;
+                long dx = (long) exitBounds.centerX() - b.centerX();
+                if (dx <= 0L) continue;
+                if (dx < nearestDx) {
+                    secondDx = nearestDx;
+                    secondLeft = nearestLeft;
+                    nearestDx = dx;
+                    nearestLeft = candidate;
+                } else if (dx < secondDx) {
+                    secondDx = dx;
+                    secondLeft = candidate;
+                }
+            }
+
+            if (out.speaker == null && nearestLeft != null) out.speaker = nearestLeft;
+            if (out.mic == null && secondLeft != null) out.mic = secondLeft;
+            if (out.mic != null && out.speaker != null) break;
+            ancestor = ancestor.getParent();
+        }
+        return out;
+    }
+
+    private String controlLabel(AccessibilityNodeInfo node) {
+        if (node == null) return "";
+        StringBuilder out = new StringBuilder();
+        appendLabel(out, node);
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) appendLabel(out, child);
+        }
+        return out.toString().trim();
+    }
+
+    private void appendLabel(StringBuilder out, AccessibilityNodeInfo node) {
+        String text = value(node.getText());
+        String desc = value(node.getContentDescription());
+        if (!text.isEmpty()) out.append(' ').append(text);
+        if (!desc.isEmpty()) out.append(' ').append(desc);
     }
 
     private boolean hasCreateSheet(AccessibilityNodeInfo root) {
@@ -475,8 +652,10 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
 
     private void markActive(VoiceRoomStore.Room room, long now) {
         boolean manual = VoiceRoomStore.isManualPending(this);
-        boolean createdByUs = "CREATING_CONFIRMING".equals(room.status);
-        boolean existingVoiceRoom = "VOICE_MENU".equals(room.status);
+        boolean createdByUs = "CREATING_CONFIRMING".equals(room.status)
+                || "AUDIO_GUARD_CREATED".equals(room.status);
+        boolean existingVoiceRoom = "VOICE_MENU".equals(room.status)
+                || "AUDIO_GUARD_EXISTING".equals(room.status);
         if (!createdByUs && !existingVoiceRoom) {
             fail(room, "활성 증거 단계가 올바르지 않아 성공 처리를 거부함");
             return;
@@ -493,7 +672,11 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         room.status = room.startedAt <= 0L ? "ACTIVE_UNKNOWN_START" : "ACTIVE";
         room.nextCheckAt = VoiceRoomTiming.nextActiveCheck(room.startedAt, now);
         VoiceRoomStore.update(this, room);
-        VoiceRoomStore.setLastStatus(this, room.title + " · 강한 증거 2회로 보이스룸 활성 확인");
+        String audio = room.micMuted && room.speakerMuted
+                ? " · 마이크/스피커 무음 확인"
+                : " · 보룸 활성, 오디오 상태는 확인 필요";
+        VoiceRoomStore.setLastStatus(this,
+                room.title + " · 보이스룸 활성 확인" + audio);
         finishPending();
     }
 
@@ -526,6 +709,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         followUpScheduled = false;
         watchedRoomId = "";
         resetActiveEvidence();
+        resetAudioGuard();
         VoiceRoomStore.clearPending(this);
         VoiceRoomScheduler.scheduleNext(this);
 
@@ -727,6 +911,9 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                 + " · submitReady=" + (submit != null && submit.isEnabled())
                 + " · activeStrong=" + hasStrongActiveEvidence(root)
                 + " · activeEvidenceCount=" + activeEvidenceCount
+                + " · micSafe=" + room.micMuted
+                + " · speakerSafe=" + room.speakerMuted
+                + " · audioPasses=" + audioGuardPasses
                 + " · entry=" + VoiceRoomStore.pendingEntry(this);
     }
 
