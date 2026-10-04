@@ -15,13 +15,10 @@
         </Grid.RowDefinitions>
 
         <Grid Grid.Row="0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="보이스룸 매니저 · Windows" FontSize="30" FontWeight="Bold" Foreground="White"/>
-                <TextBlock Text="오픈채팅 링크 우선 진입 · 정확한 방 제목 재검증 · 모바일 앱과 별도 프로그램"
+                <TextBlock Text="오픈채팅 링크 우선 진입 · 자동 UI 진단 · 필요 시 자체 캘리브레이션 · 모바일 앱과 별도 프로그램"
                            Foreground="{StaticResource Muted}" FontSize="13" Margin="0,6,0,0"/>
             </StackPanel>
             <Border Grid.Column="1" Background="#151922" BorderBrush="{StaticResource Border}" BorderThickness="1"
@@ -36,14 +33,11 @@
         <Border Grid.Row="1" Background="{StaticResource Card}" BorderBrush="{StaticResource Border}" BorderThickness="1"
                 CornerRadius="16" Padding="20" Margin="0,20,0,0">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <StackPanel>
                     <TextBlock x:Name="MasterStatus" Text="● 보이스룸 자동관리 중지됨" FontSize="22" FontWeight="Bold" Foreground="White"/>
                     <TextBlock x:Name="SystemStatus" Foreground="{StaticResource Muted}" Margin="0,8,0,0"/>
-                    <TextBlock Text="모니터 OFF는 가능 · Windows 잠금/로그아웃 상태에서는 안전하게 대기"
+                    <TextBlock Text="모니터 OFF는 가능 · Windows 잠금/로그아웃 상태에서는 안전하게 대기 · 잠금 우회 없음"
                                Foreground="{StaticResource Warn}" Margin="0,8,0,0" FontSize="12"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -55,13 +49,10 @@
         </Border>
 
         <Grid Grid.Row="2" Margin="0,22,0,10">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="관리할 오픈채팅방" FontSize="21" FontWeight="Bold" Foreground="White"/>
-                <TextBlock Text="오픈채팅 링크로 먼저 진입하고, 방 이름으로 실제 대상이 맞는지 다시 검증해."
+                <TextBlock Text="링크 → 카카오 소개 화면 → 실제 채팅을 하나의 세션으로 검증하고, 자동 인식 실패 단계만 캘리브레이션해."
                            Foreground="{StaticResource Muted}" FontSize="12" Margin="0,4,0,0"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -81,32 +72,30 @@
                       AlternationCount="2" RowHeaderWidth="0" ColumnHeaderHeight="38"
                       HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="방 이름" Binding="{Binding Title}" Width="1.45*"/>
+                    <DataGridTextColumn Header="방 이름" Binding="{Binding Title}" Width="1.35*"/>
                     <DataGridTextColumn Header="오픈채팅 링크" Binding="{Binding LinkDisplay}" Width="105"/>
                     <DataGridCheckBoxColumn Header="관리" Binding="{Binding Enabled}" Width="65"/>
                     <DataGridTextColumn Header="상태" Binding="{Binding StatusDisplay}" Width="150"/>
-                    <DataGridTextColumn Header="남은 시간" Binding="{Binding Remaining}" Width="140"/>
+                    <DataGridTextColumn Header="남은 시간" Binding="{Binding Remaining}" Width="135"/>
                     <DataGridCheckBoxColumn Header="실제 활성" Binding="{Binding LiveVerified}" Width="82"/>
                     <DataGridCheckBoxColumn Header="마이크" Binding="{Binding MicMuted}" Width="68"/>
                     <DataGridCheckBoxColumn Header="스피커" Binding="{Binding SpeakerMuted}" Width="68"/>
-                    <DataGridTextColumn Header="최근 동작 / 오류" Binding="{Binding OperationDetail}" Width="2.5*"/>
+                    <DataGridTextColumn Header="최근 동작 / 오류" Binding="{Binding OperationDetail}" Width="2.7*"/>
                 </DataGrid.Columns>
             </DataGrid>
         </Border>
 
         <Grid Grid.Row="4" Margin="0,12,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <StackPanel Orientation="Horizontal">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <WrapPanel>
                 <Button Content="관리 ON / OFF" Click="ToggleRoom_Click"/>
                 <Button Content="링크 설정" Click="SetLink_Click" Background="#485C78"/>
                 <Button Content="안전 점검" Click="SafeProbe_Click" Background="#53698F"/>
                 <Button Content="실제 점검" Click="LiveCheck_Click" Background="#4167AE"/>
+                <Button Content="UI 캘리브레이션" Click="Calibrate_Click" Background="#5C4A84"/>
                 <Button Content="방 삭제" Click="RemoveRoom_Click" Background="#70434B"/>
-            </StackPanel>
-            <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MaxWidth="500">
+            </WrapPanel>
+            <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MaxWidth="480">
                 <TextBlock x:Name="RuntimeStats" HorizontalAlignment="Right" Foreground="#C5CCD6" FontSize="12" TextWrapping="Wrap"/>
                 <TextBlock x:Name="LastStatus" HorizontalAlignment="Right" Foreground="{StaticResource Muted}"
                            Margin="0,4,0,0" FontSize="12" TextWrapping="Wrap" TextAlignment="Right"/>
@@ -116,13 +105,10 @@
         <Border Grid.Row="5" Background="#11151C" BorderBrush="{StaticResource Border}" BorderThickness="1"
                 CornerRadius="10" Padding="12,9" Margin="0,12,0,0">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="초기 설정" Foreground="{StaticResource Warn}" FontWeight="SemiBold"/>
-                <TextBlock Grid.Column="1" Margin="12,0,0,0" Foreground="{StaticResource Muted}" FontSize="12"
-                           Text="1) 방 이름+오픈채팅 링크  →  2) 안전 점검  →  3) 실제 점검  →  4) 관리 ON  →  5) 전체 시작"/>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <TextBlock Text="운영 흐름" Foreground="{StaticResource Warn}" FontWeight="SemiBold"/>
+                <TextBlock Grid.Column="1" Margin="12,0,0,0" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"
+                           Text="방+링크 등록 → 안전 점검 → 실제 점검 → 관리 ON → 전체 시작. 자동 인식 실패 단계만 ‘UI 캘리브레이션’으로 1회 저장하면 이후 상대좌표+시그니처 검증으로 재사용."/>
             </Grid>
         </Border>
     </Grid>
