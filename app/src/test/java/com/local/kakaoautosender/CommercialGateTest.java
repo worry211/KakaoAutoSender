@@ -20,7 +20,6 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowContentResolver;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 28)
@@ -34,7 +33,7 @@ public class CommercialGateTest {
     c.getSharedPreferences("entitlement_v2", 0).edit().clear().commit();
     Settings.Global.putInt(c.getContentResolver(), Settings.Global.BOOT_COUNT, 4);
     KakaoNotificationListener.clearRuntimeAndBindings(c);
-    ShadowContentResolver.registerInputStream(
+    Shadows.shadowOf(c.getContentResolver()).registerInputStream(
         Uri.parse("content://photo/a"), new ByteArrayInputStream(new byte[] {1, 2, 3}));
     c.getSharedPreferences("entitlement_v2", 0)
         .edit()
