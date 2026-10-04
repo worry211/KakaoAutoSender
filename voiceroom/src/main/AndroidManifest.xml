@@ -48,10 +48,13 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- These are protected/system-targeted recovery broadcasts. Exported remains true so
+             BOOT_COMPLETED / MY_PACKAGE_REPLACED / exact-alarm permission change delivery is not
+             lost across OEM Android implementations. onReceive only accepts this fixed allowlist. -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
-            android:exported="false">
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
