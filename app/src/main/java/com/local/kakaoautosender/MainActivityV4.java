@@ -48,7 +48,10 @@ public class MainActivityV4 extends Activity {
     private LinearLayout roomList;
     private TextView masterStatus;
     private TextView systemStatus;
-    private TextView summaryStatus;
+    private TextView summaryRooms;
+    private TextView summaryEnabled;
+    private TextView summaryReady;
+    private TextView summaryNote;
     private Button startButton;
     private Button stopButton;
     private boolean receiverRegistered;
@@ -166,12 +169,32 @@ public class MainActivityV4 extends Activity {
         root.addView(roomList, top(7));
 
         LinearLayout summaryCard = card(Color.rgb(14, 18, 27), Color.rgb(35, 44, 61), 16);
+        LinearLayout summaryHeader = new LinearLayout(this);
+        summaryHeader.setOrientation(LinearLayout.HORIZONTAL);
+        summaryHeader.setGravity(Gravity.CENTER_VERTICAL);
         TextView summaryTitle = text("운영 요약", 11, true, Color.rgb(128, 142, 169));
         summaryTitle.setLetterSpacing(0.07f);
-        summaryCard.addView(summaryTitle);
-        summaryStatus = text("", 12, false, Color.rgb(184, 194, 213));
-        summaryStatus.setLineSpacing(0, 1.16f);
-        summaryCard.addView(summaryStatus, top(7));
+        summaryHeader.addView(summaryTitle, weight());
+        summaryHeader.addView(pill("LIVE", Color.rgb(24, 34, 52), Color.rgb(158, 177, 225)));
+        summaryCard.addView(summaryHeader);
+
+        LinearLayout metrics = new LinearLayout(this);
+        metrics.setOrientation(LinearLayout.HORIZONTAL);
+        summaryRooms = metricValue();
+        summaryEnabled = metricValue();
+        summaryReady = metricValue();
+        metrics.addView(metric("연결된 방", summaryRooms), weight());
+        LinearLayout.LayoutParams enabledLp = weight();
+        enabledLp.leftMargin = dp(7);
+        metrics.addView(metric("사용 중", summaryEnabled), enabledLp);
+        LinearLayout.LayoutParams readyLp = weight();
+        readyLp.leftMargin = dp(7);
+        metrics.addView(metric("전송 준비", summaryReady), readyLp);
+        summaryCard.addView(metrics, top(12));
+
+        summaryNote = text("", 11, false, Color.rgb(142, 155, 180));
+        summaryNote.setLineSpacing(0, 1.14f);
+        summaryCard.addView(summaryNote, top(11));
         root.addView(summaryCard, top(12));
 
         LinearLayout toolsHeading = new LinearLayout(this);
@@ -247,10 +270,15 @@ public class MainActivityV4 extends Activity {
             TextView emptyBadge = pill("GET STARTED", Color.rgb(29, 38, 65), Color.rgb(180, 195, 255));
             empty.addView(emptyBadge, wrap());
             empty.addView(text("첫 자동전송 방을 연결하세요", 18, true, TEXT), top(13));
-            TextView guide = text("원하는 카카오톡 오픈채팅방에서 새 메시지를 하나 받은 뒤 위의 ‘새 방 연결’을 선택하면 됩니다.", 13, false, Color.rgb(166, 177, 198));
+            TextView guide = text("카카오톡에서 대상 방의 새 메시지를 하나 받은 뒤 ‘새 방 연결’에서 방을 선택하세요.", 13, false, Color.rgb(166, 177, 198));
             guide.setLineSpacing(0, 1.15f);
             empty.addView(guide, top(7));
-            TextView safe = text("방 이름과 답장 세션이 확인된 경우에만 연결됩니다.", 11, false, Color.rgb(112, 126, 151));
+            LinearLayout path = card(Color.rgb(14, 18, 27), Color.rgb(35, 44, 61), 12);
+            TextView steps = text("01  새 메시지 받기   →   02  방 연결   →   03  1회 테스트", 11, true, Color.rgb(153, 170, 209));
+            steps.setGravity(Gravity.CENTER);
+            path.addView(steps);
+            empty.addView(path, top(11));
+            TextView safe = text("방 이름과 답장 세션이 함께 확인된 경우에만 연결됩니다.", 11, false, Color.rgb(112, 126, 151));
             empty.addView(safe, top(10));
             roomList.addView(empty, top(7));
         } else {
@@ -260,13 +288,32 @@ public class MainActivityV4 extends Activity {
         int ready = MultiRoomStore.readyCount(this);
         int enabled = MultiRoomStore.enabledCount(this);
         long next = MultiRoomStore.nextDueAt(this);
-        StringBuilder s = new StringBuilder();
-        s.append("방 ").append(profiles.size()).append("개  ·  사용 중 ").append(enabled)
-                .append("개  ·  즉시 전송 가능 ").append(ready).append("개");
-        if (active && next > 0) s.append("\n다음 예정  ").append(formatDateTime(next));
-        if (!access) s.append("\n알림 접근 권한을 허용해야 자동전송을 사용할 수 있습니다.");
-        else if (!listener) s.append("\n카카오 알림 리스너 연결을 기다리고 있습니다.");
-        summaryStatus.setText(s.toString());
+        summaryRooms.setText(String.valueOf(profiles.size()));
+        summaryEnabled.setText(String.valueOf(enabled));
+        summaryReady.setText(String.valueOf(ready));
+
+        boolean warning = false;
+        String note;
+        if (!access) {
+            warning = true;
+            note = "알림 접근 권한이 필요합니다. 아래 ‘알림 접근’에서 허용해 주세요.";
+        } else if (!listener) {
+            warning = true;
+            note = "카카오 알림 연결을 기다리고 있습니다. 새 메시지를 받은 뒤 새로고침해 주세요.";
+        } else if (profiles.isEmpty()) {
+            note = "첫 방을 연결하면 메시지·스케줄·전송 상태를 여기서 한눈에 확인할 수 있습니다.";
+        } else if (enabled == 0) {
+            note = "연결된 방은 있지만 현재 사용 중인 자동전송 방이 없습니다.";
+        } else if (ready < enabled) {
+            warning = true;
+            note = "사용 중인 방 중 " + (enabled - ready) + "개가 연결 대기 중입니다. 해당 방의 새 메시지를 받으면 복구됩니다.";
+        } else if (active && next > 0) {
+            note = "다음 전송 예정  ·  " + formatDateTime(next);
+        } else {
+            note = "모든 활성 방이 전송 준비 상태입니다.";
+        }
+        summaryNote.setText(note);
+        summaryNote.setTextColor(warning ? AMBER : Color.rgb(142, 155, 180));
     }
 
     private View roomCard(MultiRoomStore.Profile p) {
@@ -381,13 +428,15 @@ public class MainActivityV4 extends Activity {
         ScrollView listScroll = new ScrollView(this);
         listScroll.setFillViewport(false);
         listScroll.addView(rows);
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
+        int pickerHeight = Math.min(dp(500), Math.max(dp(300), screenHeight - dp(390)));
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(420));
+                LinearLayout.LayoutParams.MATCH_PARENT, pickerHeight);
         scrollLp.topMargin = dp(5);
         content.addView(listScroll, scrollLp);
 
         if (!manual) {
-            Button advanced = tertiaryButton("방이 안 보이면 직접 연결");
+            Button advanced = tertiaryButton("최근 알림에서 직접 연결");
             content.addView(advanced, top(10));
             advanced.setOnClickListener(v -> {
                 showAdvancedManualAdd();
@@ -430,13 +479,20 @@ public class MainActivityV4 extends Activity {
             LinearLayout row = card(SURFACE_2, BORDER, 14);
             row.setClickable(true);
             row.setFocusable(true);
+            boolean existing = !room.isEmpty() && !MultiRoomStore.findByActualName(this, room).isEmpty();
+            LinearLayout rowTop = new LinearLayout(this);
+            rowTop.setOrientation(LinearLayout.HORIZONTAL);
+            rowTop.setGravity(Gravity.CENTER_VERTICAL);
             TextView name = text(room.isEmpty() ? "방 이름 미확인" : room, 15, true, TEXT);
             name.setMaxLines(2);
-            row.addView(name);
-            boolean existing = !room.isEmpty() && !MultiRoomStore.findByActualName(this, room).isEmpty();
-            String meta = manual ? "직접 확인 후 연결"
-                    : existing ? "기존 등록 방 · 연결 복구 가능"
-                    : "새 방 후보 · 탭하여 연결";
+            rowTop.addView(name, weight());
+            rowTop.addView(pill(manual ? "확인" : existing ? "복구" : "연결",
+                    existing ? Color.rgb(25, 49, 42) : Color.rgb(29, 38, 65),
+                    existing ? GREEN : Color.rgb(180, 195, 255)));
+            row.addView(rowTop);
+            String meta = manual ? "알림에 표시된 방 이름을 확인한 뒤 연결합니다."
+                    : existing ? "기존 등록 방 · 현재 답장 연결만 복구합니다."
+                    : "새 방 후보 · 선택하면 방별 설정 화면으로 이동합니다.";
             row.addView(text(meta, 11, false, existing ? GREEN : Color.rgb(125, 139, 166)), top(6));
             final KakaoNotificationListener.SessionEntry selected = entry;
             row.setOnClickListener(v -> {
@@ -445,7 +501,7 @@ public class MainActivityV4 extends Activity {
             });
             rows.addView(row, top(6));
         }
-        count.setText(shown + "개 방 표시");
+        count.setText(shown + "개 방 표시 · 방 이름을 눌러 연결");
         if (shown == 0) {
             LinearLayout empty = card(Color.rgb(14, 18, 27), Color.rgb(35, 44, 61), 14);
             empty.addView(text("검색 결과가 없습니다.", 13, true, Color.rgb(197, 207, 228)));
@@ -708,6 +764,23 @@ public class MainActivityV4 extends Activity {
         l.setBackground(roundStroke(fill, stroke, radiusDp));
         l.setElevation(dp(1));
         return l;
+    }
+
+    private TextView metricValue() {
+        TextView value = text("0", 20, true, TEXT);
+        value.setGravity(Gravity.CENTER);
+        return value;
+    }
+
+    private LinearLayout metric(String label, TextView value) {
+        LinearLayout box = card(Color.rgb(18, 23, 34), Color.rgb(40, 49, 67), 12);
+        box.setPadding(dp(8), dp(11), dp(8), dp(10));
+        box.setGravity(Gravity.CENTER);
+        box.addView(value, wrap());
+        TextView caption = text(label, 10, true, Color.rgb(118, 132, 158));
+        caption.setGravity(Gravity.CENTER);
+        box.addView(caption, topWrap(4));
+        return box;
     }
 
     private TextView section(String value) {
