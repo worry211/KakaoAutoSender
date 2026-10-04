@@ -6,6 +6,7 @@ namespace VoiceRoomManager.Windows.Core;
 internal static partial class OpenChatLinkRegistry
 {
     private static readonly ConcurrentDictionary<string, string> Links = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, DateTimeOffset> RecentVerifiedEntries = new(StringComparer.Ordinal);
 
     [GeneratedRegex("^[A-Za-z0-9_-]{3,128}$", RegexOptions.CultureInvariant)]
     private static partial Regex SlugPattern();
@@ -37,6 +38,7 @@ internal static partial class OpenChatLinkRegistry
     public static void Rebuild(IEnumerable<RoomState> rooms)
     {
         Links.Clear();
+        RecentVerifiedEntries.Clear();
         foreach (var room in rooms)
         {
             if (!IsSupported(room.OpenChatUrl)) continue;
@@ -46,4 +48,26 @@ internal static partial class OpenChatLinkRegistry
 
     public static bool TryGet(string title, out string url) =>
         Links.TryGetValue((title ?? "").Trim(), out url!);
+
+    public static void MarkVerifiedEntry(string title)
+    {
+        title = (title ?? "").Trim();
+        if (title.Length == 0 || !Links.ContainsKey(title)) return;
+        RecentVerifiedEntries[title] = DateTimeOffset.UtcNow;
+    }
+
+    public static bool IsRecentlyVerifiedEntry(string title, TimeSpan? maxAge = null)
+    {
+        title = (title ?? "").Trim();
+        if (title.Length == 0 || !Links.ContainsKey(title)) return false;
+        if (!RecentVerifiedEntries.TryGetValue(title, out var at)) return false;
+        var age = DateTimeOffset.UtcNow - at;
+        var limit = maxAge ?? TimeSpan.FromSeconds(12);
+        if (age < TimeSpan.Zero || age > limit)
+        {
+            RecentVerifiedEntries.TryRemove(title, out _);
+            return false;
+        }
+        return true;
+    }
 }
