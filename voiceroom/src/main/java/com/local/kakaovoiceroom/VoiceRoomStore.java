@@ -24,7 +24,7 @@ final class VoiceRoomStore {
     static final String ENTRY_DEEPLINK = "DEEPLINK";
     static final String ENTRY_LAUNCHER = "LAUNCHER";
 
-    private static final int VERIFICATION_SCHEMA = 2;
+    private static final int VERIFICATION_SCHEMA = 3;
     private static final String PREFS = "voiceroom_manager";
     private static final String KEY_ROOMS = "rooms_json";
     private static final String KEY_ACTIVE = "manager_active";
@@ -52,6 +52,9 @@ final class VoiceRoomStore {
         String lastError;
         long stageStartedAt;
         String lastDiagnostic;
+        boolean micMuted;
+        boolean speakerMuted;
+        long audioCheckedAt;
 
         Room copy() {
             Room r = new Room();
@@ -69,6 +72,9 @@ final class VoiceRoomStore {
             r.lastError = lastError;
             r.stageStartedAt = stageStartedAt;
             r.lastDiagnostic = lastDiagnostic;
+            r.micMuted = micMuted;
+            r.speakerMuted = speakerMuted;
+            r.audioCheckedAt = audioCheckedAt;
             return r;
         }
     }
@@ -78,14 +84,13 @@ final class VoiceRoomStore {
     }
 
     /**
-     * v0.4.0 could accept a weak text combination from a normal chat/menu as an active VoiceRoom.
-     * Never carry that trust boundary forward. The migration is one-shot and intentionally keeps
-     * the non-destructive safe-probe result while requiring a fresh live check under the stricter
-     * v0.4.1 activation proof.
+     * Schema 2 invalidated v0.4.0's weak live-verification evidence. Schema 3 adds audio-safety
+     * evidence without destroying a v0.4.1 live check that has already been proven on-device.
      */
     private static void ensureVerificationSchema(Context context) {
         SharedPreferences prefs = p(context);
-        if (prefs.getInt(KEY_VERIFICATION_SCHEMA, 0) >= VERIFICATION_SCHEMA) return;
+        int schema = prefs.getInt(KEY_VERIFICATION_SCHEMA, 0);
+        if (schema >= VERIFICATION_SCHEMA) return;
 
         String raw = prefs.getString(KEY_ROOMS, "[]");
         JSONArray migrated = new JSONArray();
@@ -94,32 +99,46 @@ final class VoiceRoomStore {
             for (int i = 0; i < source.length(); i++) {
                 JSONObject o = source.optJSONObject(i);
                 if (o == null) continue;
-                boolean safe = o.optBoolean("safeProbePassed", false);
-                o.put("liveCheckPassed", false);
-                o.put("verifiedAt", safe ? Math.max(0L, o.optLong("verifiedAt", 0L)) : 0L);
-                o.put("startedAt", 0L);
-                o.put("nextCheckAt", 0L);
-                o.put("failures", 0);
-                o.put("stageStartedAt", 0L);
-                o.put("status", safe ? "PROBE_OK" : "NEW");
-                o.put("lastError", "v0.4.1 활성 판정 강화로 실제 점검을 다시 해줘.");
+
+                if (schema < 2) {
+                    boolean safe = o.optBoolean("safeProbePassed", false);
+                    o.put("liveCheckPassed", false);
+                    o.put("verifiedAt", safe ? Math.max(0L, o.optLong("verifiedAt", 0L)) : 0L);
+                    o.put("startedAt", 0L);
+                    o.put("nextCheckAt", 0L);
+                    o.put("failures", 0);
+                    o.put("stageStartedAt", 0L);
+                    o.put("status", safe ? "PROBE_OK" : "NEW");
+                    o.put("lastError", "v0.4.1 활성 판정 강화로 실제 점검을 다시 해줘.");
+                }
+
+                if (schema < 3) {
+                    o.put("micMuted", false);
+                    o.put("speakerMuted", false);
+                    o.put("audioCheckedAt", 0L);
+                }
                 migrated.put(o);
             }
         } catch (Exception ignored) {
             migrated = new JSONArray();
         }
 
-        prefs.edit()
+        SharedPreferences.Editor editor = prefs.edit()
                 .putString(KEY_ROOMS, migrated.toString())
-                .putBoolean(KEY_ACTIVE, false)
-                .putInt(KEY_VERIFICATION_SCHEMA, VERIFICATION_SCHEMA)
-                .remove(KEY_PENDING_ROOM)
-                .remove(KEY_PENDING_AT)
-                .remove(KEY_PENDING_MODE)
-                .remove(KEY_PENDING_ENTRY)
-                .putString(KEY_LAST_STATUS, "v0.4.1 활성 판정 강화 · 실제 점검 재확인 필요")
-                .apply();
-        AudioGuard.restore(context);
+                .putInt(KEY_VERIFICATION_SCHEMA, VERIFICATION_SCHEMA);
+        if (schema < 2) {
+            editor.putBoolean(KEY_ACTIVE, false)
+                    .remove(KEY_PENDING_ROOM)
+                    .remove(KEY_PENDING_AT)
+                    .remove(KEY_PENDING_MODE)
+                    .remove(KEY_PENDING_ENTRY)
+                    .putString(KEY_LAST_STATUS, "v0.4.1 활성 판정 강화 · 실제 점검 재확인 필요");
+        } else {
+            editor.putString(KEY_LAST_STATUS,
+                    "v0.4.2 오디오 보호 상태 추가 · 다음 실제/자동 점검에서 마이크·스피커 상태 확인");
+        }
+        editor.apply();
+        if (schema < 2) AudioGuard.restore(context);
     }
 
     static synchronized List<Room> list(Context context) {
@@ -161,6 +180,9 @@ final class VoiceRoomStore {
         room.lastError = "";
         room.stageStartedAt = 0L;
         room.lastDiagnostic = "";
+        room.micMuted = false;
+        room.speakerMuted = false;
+        room.audioCheckedAt = 0L;
         List<Room> rooms = list(context);
         rooms.add(room);
         save(context, rooms);
@@ -319,6 +341,9 @@ final class VoiceRoomStore {
             o.put("lastError", safe(r.lastError));
             o.put("stageStartedAt", r.stageStartedAt);
             o.put("lastDiagnostic", safe(r.lastDiagnostic));
+            o.put("micMuted", r.micMuted);
+            o.put("speakerMuted", r.speakerMuted);
+            o.put("audioCheckedAt", r.audioCheckedAt);
         } catch (Exception ignored) {}
         return o;
     }
@@ -339,6 +364,9 @@ final class VoiceRoomStore {
         r.lastError = o.optString("lastError", "");
         r.stageStartedAt = Math.max(0L, o.optLong("stageStartedAt", 0L));
         r.lastDiagnostic = o.optString("lastDiagnostic", "");
+        r.micMuted = o.optBoolean("micMuted", false);
+        r.speakerMuted = o.optBoolean("speakerMuted", false);
+        r.audioCheckedAt = Math.max(0L, o.optLong("audioCheckedAt", 0L));
         return r;
     }
 
