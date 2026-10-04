@@ -44,12 +44,16 @@ public class MainActivity extends Activity {
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getWindow().setStatusBarColor(Color.rgb(12, 13, 16));
+        getWindow().setNavigationBarColor(Color.rgb(12, 13, 16));
         setContentView(buildUi());
+        recoverStalePendingOnForeground();
         refreshUi();
     }
 
     @Override protected void onResume() {
         super.onResume();
+        recoverStalePendingOnForeground();
         handler.removeCallbacks(ticker);
         handler.post(ticker);
     }
@@ -169,7 +173,7 @@ public class MainActivity extends Activity {
         if (rooms.isEmpty()) {
             LinearLayout empty = card(Color.rgb(28, 31, 38));
             empty.addView(text("아직 등록한 방이 없어", 16, true));
-            TextView guide = text("방 이름을 정확히 입력하고, 가능하면 오픈채팅 링크도 같이 등록해줘.", 12, false);
+            TextView guide = text("방 이름을 정확히 입력하고, 가능하면 open.kakao.com 오픈채팅 링크도 같이 등록해줘.", 12, false);
             guide.setTextColor(Color.rgb(166, 172, 183));
             empty.addView(guide, top(6));
             roomList.addView(empty, top(7));
@@ -209,6 +213,12 @@ public class MainActivity extends Activity {
             TextView error = text(room.lastError, 11, false);
             error.setTextColor(Color.rgb(235, 126, 126));
             card.addView(error, top(5));
+        }
+        if (room.lastDiagnostic != null && !room.lastDiagnostic.isEmpty()
+                && ("ERROR".equals(room.status) || "PROBE_ERROR".equals(room.status))) {
+            TextView diag = text("진단  " + room.lastDiagnostic, 10, false);
+            diag.setTextColor(Color.rgb(142, 151, 170));
+            card.addView(diag, top(5));
         }
 
         LinearLayout actions = new LinearLayout(this);
@@ -282,15 +292,29 @@ public class MainActivity extends Activity {
             return;
         }
 
+        if (current.roomUrl != null && !current.roomUrl.trim().isEmpty()
+                && !KakaoUiPolicy.isOpenChatUrl(current.roomUrl)) {
+            current.status = "PROBE_ERROR";
+            current.lastError = "오픈채팅 링크 형식이 올바르지 않아. open.kakao.com 링크를 사용해줘.";
+            current.stageStartedAt = 0L;
+            VoiceRoomStore.update(this, current);
+            refreshUi();
+            return;
+        }
+
+        long now = System.currentTimeMillis();
         current.status = "PROBE_OPENING_KAKAO";
+        current.stageStartedAt = now;
         current.lastError = "";
+        current.lastDiagnostic = "";
         VoiceRoomStore.update(this, current);
-        VoiceRoomStore.setPending(this, current.id, VoiceRoomStore.MODE_PROBE);
+        VoiceRoomStore.setPending(this, current.id, VoiceRoomStore.MODE_PROBE, VoiceRoomStore.ENTRY_UNKNOWN);
         VoiceRoomStore.setLastStatus(this, current.title + " · 전경 안전 점검 시작");
 
         Exception last = null;
-        if (current.roomUrl != null && !current.roomUrl.trim().isEmpty()) {
+        if (KakaoUiPolicy.isOpenChatUrl(current.roomUrl)) {
             try {
+                VoiceRoomStore.updatePendingEntry(this, VoiceRoomStore.ENTRY_DEEPLINK);
                 Intent deepLink = new Intent(Intent.ACTION_VIEW, Uri.parse(current.roomUrl.trim()));
                 deepLink.setPackage("com.kakao.talk");
                 startActivity(deepLink);
@@ -302,6 +326,7 @@ public class MainActivity extends Activity {
         }
 
         try {
+            VoiceRoomStore.updatePendingEntry(this, VoiceRoomStore.ENTRY_LAUNCHER);
             Intent launcher = getPackageManager().getLaunchIntentForPackage("com.kakao.talk");
             if (launcher == null) throw new IllegalStateException("카카오톡 런처 없음");
             startActivity(launcher);
@@ -313,6 +338,7 @@ public class MainActivity extends Activity {
 
         VoiceRoomStore.clearPending(this);
         current.status = "PROBE_ERROR";
+        current.stageStartedAt = 0L;
         current.lastError = "카카오톡 실행 실패 · " + shortError(last);
         VoiceRoomStore.update(this, current);
         VoiceRoomStore.setLastStatus(this, current.title + " · " + current.lastError);
@@ -342,7 +368,9 @@ public class MainActivity extends Activity {
                     if (current == null) return;
                     current.nextCheckAt = System.currentTimeMillis() + 2_000L;
                     current.status = "CHECK_DUE";
+                    current.stageStartedAt = 0L;
                     current.lastError = "";
+                    current.lastDiagnostic = "";
                     VoiceRoomStore.update(this, current);
                     VoiceRoomScheduler.scheduleNext(this);
                     toast("실제 점검 예약을 앞당겼어.");
@@ -364,7 +392,7 @@ public class MainActivity extends Activity {
         wrap.addView(title);
 
         EditText url = new EditText(this);
-        url.setHint("오픈채팅 링크 (선택, 권장)");
+        url.setHint("open.kakao.com 오픈채팅 링크 (선택, 권장)");
         url.setSingleLine(true);
         url.setText(existing == null ? "" : existing.roomUrl);
         wrap.addView(url, top(8));
@@ -379,17 +407,32 @@ public class MainActivity extends Activity {
         dialog.setOnShowListener(ignored -> {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                 String t = title.getText().toString().trim();
+                String u = url.getText().toString().trim();
                 if (t.isEmpty()) {
                     title.setError("방 이름을 입력해줘.");
                     return;
                 }
+                if (!u.isEmpty() && !KakaoUiPolicy.isOpenChatUrl(u)) {
+                    url.setError("https://open.kakao.com/... 링크를 넣어줘.");
+                    return;
+                }
                 if (existing == null) {
-                    VoiceRoomStore.add(this, t, url.getText().toString().trim());
+                    VoiceRoomStore.add(this, t, u);
                 } else {
                     VoiceRoomStore.Room current = VoiceRoomStore.get(this, existing.id);
                     if (current == null) return;
+                    boolean identityChanged = !t.equals(current.title) || !u.equals(current.roomUrl);
                     current.title = t;
-                    current.roomUrl = url.getText().toString().trim();
+                    current.roomUrl = u;
+                    if (identityChanged) {
+                        current.startedAt = 0L;
+                        current.nextCheckAt = System.currentTimeMillis() + 5_000L;
+                        current.failures = 0;
+                        current.status = "NEW";
+                        current.stageStartedAt = 0L;
+                        current.lastError = "";
+                        current.lastDiagnostic = "";
+                    }
                     VoiceRoomStore.update(this, current);
                 }
                 VoiceRoomScheduler.scheduleNext(this);
@@ -460,6 +503,28 @@ public class MainActivity extends Activity {
         refreshUi();
     }
 
+    private void recoverStalePendingOnForeground() {
+        String pendingId = VoiceRoomStore.pendingRoomId(this);
+        if (pendingId.isEmpty() || VoiceRoomStore.hasFreshPending(this)) return;
+        boolean probe = VoiceRoomStore.isProbePending(this);
+        VoiceRoomStore.Room room = VoiceRoomStore.get(this, pendingId);
+        VoiceRoomStore.clearPending(this);
+        if (room == null) return;
+        room.stageStartedAt = 0L;
+        if (probe) {
+            room.status = "PROBE_ERROR";
+            room.lastError = "이전 안전 점검이 응답 없이 종료되어 자동 복구됨";
+        } else {
+            room.failures += 1;
+            room.status = "ERROR";
+            room.lastError = "이전 자동화 작업이 응답 없이 종료되어 자동 복구됨";
+            room.nextCheckAt = System.currentTimeMillis() + KakaoUiPolicy.retryDelayMs(room.failures);
+        }
+        VoiceRoomStore.update(this, room);
+        VoiceRoomStore.setLastStatus(this, room.title + " · 중단된 작업 자동 복구");
+        VoiceRoomScheduler.scheduleNext(this);
+    }
+
     private void openExactAlarmSettings() {
         if (Build.VERSION.SDK_INT < 31) {
             toast("이 Android 버전에서는 별도 정확 알람 설정이 필요하지 않아.");
@@ -505,19 +570,20 @@ public class MainActivity extends Activity {
             case "ACTIVE": return "실행 중";
             case "ACTIVE_UNKNOWN_START": return "실행 중 · 시작시간 확인 중";
             case "CREATING": return "재개설 중";
+            case "CREATING_CONFIRMING": return "생성 확인 중";
             case "OPENING_KAKAO": return "카카오톡 여는 중";
             case "OPENING_ROOM": return "방 진입 중";
             case "ROOM_VERIFIED": return "대상 방 확인됨";
-            case "ROOM_MENU": return "방 메뉴 확인 중";
-            case "VOICE_MENU": return "보이스룸 메뉴 확인 중";
+            case "ROOM_MENU": return "하단 + 메뉴 확인 중";
+            case "VOICE_MENU": return "보이스룸 화면 확인 중";
             case "WAITING_UNLOCK": return "잠금 해제 대기";
             case "ERROR": return "오류 · 재시도 예정";
             case "CHECK_DUE": return "점검 대기";
             case "PROBE_OPENING_KAKAO": return "안전 점검 · 카카오톡 여는 중";
             case "PROBE_OPENING_ROOM": return "안전 점검 · 방 진입 중";
             case "PROBE_ROOM_VERIFIED": return "안전 점검 · 대상 방 확인됨";
-            case "PROBE_ROOM_MENU": return "안전 점검 · 방 메뉴 확인 중";
-            case "PROBE_VOICE_MENU": return "안전 점검 · 보이스룸 메뉴 확인 중";
+            case "PROBE_ROOM_MENU": return "안전 점검 · 하단 + 확인 중";
+            case "PROBE_VOICE_MENU": return "안전 점검 · 보이스룸 화면 확인 중";
             case "PROBE_OK": return "안전 점검 성공";
             case "PROBE_ERROR": return "안전 점검 실패";
             default: return "대기";
