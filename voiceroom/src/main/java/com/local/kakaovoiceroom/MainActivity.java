@@ -143,7 +143,7 @@ public class MainActivity extends Activity {
         tools2.addView(kakao, kakaoLp);
         root.addView(tools2, top(7));
 
-        TextView note = text("처음에는 방별 ‘안전 점검’부터 실행해. 생성 버튼은 누르지 않고 방/보이스룸 화면 인식까지만 검증해. 화면 OFF 자동화는 보안 잠금을 우회하지 않아.", 11, false);
+        TextView note = text("처음에는 방별 ‘안전 점검’부터 실행해. 안전 점검은 생성하지 않고 인식만 확인하고, ‘실제 점검’은 선택한 방만 즉시 실제 생성까지 검증할 수 있어. 화면 OFF 자동화는 보안 잠금을 우회하지 않아.", 11, false);
         note.setTextColor(Color.rgb(132, 138, 150));
         root.addView(note, top(14));
 
@@ -215,7 +215,8 @@ public class MainActivity extends Activity {
             card.addView(error, top(5));
         }
         if (room.lastDiagnostic != null && !room.lastDiagnostic.isEmpty()
-                && ("ERROR".equals(room.status) || "PROBE_ERROR".equals(room.status))) {
+                && ("ERROR".equals(room.status) || "PROBE_ERROR".equals(room.status)
+                || "MANUAL_ERROR".equals(room.status))) {
             TextView diag = text("진단  " + room.lastDiagnostic, 10, false);
             diag.setTextColor(Color.rgb(142, 151, 170));
             card.addView(diag, top(5));
@@ -259,19 +260,7 @@ public class MainActivity extends Activity {
             toast("안전 점검은 전체 자동관리를 잠깐 중단한 뒤 실행해줘.");
             return;
         }
-        if (!VoiceRoomAccessibilityService.isEnabled(this)) {
-            new AlertDialog.Builder(this)
-                    .setTitle("접근성 설정 필요")
-                    .setMessage("안전 점검에는 ‘보이스룸 자동화’ 접근성 서비스가 필요해.")
-                    .setNegativeButton("취소", null)
-                    .setPositiveButton("설정 열기", (d, w) -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
-                    .show();
-            return;
-        }
-        if (getPackageManager().getLaunchIntentForPackage("com.kakao.talk") == null) {
-            toast("카카오톡이 설치되어 있지 않아.");
-            return;
-        }
+        if (!preflightForDirectCheck()) return;
         if (VoiceRoomStore.hasFreshPending(this)) {
             toast("이미 다른 점검을 처리 중이야.");
             return;
@@ -279,10 +268,27 @@ public class MainActivity extends Activity {
 
         new AlertDialog.Builder(this)
                 .setTitle("안전 인식 점검")
-                .setMessage("‘" + room.title + "’ 방을 열고 보이스룸 메뉴/생성 화면 또는 기존 활성 상태까지만 확인해. 새 보이스룸 생성 버튼은 누르지 않아.")
+                .setMessage("‘" + room.title + "’ 방을 열고 보이스룸 생성 화면 또는 기존 활성 상태까지만 확인해. 새 보이스룸 이름 입력/생성은 하지 않아.")
                 .setNegativeButton("취소", null)
                 .setPositiveButton("점검 시작", (d, w) -> launchSafeProbeFromForeground(room))
                 .show();
+    }
+
+    private boolean preflightForDirectCheck() {
+        if (!VoiceRoomAccessibilityService.isEnabled(this)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("접근성 설정 필요")
+                    .setMessage("점검에는 ‘보이스룸 자동화’ 접근성 서비스가 필요해.")
+                    .setNegativeButton("취소", null)
+                    .setPositiveButton("설정 열기", (d, w) -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
+                    .show();
+            return false;
+        }
+        if (getPackageManager().getLaunchIntentForPackage("com.kakao.talk") == null) {
+            toast("카카오톡이 설치되어 있지 않아.");
+            return false;
+        }
+        return true;
     }
 
     private void launchSafeProbeFromForeground(VoiceRoomStore.Room room) {
@@ -291,16 +297,7 @@ public class MainActivity extends Activity {
             toast("등록된 방을 찾지 못했어.");
             return;
         }
-
-        if (current.roomUrl != null && !current.roomUrl.trim().isEmpty()
-                && !KakaoUiPolicy.isOpenChatUrl(current.roomUrl)) {
-            current.status = "PROBE_ERROR";
-            current.lastError = "오픈채팅 링크 형식이 올바르지 않아. open.kakao.com 링크를 사용해줘.";
-            current.stageStartedAt = 0L;
-            VoiceRoomStore.update(this, current);
-            refreshUi();
-            return;
-        }
+        if (!validRoomLinkOrMarkError(current, true)) return;
 
         long now = System.currentTimeMillis();
         current.status = "PROBE_OPENING_KAKAO";
@@ -345,6 +342,49 @@ public class MainActivity extends Activity {
         refreshUi();
     }
 
+    private void confirmImmediateCheck(VoiceRoomStore.Room room) {
+        if (!preflightForDirectCheck()) return;
+        if (VoiceRoomStore.hasFreshPending(this)) {
+            toast("이미 다른 점검을 처리 중이야.");
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("실제 보이스룸 점검")
+                .setMessage("선택한 ‘" + room.title + "’ 방만 즉시 확인해. 보이스룸이 없으면 방 이름을 보이스룸 이름으로 자동 입력하고 실제로 새 보이스룸을 만들 수 있어. 전체 자동관리 ON/OFF 상태는 바꾸지 않아. 계속할까?")
+                .setNegativeButton("취소", null)
+                .setPositiveButton("실행", (d, w) -> startManualLiveCheck(room))
+                .show();
+    }
+
+    private void startManualLiveCheck(VoiceRoomStore.Room room) {
+        VoiceRoomStore.Room current = VoiceRoomStore.get(this, room.id);
+        if (current == null) return;
+        if (!validRoomLinkOrMarkError(current, false)) return;
+
+        current.nextCheckAt = System.currentTimeMillis() + 2_000L;
+        current.status = "CHECK_DUE";
+        current.stageStartedAt = 0L;
+        current.lastError = "";
+        current.lastDiagnostic = "";
+        VoiceRoomStore.update(this, current);
+        VoiceRoomStore.setLastStatus(this, current.title + " · 수동 실제 점검 대기");
+        VoiceRoomScheduler.scheduleNext(this);
+        toast("선택한 방 실제 점검을 시작해.");
+        refreshUi();
+    }
+
+    private boolean validRoomLinkOrMarkError(VoiceRoomStore.Room room, boolean probe) {
+        if (room.roomUrl == null || room.roomUrl.trim().isEmpty()
+                || KakaoUiPolicy.isOpenChatUrl(room.roomUrl)) return true;
+        room.status = probe ? "PROBE_ERROR" : "MANUAL_ERROR";
+        room.lastError = "오픈채팅 링크 형식이 올바르지 않아. open.kakao.com 링크를 사용해줘.";
+        room.stageStartedAt = 0L;
+        VoiceRoomStore.update(this, room);
+        refreshUi();
+        return false;
+    }
+
     private String shortError(Exception error) {
         if (error == null) return "원인 미확인";
         String message = error.getMessage();
@@ -352,31 +392,6 @@ public class MainActivity extends Activity {
         message = message.replace('\n', ' ').replace('\r', ' ').trim();
         if (message.length() > 100) message = message.substring(0, 100);
         return error.getClass().getSimpleName() + ": " + message;
-    }
-
-    private void confirmImmediateCheck(VoiceRoomStore.Room room) {
-        if (!VoiceRoomStore.managerActive(this)) {
-            toast("실제 점검은 먼저 전체 시작을 켜야 해.");
-            return;
-        }
-        new AlertDialog.Builder(this)
-                .setTitle("실제 자동 점검")
-                .setMessage("보이스룸이 없는 것으로 확인되면 이 작업은 실제로 새 보이스룸을 만들 수 있어. 계속할까?")
-                .setNegativeButton("취소", null)
-                .setPositiveButton("실행", (d, w) -> {
-                    VoiceRoomStore.Room current = VoiceRoomStore.get(this, room.id);
-                    if (current == null) return;
-                    current.nextCheckAt = System.currentTimeMillis() + 2_000L;
-                    current.status = "CHECK_DUE";
-                    current.stageStartedAt = 0L;
-                    current.lastError = "";
-                    current.lastDiagnostic = "";
-                    VoiceRoomStore.update(this, current);
-                    VoiceRoomScheduler.scheduleNext(this);
-                    toast("실제 점검 예약을 앞당겼어.");
-                    refreshUi();
-                })
-                .show();
     }
 
     private void showRoomDialog(VoiceRoomStore.Room existing) {
@@ -397,13 +412,14 @@ public class MainActivity extends Activity {
         url.setText(existing == null ? "" : existing.roomUrl);
         wrap.addView(url, top(8));
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
                 .setTitle(existing == null ? "방 추가" : "방 수정")
                 .setView(wrap)
                 .setNegativeButton("취소", null)
-                .setPositiveButton("저장", null)
-                .create();
-        if (existing != null) dialog.setButton(AlertDialog.BUTTON_NEUTRAL, "삭제", (d, which) -> {});
+                .setPositiveButton("저장", null);
+        if (existing != null) builder.setNeutralButton("삭제", null);
+        AlertDialog dialog = builder.create();
+
         dialog.setOnShowListener(ignored -> {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                 String t = title.getText().toString().trim();
@@ -456,19 +472,7 @@ public class MainActivity extends Activity {
     }
 
     private void startManager() {
-        if (!VoiceRoomAccessibilityService.isEnabled(this)) {
-            new AlertDialog.Builder(this)
-                    .setTitle("접근성 설정 필요")
-                    .setMessage("보이스룸 매니저가 카카오톡 화면을 확인하려면 접근성 서비스가 필요해. 설정에서 ‘보이스룸 자동화’를 켜줘.")
-                    .setNegativeButton("나중에", null)
-                    .setPositiveButton("설정 열기", (d, w) -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
-                    .show();
-            return;
-        }
-        if (getPackageManager().getLaunchIntentForPackage("com.kakao.talk") == null) {
-            toast("카카오톡이 설치되어 있지 않아.");
-            return;
-        }
+        if (!preflightForDirectCheck()) return;
         if (VoiceRoomStore.hasFreshPending(this)) {
             toast("진행 중인 점검이 끝난 뒤 시작해줘.");
             return;
@@ -480,8 +484,9 @@ public class MainActivity extends Activity {
         for (VoiceRoomStore.Room room : rooms) {
             if (!room.enabled) continue;
             any = true;
-            if (room.nextCheckAt <= 0L) {
+            if (room.nextCheckAt <= 0L || "MANUAL_ERROR".equals(room.status)) {
                 room.nextCheckAt = now + 3_000L;
+                if ("MANUAL_ERROR".equals(room.status)) room.status = "CHECK_DUE";
                 VoiceRoomStore.update(this, room);
             }
         }
@@ -507,6 +512,7 @@ public class MainActivity extends Activity {
         String pendingId = VoiceRoomStore.pendingRoomId(this);
         if (pendingId.isEmpty() || VoiceRoomStore.hasFreshPending(this)) return;
         boolean probe = VoiceRoomStore.isProbePending(this);
+        boolean manual = VoiceRoomStore.isManualPending(this);
         VoiceRoomStore.Room room = VoiceRoomStore.get(this, pendingId);
         VoiceRoomStore.clearPending(this);
         if (room == null) return;
@@ -514,6 +520,9 @@ public class MainActivity extends Activity {
         if (probe) {
             room.status = "PROBE_ERROR";
             room.lastError = "이전 안전 점검이 응답 없이 종료되어 자동 복구됨";
+        } else if (manual) {
+            room.status = "MANUAL_ERROR";
+            room.lastError = "이전 실제 점검이 응답 없이 종료되어 자동 복구됨";
         } else {
             room.failures += 1;
             room.status = "ERROR";
@@ -569,7 +578,8 @@ public class MainActivity extends Activity {
         switch (status) {
             case "ACTIVE": return "실행 중";
             case "ACTIVE_UNKNOWN_START": return "실행 중 · 시작시간 확인 중";
-            case "CREATING": return "재개설 중";
+            case "CREATING": return "재개설 준비 중";
+            case "CREATING_NAMED": return "이름 입력 완료 · 생성 중";
             case "CREATING_CONFIRMING": return "생성 확인 중";
             case "OPENING_KAKAO": return "카카오톡 여는 중";
             case "OPENING_ROOM": return "방 진입 중";
@@ -578,6 +588,7 @@ public class MainActivity extends Activity {
             case "VOICE_MENU": return "보이스룸 화면 확인 중";
             case "WAITING_UNLOCK": return "잠금 해제 대기";
             case "ERROR": return "오류 · 재시도 예정";
+            case "MANUAL_ERROR": return "실제 점검 실패";
             case "CHECK_DUE": return "점검 대기";
             case "PROBE_OPENING_KAKAO": return "안전 점검 · 카카오톡 여는 중";
             case "PROBE_OPENING_ROOM": return "안전 점검 · 방 진입 중";
@@ -596,7 +607,7 @@ public class MainActivity extends Activity {
             return Color.rgb(90, 220, 145);
         }
         if ("ERROR".equals(status) || "WAITING_UNLOCK".equals(status)
-                || "PROBE_ERROR".equals(status)) {
+                || "PROBE_ERROR".equals(status) || "MANUAL_ERROR".equals(status)) {
             return Color.rgb(235, 137, 102);
         }
         return Color.rgb(164, 177, 205);
