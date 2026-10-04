@@ -74,14 +74,17 @@ public class KakaoMacroApplication extends Application
   @Override
   public void onActivityResumed(Activity a) {
     foreground = a;
+    PremiumChrome.polish(a);
     if (!AppIntegrity.isAuthentic(this)) {
       AppIntegrity.trip(this);
       routeIntegrity(a);
       return;
     }
     LicenseManager.Verification cached = LicenseManager.verifyStored(this);
-    if (!(a instanceof LicenseActivity) && !(a instanceof IntegrityGateActivity) && !cached.valid && !"NETWORK".equals(cached.state))
-      routeLockout();
+    if (!(a instanceof LicenseActivity)
+        && !(a instanceof IntegrityGateActivity)
+        && !cached.valid
+        && !"NETWORK".equals(cached.state)) routeLockout();
     checkForeground();
   }
 
@@ -94,6 +97,7 @@ public class KakaoMacroApplication extends Application
   @Override
   public void onActivityCreated(Activity a, Bundle b) {
     activities.add(a);
+    PremiumChrome.applyWindow(a);
   }
 
   @Override
