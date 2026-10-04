@@ -57,7 +57,10 @@ describe("Discord admin scope guard", () => {
       ).type,
     ).toBe(1);
     expect(() =>
-      enforceDiscordScope(JSON.stringify({ type: 1, application_id: "1" }), env),
+      enforceDiscordScope(
+        JSON.stringify({ type: 1, application_id: "1" }),
+        env,
+      ),
     ).toThrowError(/INVALID/);
   });
 });
