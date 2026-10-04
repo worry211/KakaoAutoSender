@@ -15,7 +15,7 @@ public class BootReceiver extends BroadcastReceiver {
         boolean alarmAccess = AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED.equals(action);
         if (!boot && !updated && !alarmAccess) return;
 
-        if (boot || updated) VoiceRoomStore.clearPending(context);
+        if (boot || updated) recoverInterruptedPending(context, boot ? "재부팅" : "앱 업데이트");
 
         if (!VoiceRoomStore.managerActive(context)) {
             VoiceRoomScheduler.cancel(context);
@@ -30,5 +30,25 @@ public class BootReceiver extends BroadcastReceiver {
             VoiceRoomStore.setLastStatus(context, "정확 알람 권한 변경 확인 · 예약 다시 설정");
         }
         VoiceRoomScheduler.scheduleNext(context);
+    }
+
+    private void recoverInterruptedPending(Context context, String reason) {
+        String pendingId = VoiceRoomStore.pendingRoomId(context);
+        boolean probe = VoiceRoomStore.isProbePending(context);
+        VoiceRoomStore.clearPending(context);
+        if (pendingId.isEmpty()) return;
+
+        VoiceRoomStore.Room room = VoiceRoomStore.get(context, pendingId);
+        if (room == null) return;
+        room.stageStartedAt = 0L;
+        if (probe) {
+            room.status = "PROBE_ERROR";
+            room.lastError = reason + "으로 안전 점검이 중단됨";
+        } else {
+            room.status = "CHECK_DUE";
+            room.lastError = reason + "으로 이전 작업이 중단됨 · 자동 재시도 예정";
+            room.nextCheckAt = System.currentTimeMillis() + 15_000L;
+        }
+        VoiceRoomStore.update(context, room);
     }
 }
