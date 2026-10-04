@@ -29,6 +29,14 @@ public class VoiceRoomTimingTest {
     }
 
     @Test
+    public void lastMinuteNeverSchedulesPastExpectedExpiry() {
+        long startedAt = 10_000L;
+        long expiry = startedAt + VoiceRoomStore.VOICE_ROOM_LIFETIME_MS;
+        long now = expiry - 30_000L;
+        assertEquals(expiry, VoiceRoomTiming.nextActiveCheck(startedAt, now));
+    }
+
+    @Test
     public void overdueActiveRoomIsRecheckedInsteadOfAssumedDead() {
         long startedAt = 10_000L;
         long expiry = startedAt + VoiceRoomStore.VOICE_ROOM_LIFETIME_MS;
