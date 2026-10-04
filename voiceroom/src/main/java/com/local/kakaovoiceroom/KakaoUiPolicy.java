@@ -1,5 +1,6 @@
 package com.local.kakaovoiceroom;
 
+import java.net.URI;
 import java.util.Locale;
 
 final class KakaoUiPolicy {
@@ -50,8 +51,20 @@ final class KakaoUiPolicy {
 
     static boolean isOpenChatUrl(String value) {
         if (value == null || value.trim().isEmpty()) return false;
-        String lower = value.trim().toLowerCase(Locale.ROOT);
-        return lower.startsWith("https://open.kakao.com/") || lower.startsWith("http://open.kakao.com/");
+        try {
+            URI uri = URI.create(value.trim());
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            String path = uri.getPath();
+            return scheme != null
+                    && "https".equals(scheme.toLowerCase(Locale.ROOT))
+                    && host != null
+                    && "open.kakao.com".equals(host.toLowerCase(Locale.ROOT))
+                    && path != null
+                    && path.length() > 1;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
     }
 
     static long retryDelayMs(int failures) {
