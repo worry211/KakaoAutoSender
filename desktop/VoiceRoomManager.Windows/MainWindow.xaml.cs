@@ -29,6 +29,9 @@ public partial class MainWindow : Window
         if (selectedId is not null)
             RoomsGrid.SelectedItem = State.Rooms.FirstOrDefault(r => r.Id == selectedId);
 
+        var version = typeof(MainWindow).Assembly.GetName().Version;
+        VersionBadge.Text = version is null ? "Windows" : $"Windows v{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
+
         MasterStatus.Text = State.ManagerActive
             ? "● 보이스룸 자동관리 실행 중"
             : State.Rooms.Any(r => r.LiveVerified)
@@ -64,29 +67,39 @@ public partial class MainWindow : Window
 
     private void AddRoom_Click(object sender, RoutedEventArgs e)
     {
-        var title = Interaction.InputBox("PC 카카오톡에 표시되는 오픈채팅방 이름을 정확히 입력해줘.\n링크로 진입한 뒤 이 제목으로 실제 방이 맞는지 검증해.", "방 추가 · 이름", "").Trim();
+        var title = Interaction.InputBox(
+            "PC 카카오톡에 표시되는 오픈채팅방 이름을 정확히 입력해줘.\n링크로 진입한 뒤 이 제목으로 실제 방이 맞는지 다시 검증해.",
+            "방 추가 · 이름", "").Trim();
         if (title.Length == 0) return;
 
-        var url = Interaction.InputBox("오픈채팅 링크를 입력해줘.\n예: https://open.kakao.com/o/xxxx", "방 추가 · 오픈채팅 링크", "").Trim();
-        if (!OpenChatLinkRegistry.IsSupported(url))
-        {
-            MessageBox.Show(this, "https://open.kakao.com/o/... 형식의 정상 오픈채팅 링크만 등록할 수 있어.", "링크 확인", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        url = OpenChatLinkRegistry.Normalize(url);
+        var url = Interaction.InputBox(
+            "오픈채팅 링크를 입력해줘.\n예: https://open.kakao.com/o/xxxx",
+            "방 추가 · 오픈채팅 링크", "").Trim();
+        if (!TryNormalizeLink(url, null, out var normalized)) return;
 
         var existing = State.Rooms.FirstOrDefault(r => string.Equals(r.Title, title, StringComparison.Ordinal));
         if (existing is not null)
         {
-            if (MessageBox.Show(this, $"같은 이름의 방 ‘{title}’이 이미 있어.\n이 방의 오픈채팅 링크를 새 링크로 바꿀까?\n검증 상태는 안전하게 초기화돼.", "기존 방 링크 변경",
-                    MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-            existing.OpenChatUrl = url;
+            if (LinkUsedByOtherRoom(normalized, existing.Id, out var owner))
+            {
+                MessageBox.Show(this, $"이 링크는 이미 ‘{owner}’ 방에 등록돼 있어.", "중복 링크", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            if (MessageBox.Show(this,
+                    $"같은 이름의 방 ‘{title}’이 이미 있어.\n이 방의 오픈채팅 링크를 새 링크로 바꿀까?\n검증 상태는 안전하게 초기화돼.",
+                    "기존 방 링크 변경", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            existing.OpenChatUrl = normalized;
             ResetVerification(existing);
             State.LastStatus = title + " · 오픈채팅 링크 변경 · 재검증 필요";
         }
         else
         {
-            State.Rooms.Add(new RoomState { Title = title, OpenChatUrl = url, Enabled = true });
+            if (LinkUsedByOtherRoom(normalized, null, out var owner))
+            {
+                MessageBox.Show(this, $"이 링크는 이미 ‘{owner}’ 방에 등록돼 있어.", "중복 링크", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            State.Rooms.Add(new RoomState { Title = title, OpenChatUrl = normalized, Enabled = true });
             State.LastStatus = title + " · 방/링크 추가 · 안전 점검 필요";
         }
         _coordinator.Save();
@@ -97,20 +110,52 @@ public partial class MainWindow : Window
     {
         var room = SelectedRoom();
         if (room is null) return;
-        var url = Interaction.InputBox("이 방의 오픈채팅 링크를 입력해줘.\n링크를 바꾸면 기존 검증/48시간 기준은 초기화돼.", "오픈채팅 링크 설정", room.OpenChatUrl).Trim();
+        var url = Interaction.InputBox(
+            "이 방의 오픈채팅 링크를 입력해줘.\n링크를 바꾸면 기존 검증/48시간 기준은 초기화돼.",
+            "오픈채팅 링크 설정", room.OpenChatUrl).Trim();
         if (url.Length == 0) return;
-        if (!OpenChatLinkRegistry.IsSupported(url))
-        {
-            MessageBox.Show(this, "https://open.kakao.com/o/... 형식의 정상 오픈채팅 링크만 등록할 수 있어.", "링크 확인", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        url = OpenChatLinkRegistry.Normalize(url);
-        if (string.Equals(room.OpenChatUrl, url, StringComparison.Ordinal)) return;
-        room.OpenChatUrl = url;
+        if (!TryNormalizeLink(url, room.Id, out var normalized)) return;
+        if (string.Equals(room.OpenChatUrl, normalized, StringComparison.Ordinal)) return;
+
+        room.OpenChatUrl = normalized;
         ResetVerification(room);
         State.LastStatus = room.Title + " · 오픈채팅 링크 설정 완료 · 안전 점검부터 다시 진행";
         _coordinator.Save();
         RefreshUi();
+    }
+
+    private bool TryNormalizeLink(string raw, string? currentRoomId, out string normalized)
+    {
+        normalized = "";
+        if (!OpenChatLinkRegistry.IsSupported(raw))
+        {
+            MessageBox.Show(this,
+                "https://open.kakao.com/o/... 형식의 정상 오픈채팅 링크만 등록할 수 있어.\n다른 도메인·포트·변형 URL은 안전상 거부해.",
+                "링크 확인", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+
+        normalized = OpenChatLinkRegistry.Normalize(raw);
+        if (LinkUsedByOtherRoom(normalized, currentRoomId, out var owner))
+        {
+            MessageBox.Show(this, $"이 링크는 이미 ‘{owner}’ 방에 등록돼 있어.", "중복 링크", MessageBoxButton.OK, MessageBoxImage.Warning);
+            normalized = "";
+            return false;
+        }
+        return true;
+    }
+
+    private bool LinkUsedByOtherRoom(string normalized, string? currentRoomId, out string ownerTitle)
+    {
+        foreach (var other in State.Rooms)
+        {
+            if (other.Id == currentRoomId || !OpenChatLinkRegistry.IsSupported(other.OpenChatUrl)) continue;
+            if (!string.Equals(OpenChatLinkRegistry.Normalize(other.OpenChatUrl), normalized, StringComparison.OrdinalIgnoreCase)) continue;
+            ownerTitle = other.Title;
+            return true;
+        }
+        ownerTitle = "";
+        return false;
     }
 
     private static void ResetVerification(RoomState room)
@@ -152,6 +197,11 @@ public partial class MainWindow : Window
     {
         var room = SelectedRoom();
         if (room is null) return;
+        if (!OpenChatLinkRegistry.IsSupported(room.OpenChatUrl))
+        {
+            MessageBox.Show(this, "먼저 ‘링크 설정’에서 이 방의 오픈채팅 링크를 등록해줘.", "링크 필요", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
         var launch = _kakao.EnsureKakaoRunning();
         State.LastStatus = launch.Status;
         _coordinator.Save();
@@ -171,6 +221,11 @@ public partial class MainWindow : Window
     {
         var room = SelectedRoom();
         if (room is null) return;
+        if (!OpenChatLinkRegistry.IsSupported(room.OpenChatUrl))
+        {
+            MessageBox.Show(this, "먼저 ‘링크 설정’에서 이 방의 오픈채팅 링크를 등록해줘.", "링크 필요", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
         var launch = _kakao.EnsureKakaoRunning();
         State.LastStatus = launch.Status;
         _coordinator.Save();
