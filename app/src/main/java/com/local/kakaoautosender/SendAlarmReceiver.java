@@ -6,8 +6,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.service.notification.NotificationListenerService;
 
-import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -49,8 +47,8 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                     if (!profile.enabled || profile.room.trim().isEmpty() || profile.message.trim().isEmpty()) continue;
 
                     if (!profile.unlimited() && profile.todayCount >= profile.dailyLimit) {
-                        long next = nextDayStart();
-                        String status = "오늘 방별 한도 도달: " + profile.room + " ("
+                        long next = MultiRoomStore.nextAfterDailyLimit(profile, System.currentTimeMillis());
+                        String status = "오늘 방별 한도 도달: " + profile.title() + " ("
                                 + profile.todayCount + "/" + profile.dailyLimit + ")";
                         MultiRoomStore.markSkippedForLimit(app, profile.room, next, status);
                         skipped++;
@@ -67,14 +65,14 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                             if (failureReason == null || failureReason.trim().isEmpty()) {
                                 failureReason = "확인된 답장 세션 없음";
                             }
-                            sleep(450L);
+                            sleep(400L);
                         }
                     }
 
-                    long next = System.currentTimeMillis() + profile.intervalMinutes * 60_000L;
+                    long next = MultiRoomStore.computeNextAt(profile, System.currentTimeMillis());
                     if (sent) {
                         MultiRoomStore.markSuccess(app, profile.room, next,
-                                "자동전송 성공: " + profile.room);
+                                "자동전송 성공: " + profile.title());
                         success++;
                     } else {
                         String recovery = KakaoNotificationListener.hasStoredBinding(app, profile.room)
@@ -84,11 +82,11 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                                 "자동전송 실패: " + failureReason + " · " + recovery);
                     }
 
-                    // 여러 방이 같은 시각에 예정돼도 PendingIntent 답장이 한꺼번에 충돌하지 않도록 짧게 분리한다.
-                    sleep(700L);
+                    // 여러 방이 동시에 예정돼도 카카오 답장 PendingIntent를 연속으로 몰아치지 않는다.
+                    sleep(650L);
                 }
 
-                Prefs.setStatus(app, "다중방 예약 실행 · 시도 " + attempted + " · 성공 " + success
+                Prefs.setStatus(app, "예약 실행 · 시도 " + attempted + " · 성공 " + success
                         + (skipped > 0 ? " · 한도대기 " + skipped : ""));
                 SendScheduler.scheduleNext(app);
             } catch (Throwable t) {
@@ -99,11 +97,6 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 result.finish();
             }
         });
-    }
-
-    private static long nextDayStart() {
-        return LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault())
-                .plusMinutes(1).toInstant().toEpochMilli();
     }
 
     private static void sleep(long ms) {

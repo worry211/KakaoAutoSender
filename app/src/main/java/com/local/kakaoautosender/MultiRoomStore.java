@@ -6,20 +6,33 @@ import android.content.SharedPreferences;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 
 final class MultiRoomStore {
     static final String KEY_PROFILES = "multi_room_profiles_v1";
     private static final String KEY_MIGRATED = "multi_room_migrated_v1";
 
+    static final String MODE_INTERVAL = "interval";
+    static final String MODE_TIMES = "times";
+
     static final class Profile {
-        String room;
+        String room;          // real Kakao conversation name / routing alias
+        String displayName;   // user's private label shown in this app
         String message;
+        String scheduleMode;
         int intervalMinutes;
-        int dailyLimit; // 0 = unlimited
+        String dailyTimes;    // canonical comma-separated HH:mm list
+        int dailyLimit;       // 0 = unlimited
         boolean enabled;
         long nextAt;
         String countDate;
@@ -29,9 +42,12 @@ final class MultiRoomStore {
         String lastStatus;
 
         Profile(String room) {
-            this.room = room == null ? "" : room.trim();
+            this.room = safe(room).trim();
+            this.displayName = this.room;
             this.message = "";
+            this.scheduleMode = MODE_INTERVAL;
             this.intervalMinutes = 60;
+            this.dailyTimes = "09:00";
             this.dailyLimit = 8;
             this.enabled = true;
             this.nextAt = 0L;
@@ -44,8 +60,11 @@ final class MultiRoomStore {
 
         Profile copy() {
             Profile p = new Profile(room);
+            p.displayName = displayName;
             p.message = message;
+            p.scheduleMode = scheduleMode;
             p.intervalMinutes = intervalMinutes;
+            p.dailyTimes = dailyTimes;
             p.dailyLimit = dailyLimit;
             p.enabled = enabled;
             p.nextAt = nextAt;
@@ -59,6 +78,15 @@ final class MultiRoomStore {
 
         boolean unlimited() {
             return dailyLimit <= 0;
+        }
+
+        boolean fixedTimes() {
+            return MODE_TIMES.equals(scheduleMode);
+        }
+
+        String title() {
+            String n = safe(displayName).trim();
+            return n.isEmpty() ? room : n;
         }
     }
 
@@ -86,7 +114,7 @@ final class MultiRoomStore {
                 p.lastStatus = safe(prefs.getString(Prefs.KEY_LAST_STATUS, "v0.7 설정에서 가져옴"));
                 profiles.add(p);
                 writeRaw(context, profiles);
-                Prefs.appendLog(context, "v0.8 다중방 마이그레이션: 기존 단일 방 설정 보존 · " + p.room);
+                Prefs.appendLog(context, "다중방 마이그레이션: 기존 단일 방 설정 보존 · " + p.room);
             }
         }
         prefs.edit().putBoolean(KEY_MIGRATED, true).apply();
@@ -97,7 +125,7 @@ final class MultiRoomStore {
         ArrayList<Profile> profiles = readRaw(context);
         boolean changed = false;
         for (Profile p : profiles) changed |= normalizeDailyCount(p);
-        profiles.sort(Comparator.comparing(a -> a.room.toLowerCase(Locale.ROOT)));
+        profiles.sort(Comparator.comparing(a -> a.title().toLowerCase(Locale.ROOT)));
         if (changed) writeRaw(context, profiles);
         ArrayList<Profile> result = new ArrayList<>();
         for (Profile p : profiles) result.add(p.copy());
@@ -114,7 +142,7 @@ final class MultiRoomStore {
     }
 
     static synchronized void upsert(Context context, Profile profile) {
-        if (profile == null || profile.room == null || profile.room.trim().isEmpty()) return;
+        if (profile == null || safe(profile.room).trim().isEmpty()) return;
         ensureMigrated(context);
         Profile incoming = sanitize(profile.copy());
         ArrayList<Profile> profiles = readRaw(context);
@@ -147,11 +175,8 @@ final class MultiRoomStore {
         ArrayList<Profile> profiles = readRaw(context);
         for (Profile p : profiles) {
             sanitize(p);
-            if (p.enabled && !p.message.trim().isEmpty()) {
-                p.nextAt = now + p.intervalMinutes * 60_000L;
-            } else {
-                p.nextAt = 0L;
-            }
+            normalizeDailyCount(p);
+            p.nextAt = isRunnable(p) ? computeNextAt(p, now) : 0L;
         }
         writeRaw(context, profiles);
     }
@@ -163,11 +188,8 @@ final class MultiRoomStore {
         for (Profile p : profiles) {
             sanitize(p);
             normalizeDailyCount(p);
-            if (!p.enabled || p.message.trim().isEmpty()) {
-                p.nextAt = 0L;
-            } else if (p.nextAt <= now) {
-                p.nextAt = now + p.intervalMinutes * 60_000L;
-            }
+            if (!isRunnable(p)) p.nextAt = 0L;
+            else if (p.nextAt <= now) p.nextAt = computeNextAt(p, now);
         }
         writeRaw(context, profiles);
     }
@@ -175,7 +197,7 @@ final class MultiRoomStore {
     static synchronized long nextDueAt(Context context) {
         long min = Long.MAX_VALUE;
         for (Profile p : list(context)) {
-            if (!p.enabled || p.message.trim().isEmpty() || p.nextAt <= 0L) continue;
+            if (!isRunnable(p) || p.nextAt <= 0L) continue;
             min = Math.min(min, p.nextAt);
         }
         return min == Long.MAX_VALUE ? 0L : min;
@@ -184,11 +206,61 @@ final class MultiRoomStore {
     static synchronized ArrayList<Profile> due(Context context, long now) {
         ArrayList<Profile> result = new ArrayList<>();
         for (Profile p : list(context)) {
-            if (!p.enabled || p.message.trim().isEmpty()) continue;
-            if (p.nextAt > 0L && p.nextAt <= now + 1_500L) result.add(p);
+            if (!isRunnable(p)) continue;
+            if (p.nextAt > 0L && p.nextAt <= now + 2_000L) result.add(p);
         }
         result.sort(Comparator.comparingLong(a -> a.nextAt));
         return result;
+    }
+
+    static long computeNextAt(Profile profile, long fromMillis) {
+        Profile p = sanitize(profile.copy());
+        if (p.fixedTimes()) {
+            List<LocalTime> times = parseTimes(p.dailyTimes);
+            if (times.isEmpty()) times = Collections.singletonList(LocalTime.of(9, 0));
+            ZoneId zone = ZoneId.systemDefault();
+            LocalDateTime from = LocalDateTime.ofInstant(Instant.ofEpochMilli(fromMillis), zone).plusSeconds(2);
+            for (LocalTime time : times) {
+                LocalDateTime candidate = LocalDateTime.of(from.toLocalDate(), time);
+                if (candidate.isAfter(from)) return candidate.atZone(zone).toInstant().toEpochMilli();
+            }
+            LocalDateTime tomorrow = LocalDateTime.of(from.toLocalDate().plusDays(1), times.get(0));
+            return tomorrow.atZone(zone).toInstant().toEpochMilli();
+        }
+        return fromMillis + Math.max(SendScheduler.MIN_INTERVAL_MINUTES, p.intervalMinutes) * 60_000L;
+    }
+
+    static long nextAfterDailyLimit(Profile profile, long nowMillis) {
+        Profile p = sanitize(profile.copy());
+        ZoneId zone = ZoneId.systemDefault();
+        LocalDate tomorrow = LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMillis), zone).toLocalDate().plusDays(1);
+        if (p.fixedTimes()) {
+            List<LocalTime> times = parseTimes(p.dailyTimes);
+            LocalTime first = times.isEmpty() ? LocalTime.of(9, 0) : times.get(0);
+            return LocalDateTime.of(tomorrow, first).atZone(zone).toInstant().toEpochMilli();
+        }
+        return LocalDateTime.of(tomorrow, LocalTime.of(0, 1)).atZone(zone).toInstant().toEpochMilli()
+                + Math.max(SendScheduler.MIN_INTERVAL_MINUTES, p.intervalMinutes) * 60_000L;
+    }
+
+    static String scheduleSummary(Profile p) {
+        if (p == null) return "-";
+        if (p.fixedTimes()) return "매일 " + canonicalTimes(p.dailyTimes);
+        return "매 " + Math.max(SendScheduler.MIN_INTERVAL_MINUTES, p.intervalMinutes) + "분";
+    }
+
+    static String canonicalTimes(String raw) {
+        List<LocalTime> times = parseTimes(raw);
+        StringBuilder sb = new StringBuilder();
+        for (LocalTime t : times) {
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(String.format(Locale.ROOT, "%02d:%02d", t.getHour(), t.getMinute()));
+        }
+        return sb.toString();
+    }
+
+    static boolean hasValidTimes(String raw) {
+        return !parseTimes(raw).isEmpty();
     }
 
     static synchronized void markSuccess(Context context, String room, long nextAt, String status) {
@@ -248,10 +320,19 @@ final class MultiRoomStore {
         writeRaw(context, profiles);
     }
 
+    private static boolean isRunnable(Profile p) {
+        return p != null && p.enabled && !safe(p.message).trim().isEmpty();
+    }
+
     private static Profile sanitize(Profile p) {
         p.room = safe(p.room).trim();
+        p.displayName = safe(p.displayName).trim();
+        if (p.displayName.isEmpty()) p.displayName = p.room;
         p.message = safe(p.message);
+        p.scheduleMode = MODE_TIMES.equals(p.scheduleMode) ? MODE_TIMES : MODE_INTERVAL;
         p.intervalMinutes = Math.max(SendScheduler.MIN_INTERVAL_MINUTES, p.intervalMinutes <= 0 ? 60 : p.intervalMinutes);
+        String canonical = canonicalTimes(p.dailyTimes);
+        p.dailyTimes = canonical.isEmpty() ? "09:00" : canonical;
         p.dailyLimit = Math.max(0, p.dailyLimit);
         p.countDate = safe(p.countDate);
         p.lastStatus = safe(p.lastStatus);
@@ -270,6 +351,28 @@ final class MultiRoomStore {
         return false;
     }
 
+    private static List<LocalTime> parseTimes(String raw) {
+        LinkedHashSet<LocalTime> unique = new LinkedHashSet<>();
+        if (raw != null) {
+            String[] parts = raw.trim().split("[,\\n\\s]+");
+            for (String part : parts) {
+                if (part == null || part.trim().isEmpty()) continue;
+                String[] hm = part.trim().split(":");
+                if (hm.length != 2) continue;
+                try {
+                    int h = Integer.parseInt(hm[0]);
+                    int m = Integer.parseInt(hm[1]);
+                    if (h < 0 || h > 23 || m < 0 || m > 59) continue;
+                    unique.add(LocalTime.of(h, m));
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        ArrayList<LocalTime> result = new ArrayList<>(unique);
+        Collections.sort(result);
+        return result;
+    }
+
     private static ArrayList<Profile> readRaw(Context context) {
         ArrayList<Profile> result = new ArrayList<>();
         String raw = Prefs.p(context).getString(KEY_PROFILES, "[]");
@@ -281,8 +384,11 @@ final class MultiRoomStore {
                 String room = o.optString("room", "").trim();
                 if (room.isEmpty()) continue;
                 Profile p = new Profile(room);
+                p.displayName = o.optString("displayName", room);
                 p.message = o.optString("message", "");
+                p.scheduleMode = o.optString("scheduleMode", MODE_INTERVAL);
                 p.intervalMinutes = o.optInt("intervalMinutes", 60);
+                p.dailyTimes = o.optString("dailyTimes", "09:00");
                 p.dailyLimit = o.optInt("dailyLimit", 8);
                 p.enabled = o.optBoolean("enabled", true);
                 p.nextAt = o.optLong("nextAt", 0L);
@@ -307,8 +413,11 @@ final class MultiRoomStore {
                 if (p.room.isEmpty()) continue;
                 JSONObject o = new JSONObject();
                 o.put("room", p.room);
+                o.put("displayName", p.displayName);
                 o.put("message", p.message);
+                o.put("scheduleMode", p.scheduleMode);
                 o.put("intervalMinutes", p.intervalMinutes);
+                o.put("dailyTimes", p.dailyTimes);
                 o.put("dailyLimit", p.dailyLimit);
                 o.put("enabled", p.enabled);
                 o.put("nextAt", p.nextAt);
