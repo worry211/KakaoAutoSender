@@ -68,6 +68,7 @@ public class WakeActivity extends Activity {
             VoiceRoomStore.clearPending(this);
             AudioGuard.restore(this);
             if (stale != null) {
+                stale.stageStartedAt = 0L;
                 if (staleProbe) {
                     stale.status = "PROBE_ERROR";
                     stale.lastError = "안전 인식 점검이 응답 없이 종료됨";
@@ -77,7 +78,7 @@ public class WakeActivity extends Activity {
                     stale.failures += 1;
                     stale.status = "ERROR";
                     stale.lastError = "이전 자동화 작업이 응답 없이 종료됨";
-                    stale.nextCheckAt = System.currentTimeMillis() + VoiceRoomStore.ERROR_RETRY_MS;
+                    stale.nextCheckAt = System.currentTimeMillis() + KakaoUiPolicy.retryDelayMs(stale.failures);
                     VoiceRoomStore.update(this, stale);
                     VoiceRoomStore.setLastStatus(this, stale.title + " · 이전 작업 복구 후 재시도 예정");
                 }
@@ -92,6 +93,7 @@ public class WakeActivity extends Activity {
         KeyguardManager keyguard = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
         if (keyguard != null && keyguard.isDeviceLocked()) {
             room.status = probe ? "PROBE_ERROR" : "WAITING_UNLOCK";
+            room.stageStartedAt = 0L;
             room.lastError = probe ? "안전 점검 전 휴대폰 잠금 해제가 필요함" : "휴대폰 잠금 해제가 필요함";
             if (!probe) room.nextCheckAt = System.currentTimeMillis() + 5L * 60L * 1000L;
             VoiceRoomStore.update(this, room);
@@ -109,10 +111,14 @@ public class WakeActivity extends Activity {
     private void launchKakao(VoiceRoomStore.Room room, boolean probe) {
         long now = System.currentTimeMillis();
         room.status = probe ? "PROBE_OPENING_KAKAO" : "OPENING_KAKAO";
+        room.stageStartedAt = now;
         room.lastError = "";
+        room.lastDiagnostic = "launch=scheduled";
         if (!probe) room.nextCheckAt = now + VoiceRoomStore.PENDING_TIMEOUT_MS + 5_000L;
         VoiceRoomStore.update(this, room);
-        VoiceRoomStore.setPending(this, room.id, probe ? VoiceRoomStore.MODE_PROBE : VoiceRoomStore.MODE_AUTO);
+        VoiceRoomStore.setPending(this, room.id,
+                probe ? VoiceRoomStore.MODE_PROBE : VoiceRoomStore.MODE_AUTO,
+                VoiceRoomStore.ENTRY_UNKNOWN);
         VoiceRoomStore.setLastStatus(this,
                 room.title + (probe ? " · 안전 인식 점검 시작" : " · 카카오톡 여는 중"));
 
@@ -127,7 +133,10 @@ public class WakeActivity extends Activity {
         Exception lastError = null;
         for (int i = 0; i < candidates.size(); i++) {
             Intent target = candidates.get(i);
+            String entry = Intent.ACTION_VIEW.equals(target.getAction())
+                    ? VoiceRoomStore.ENTRY_DEEPLINK : VoiceRoomStore.ENTRY_LAUNCHER;
             try {
+                VoiceRoomStore.updatePendingEntry(this, entry);
                 target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                         | Intent.FLAG_ACTIVITY_SINGLE_TOP
                         | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -148,7 +157,7 @@ public class WakeActivity extends Activity {
     private List<Intent> buildKakaoLaunchCandidates(VoiceRoomStore.Room room) {
         ArrayList<Intent> out = new ArrayList<>();
 
-        if (room.roomUrl != null && !room.roomUrl.trim().isEmpty()) {
+        if (KakaoUiPolicy.isOpenChatUrl(room.roomUrl)) {
             try {
                 Intent deepLink = new Intent(Intent.ACTION_VIEW, Uri.parse(room.roomUrl.trim()));
                 deepLink.setPackage(KAKAO_PACKAGE);
@@ -183,10 +192,11 @@ public class WakeActivity extends Activity {
 
     private void fail(VoiceRoomStore.Room room, boolean probe, String error) {
         room.status = probe ? "PROBE_ERROR" : "ERROR";
+        room.stageStartedAt = 0L;
         room.lastError = error;
         if (!probe) {
             room.failures += 1;
-            room.nextCheckAt = System.currentTimeMillis() + VoiceRoomStore.ERROR_RETRY_MS;
+            room.nextCheckAt = System.currentTimeMillis() + KakaoUiPolicy.retryDelayMs(room.failures);
         }
         VoiceRoomStore.update(this, room);
         VoiceRoomStore.clearPending(this);
