@@ -46,9 +46,6 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                     return;
                 }
 
-                // Process exactly one room per alarm invocation. This keeps the receiver
-                // short-lived and prevents multiple Kakao reply PendingIntents from being
-                // fired back-to-back when several rooms become due together.
                 MultiRoomStore.Profile profile = due.get(0);
                 if (!profile.enabled || profile.room.trim().isEmpty() || profile.message.trim().isEmpty()) {
                     SendScheduler.scheduleNext(app);
@@ -70,19 +67,17 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 } else {
                     attempted = true;
 
-                    // Advance the persisted schedule before touching Kakao. If Android kills
-                    // this process after the reply is accepted but before our success bookkeeping,
-                    // the same due item will not immediately be sent a second time on restart.
                     long reservedNext = MultiRoomStore.computeNextAt(profile, System.currentTimeMillis());
                     MultiRoomStore.Profile reserved = profile.copy();
                     reserved.nextAt = reservedNext;
                     MultiRoomStore.upsert(app, reserved);
 
+                    RoomMediaStore.Media media = RoomMediaStore.get(app, profile.room);
                     for (int i = 0; i < 3 && !sent; i++) {
                         if (!Prefs.p(app).getBoolean(Prefs.KEY_ACTIVE, false)) break;
-                        sent = KakaoNotificationListener.sendToRoom(app, profile.room, profile.message);
+                        sent = KakaoMessageSender.send(app, profile.room, profile.message, media);
                         if (!sent) {
-                            failureReason = KakaoNotificationListener.lastSendError();
+                            failureReason = KakaoMessageSender.lastError();
                             if (failureReason == null || failureReason.trim().isEmpty()) {
                                 failureReason = "확인된 답장 세션 없음";
                             }
@@ -95,7 +90,7 @@ public class SendAlarmReceiver extends BroadcastReceiver {
 
                     if (sent) {
                         MultiRoomStore.markSuccess(app, profile.room, reservedNext,
-                                "자동전송 성공: " + visibleName);
+                                "자동전송 성공: " + visibleName + (media.hasImage() ? " · 사진 포함" : ""));
                     } else {
                         String recovery = KakaoNotificationListener.hasStoredBinding(app, profile.room)
                                 ? "자동복구 정보 있음 · 같은 방 새 알림 대기"
@@ -120,9 +115,6 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 long scheduledAt = nextDue;
                 int gapSeconds = 0;
 
-                // If another room is already due (or is about to be due), force a 2-5s
-                // cross-room gap. We schedule a new alarm instead of sleeping inside this
-                // receiver, so large room sets do not hit BroadcastReceiver time limits.
                 if (attempted) {
                     long gap = ReliabilityTiming.roomGapMillis();
                     long minimumAfterCurrentRoom = nowAfter + gap;
