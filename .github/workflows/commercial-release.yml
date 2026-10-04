@@ -1,9 +1,6 @@
 name: Commercial signed APK
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - ops/v2-2-commercial-release-run
 permissions:
   contents: read
 jobs:
