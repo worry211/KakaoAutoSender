@@ -74,6 +74,8 @@ public class KakaoMacroApplication extends Application
   @Override
   public void onActivityResumed(Activity a) {
     foreground = a;
+    // Window decor is guaranteed to exist by resume. Applying chrome earlier from onActivityCreated
+    // can crash on Android 15/16 because PhoneWindow has not attached its DecorView yet.
     PremiumChrome.polish(a);
     if (!AppIntegrity.isAuthentic(this)) {
       AppIntegrity.trip(this);
@@ -97,7 +99,6 @@ public class KakaoMacroApplication extends Application
   @Override
   public void onActivityCreated(Activity a, Bundle b) {
     activities.add(a);
-    PremiumChrome.applyWindow(a);
   }
 
   @Override
