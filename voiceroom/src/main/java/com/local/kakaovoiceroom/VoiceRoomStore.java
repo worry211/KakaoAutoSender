@@ -40,6 +40,9 @@ final class VoiceRoomStore {
         String title;
         String roomUrl;
         boolean enabled;
+        boolean safeProbePassed;
+        boolean liveCheckPassed;
+        long verifiedAt;
         long startedAt;
         long nextCheckAt;
         int failures;
@@ -54,6 +57,9 @@ final class VoiceRoomStore {
             r.title = title;
             r.roomUrl = roomUrl;
             r.enabled = enabled;
+            r.safeProbePassed = safeProbePassed;
+            r.liveCheckPassed = liveCheckPassed;
+            r.verifiedAt = verifiedAt;
             r.startedAt = startedAt;
             r.nextCheckAt = nextCheckAt;
             r.failures = failures;
@@ -97,8 +103,11 @@ final class VoiceRoomStore {
         room.title = title == null ? "" : title.trim();
         room.roomUrl = roomUrl == null ? "" : roomUrl.trim();
         room.enabled = true;
+        room.safeProbePassed = false;
+        room.liveCheckPassed = false;
+        room.verifiedAt = 0L;
         room.startedAt = 0L;
-        room.nextCheckAt = System.currentTimeMillis() + 5_000L;
+        room.nextCheckAt = 0L;
         room.failures = 0;
         room.status = "NEW";
         room.lastError = "";
@@ -135,19 +144,7 @@ final class VoiceRoomStore {
     static synchronized Room earliestDue(Context context, long now) {
         Room best = null;
         for (Room room : list(context)) {
-            if (!room.enabled) continue;
-            long due = room.nextCheckAt <= 0 ? now : room.nextCheckAt;
-            if (best == null || due < (best.nextCheckAt <= 0 ? now : best.nextCheckAt)) best = room;
-        }
-        return best;
-    }
-
-    static synchronized Room manualCheckDue(Context context, long now) {
-        Room best = null;
-        for (Room room : list(context)) {
-            // Pausing a room excludes it from unattended automation only. Explicit user checks
-            // remain available so setup and recovery can be tested without re-enabling the room.
-            if (!"CHECK_DUE".equals(room.status)) continue;
+            if (!room.enabled || !room.liveCheckPassed) continue;
             long due = room.nextCheckAt <= 0 ? now : room.nextCheckAt;
             if (best == null || due < (best.nextCheckAt <= 0 ? now : best.nextCheckAt)) best = room;
         }
@@ -254,6 +251,9 @@ final class VoiceRoomStore {
             o.put("title", safe(r.title));
             o.put("roomUrl", safe(r.roomUrl));
             o.put("enabled", r.enabled);
+            o.put("safeProbePassed", r.safeProbePassed);
+            o.put("liveCheckPassed", r.liveCheckPassed);
+            o.put("verifiedAt", r.verifiedAt);
             o.put("startedAt", r.startedAt);
             o.put("nextCheckAt", r.nextCheckAt);
             o.put("failures", r.failures);
@@ -271,6 +271,9 @@ final class VoiceRoomStore {
         r.title = o.optString("title", "");
         r.roomUrl = o.optString("roomUrl", "");
         r.enabled = o.optBoolean("enabled", true);
+        r.safeProbePassed = o.optBoolean("safeProbePassed", false);
+        r.liveCheckPassed = o.optBoolean("liveCheckPassed", false);
+        r.verifiedAt = Math.max(0L, o.optLong("verifiedAt", 0L));
         r.startedAt = Math.max(0L, o.optLong("startedAt", 0L));
         r.nextCheckAt = Math.max(0L, o.optLong("nextCheckAt", 0L));
         r.failures = Math.max(0, o.optInt("failures", 0));
