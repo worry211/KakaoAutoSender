@@ -23,12 +23,17 @@ public sealed class StateStore
         {
             try
             {
-                if (!File.Exists(_path)) return new DesktopState();
-                return JsonSerializer.Deserialize<DesktopState>(File.ReadAllText(_path), _json) ?? new DesktopState();
+                DesktopState state;
+                if (!File.Exists(_path)) state = new DesktopState();
+                else state = JsonSerializer.Deserialize<DesktopState>(File.ReadAllText(_path), _json) ?? new DesktopState();
+                OpenChatLinkRegistry.Rebuild(state.Rooms);
+                return state;
             }
             catch
             {
-                return new DesktopState { LastStatus = "상태 파일을 읽지 못해 새 상태로 시작함" };
+                var state = new DesktopState { LastStatus = "상태 파일을 읽지 못해 새 상태로 시작함" };
+                OpenChatLinkRegistry.Rebuild(state.Rooms);
+                return state;
             }
         }
     }
@@ -37,6 +42,7 @@ public sealed class StateStore
     {
         lock (_gate)
         {
+            OpenChatLinkRegistry.Rebuild(state.Rooms);
             Directory.CreateDirectory(_dir);
             var tmp = _path + ".tmp";
             File.WriteAllText(tmp, JsonSerializer.Serialize(state, _json));
