@@ -1,13 +1,9 @@
-using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 
 namespace VoiceRoomManager.Windows.Core;
 
 internal static partial class OpenChatLinkRegistry
 {
-    private static readonly ConcurrentDictionary<string, string> Links = new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<string, DateTimeOffset> RecentVerifiedEntries = new(StringComparer.Ordinal);
-
     [GeneratedRegex("^[A-Za-z0-9_-]{3,128}$", RegexOptions.CultureInvariant)]
     private static partial Regex SlugPattern();
 
@@ -35,39 +31,24 @@ internal static partial class OpenChatLinkRegistry
         return $"https://open.kakao.com{uri.AbsolutePath.TrimEnd('/')}";
     }
 
-    public static void Rebuild(IEnumerable<RoomState> rooms)
-    {
-        Links.Clear();
-        RecentVerifiedEntries.Clear();
-        foreach (var room in rooms)
-        {
-            if (!IsSupported(room.OpenChatUrl)) continue;
-            Links[room.Title.Trim()] = Normalize(room.OpenChatUrl);
-        }
-    }
-
-    public static bool TryGet(string title, out string url) =>
-        Links.TryGetValue((title ?? "").Trim(), out url!);
-
-    public static void MarkVerifiedEntry(string title)
+    public static void ConfirmCurrentRoom(string title)
     {
         title = (title ?? "").Trim();
-        if (title.Length == 0 || !Links.ContainsKey(title)) return;
-        RecentVerifiedEntries[title] = DateTimeOffset.UtcNow;
+        if (title.Length == 0) return;
+        var op = AutomationOperation.Current;
+        if (op is null || op.Room.Title != title) return;
+        var host = KakaoSurfaceLocator.FindExactChat(title);
+        if (host == IntPtr.Zero)
+        {
+            host = KakaoSurfaceLocator.VisibleTopLevels().Where(s => KakaoSurfaceLocator.IsForeground(s.Hwnd))
+                .Select(s => s.Hwnd).FirstOrDefault();
+        }
+        if (host != IntPtr.Zero) op.Prove(host);
     }
 
-    public static bool IsRecentlyVerifiedEntry(string title, TimeSpan? maxAge = null)
+    public static bool HasCurrentRoomProof(string title)
     {
         title = (title ?? "").Trim();
-        if (title.Length == 0 || !Links.ContainsKey(title)) return false;
-        if (!RecentVerifiedEntries.TryGetValue(title, out var at)) return false;
-        var age = DateTimeOffset.UtcNow - at;
-        var limit = maxAge ?? TimeSpan.FromSeconds(12);
-        if (age < TimeSpan.Zero || age > limit)
-        {
-            RecentVerifiedEntries.TryRemove(title, out _);
-            return false;
-        }
-        return true;
+        return AutomationOperation.Current is { } op && op.Room.Title == title && op.HasRoomProof;
     }
 }

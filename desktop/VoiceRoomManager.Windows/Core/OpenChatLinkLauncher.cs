@@ -7,9 +7,6 @@ namespace VoiceRoomManager.Windows.Core;
 
 internal static class OpenChatLinkLauncher
 {
-    private const string KakaoWindowClass = "EVA_Window_Dblclk";
-    private const string KakaoMainTitle = "카카오톡";
-
     private static readonly HashSet<string> BrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
     {
         "chrome", "msedge", "whale", "firefox", "brave", "opera", "vivaldi"
@@ -35,8 +32,6 @@ internal static class OpenChatLinkLauncher
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern int GetClassName(IntPtr hwnd, StringBuilder className, int maxCount);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int maxCount);
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hwnd);
@@ -59,7 +54,7 @@ internal static class OpenChatLinkLauncher
         if (exact != IntPtr.Zero)
         {
             Activate(exact);
-            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
+            OpenChatLinkRegistry.ConfirmCurrentRoom(room.Title);
             return new(true, true, "이미 열린 대상 채팅창 제목 완전일치 확인");
         }
 
@@ -77,76 +72,21 @@ internal static class OpenChatLinkLauncher
         if (WaitForExactChat(room.Title, TimeSpan.FromSeconds(2), out exact))
         {
             Activate(exact);
-            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
+            OpenChatLinkRegistry.ConfirmCurrentRoom(room.Title);
             return new(true, true, "오픈채팅 링크 → 카카오 채팅창 제목 완전일치 검증 성공");
         }
 
-        // A direct handoff can also land on Kakao's OpenChat cover instead of the room itself.
-        // Treat that cover as a normal intermediate state, just like mobile.
-        var kakaoEntry = KakaoOpenChatEntry.TryEnter(room);
-        if (kakaoEntry.Success)
-            return new(true, true, "링크 → " + kakaoEntry.Diagnostic);
+        var entry = KakaoOpenChatEntry.TryEnter(room);
+        return new(true, entry.Success, entry.Diagnostic);
+    }
 
-        // Current Windows browsers can show the open.kakao.com landing page instead of handing off
-        // automatically. Invoke only the exact OpenChat landing action; never generic browser buttons.
-        var join = FindUniqueBrowserAction(JoinNames, requireOpenChatWindow: true, out var joinDiag);
-        if (join is not null)
-        {
-            Activate(join.Hwnd);
-            if (!Invoke(join.Element))
-                return new(true, false, "브라우저 오픈채팅 참여 버튼 호출 실패 · " + joinDiag);
-
-            if (WaitForExactChat(room.Title, TimeSpan.FromSeconds(2.5), out exact))
-            {
-                Activate(exact);
-                OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
-                return new(true, true, "링크 → 브라우저 참여 버튼 → 카카오 채팅창 제목 완전일치 검증 성공");
-            }
-
-            kakaoEntry = KakaoOpenChatEntry.TryEnter(room);
-            if (kakaoEntry.Success)
-                return new(true, true, "링크 → 브라우저 참여 버튼 → " + kakaoEntry.Diagnostic);
-
-            // Chromium-family browsers may ask for confirmation before opening an external app.
-            var confirm = FindUniqueBrowserAction(KakaoOpenNames, requireOpenChatWindow: false, out var confirmDiag);
-            if (confirm is not null)
-            {
-                Activate(confirm.Hwnd);
-                if (!Invoke(confirm.Element))
-                    return new(true, false, "브라우저 카카오톡 열기 확인 버튼 호출 실패 · " + confirmDiag);
-
-                if (WaitForExactChat(room.Title, TimeSpan.FromSeconds(4), out exact))
-                {
-                    Activate(exact);
-                    OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
-                    return new(true, true, "링크 → 참여 버튼 → 카카오톡 열기 확인 → 채팅창 제목 완전일치 검증 성공");
-                }
-
-                kakaoEntry = KakaoOpenChatEntry.TryEnter(room);
-                if (kakaoEntry.Success)
-                    return new(true, true, "링크 → 참여 버튼 → 카카오톡 열기 확인 → " + kakaoEntry.Diagnostic);
-
-                return new(true, false, "브라우저 카카오톡 열기 확인 후 실제 채팅방 진입 실패 · " +
-                    kakaoEntry.Diagnostic + " · " + confirmDiag);
-            }
-
-            if (WaitForExactChat(room.Title, TimeSpan.FromSeconds(2), out exact))
-            {
-                Activate(exact);
-                OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
-                return new(true, true, "링크 → 브라우저 참여 버튼 → 카카오 채팅창 제목 완전일치 검증 성공");
-            }
-
-            kakaoEntry = KakaoOpenChatEntry.TryEnter(room);
-            if (kakaoEntry.Success)
-                return new(true, true, "링크 → 브라우저 참여 버튼 → " + kakaoEntry.Diagnostic);
-
-            return new(true, false, "오픈채팅 참여 후 카카오 내부 실제 방 진입까지 완료하지 못함 · " +
-                kakaoEntry.Diagnostic + " · " + BrowserDiagnostic() + " · confirm=" + confirmDiag);
-        }
-
-        return new(true, false, "링크 랜딩은 열렸지만 오픈채팅 참여 버튼을 접근성 트리에서 찾지 못함 · " +
-            joinDiag + " · kakao=" + kakaoEntry.Diagnostic + " · " + BrowserDiagnostic());
+    public static bool TryBrowserAction(bool confirm, out string diagnostic)
+    {
+        AutomationOperation.Check();
+        var action = FindUniqueBrowserAction(confirm ? KakaoOpenNames : JoinNames, true, out diagnostic);
+        if (action is null) return false;
+        Activate(action.Hwnd);
+        return Invoke(action.Element);
     }
 
     private static BrowserButton? FindUniqueBrowserAction(
@@ -164,6 +104,7 @@ internal static class OpenChatLinkLauncher
             browserWindows++;
             if (requireOpenChatWindow && !LooksLikeOpenChatBrowser(row.Title)) continue;
 
+            if (!BrowserUrlEvidence.Matches(row.Hwnd, AutomationOperation.Current!.Room.OpenChatUrl)) continue;
             try
             {
                 var root = AutomationElement.FromHandle(row.Hwnd);
@@ -212,6 +153,7 @@ internal static class OpenChatLinkLauncher
 
     private static bool Invoke(AutomationElement element)
     {
+        AutomationOperation.Check();
         try
         {
             if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
@@ -234,7 +176,7 @@ internal static class OpenChatLinkLauncher
         var deadline = DateTime.UtcNow.Add(timeout);
         while (DateTime.UtcNow < deadline)
         {
-            Thread.Sleep(120);
+            AutomationOperation.Pause(120);
             hwnd = FindExactChat(title);
             if (hwnd != IntPtr.Zero) return true;
         }
@@ -248,13 +190,6 @@ internal static class OpenChatLinkLauncher
             || title.Contains("open.kakao.com", StringComparison.OrdinalIgnoreCase)
             || title.Contains("KakaoTalk OpenChat", StringComparison.OrdinalIgnoreCase)
             || title.Contains("Kakao OpenChat", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string BrowserDiagnostic()
-    {
-        var rows = EnumerateBrowserWindows();
-        var preview = string.Join(" | ", rows.Take(4).Select(x => $"{x.ProcessName}:{x.Title}"));
-        return $"browserTopLevels={rows.Count} [{preview}]";
     }
 
     private static List<(IntPtr Hwnd, string Title, string ProcessName)> EnumerateBrowserWindows()
@@ -279,33 +214,7 @@ internal static class OpenChatLinkLauncher
         return result;
     }
 
-    private static IntPtr FindExactChat(string title)
-    {
-        var wanted = (title ?? "").Trim();
-        if (wanted.Length == 0) return IntPtr.Zero;
-        var kakaoPids = Process.GetProcessesByName("KakaoTalk").Select(p => (uint)p.Id).ToHashSet();
-        IntPtr found = IntPtr.Zero;
-        EnumWindows((hwnd, _) =>
-        {
-            if (!IsWindowVisible(hwnd)) return true;
-            GetWindowThreadProcessId(hwnd, out var pid);
-            if (!kakaoPids.Contains(pid)) return true;
-            if (!string.Equals(GetClass(hwnd), KakaoWindowClass, StringComparison.Ordinal)) return true;
-            var windowTitle = GetText(hwnd).Trim();
-            if (windowTitle == KakaoMainTitle) return true;
-            if (!string.Equals(windowTitle, wanted, StringComparison.Ordinal)) return true;
-            found = hwnd;
-            return false;
-        }, IntPtr.Zero);
-        return found;
-    }
-
-    private static string GetClass(IntPtr hwnd)
-    {
-        var sb = new StringBuilder(256);
-        GetClassName(hwnd, sb, sb.Capacity);
-        return sb.ToString();
-    }
+    private static IntPtr FindExactChat(string title) => KakaoSurfaceLocator.FindExactChat(title);
 
     private static string GetText(IntPtr hwnd)
     {

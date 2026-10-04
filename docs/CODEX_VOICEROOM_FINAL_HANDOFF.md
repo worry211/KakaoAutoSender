@@ -1,3 +1,11 @@
+# Current handoff update — 2026-10-05 / Windows v0.4.0 RC1
+
+The historical mission and v0.3.2 baseline below are retained as context. The current implementation removes duplicate preview/search engines and global timed session tokens; uses RoomWorkflow, operation-scoped proof, local Korean OCR, verified audio readback, restart recheck, atomic backup, process-owned power request, dark onboarding/dashboard, diagnostics export and regression fixtures.
+
+Current technical facts and remaining product gates: [RC audit](VOICEROOM_WINDOWS_RC_AUDIT.md), [minimum PC checklist](VOICEROOM_WINDOWS_RC_CHECKLIST.md), [Windows README](../desktop/VoiceRoomManager.Windows/README.md). Android v0.5.1 source is preserved. Windows RC1 is not real-runtime sale-approved. Do not resurrect title-only session tokens, composer-anywhere proof or weak calibration-only activity.
+
+---
+
 # VoiceRoom Manager — Codex Final Completion Handoff
 
 ## Mission

@@ -11,9 +11,9 @@ public sealed class StateStore
     private readonly string _path;
     private readonly JsonSerializerOptions _json = new() { WriteIndented = true };
 
-    public StateStore()
+    public StateStore(string? directory = null)
     {
-        _dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VoiceRoomManagerWindows");
+        _dir = directory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VoiceRoomManagerWindows");
         _path = Path.Combine(_dir, "state.json");
     }
 
@@ -26,13 +26,23 @@ public sealed class StateStore
                 DesktopState state;
                 if (!File.Exists(_path)) state = new DesktopState();
                 else state = JsonSerializer.Deserialize<DesktopState>(File.ReadAllText(_path), _json) ?? new DesktopState();
-                OpenChatLinkRegistry.Rebuild(state.Rooms);
+
+                if (state.Schema > 2 || state.Rooms is null) throw new InvalidDataException("Unsupported state schema");
                 return state;
             }
             catch
             {
-                var state = new DesktopState { LastStatus = "상태 파일을 읽지 못해 새 상태로 시작함" };
-                OpenChatLinkRegistry.Rebuild(state.Rooms);
+                DesktopState? recovered = null;
+                try
+                {
+                    if (File.Exists(_path)) File.Copy(_path, _path + ".corrupt", true);
+                    if (File.Exists(_path + ".bak")) recovered = JsonSerializer.Deserialize<DesktopState>(File.ReadAllText(_path + ".bak"), _json);
+                }
+                catch { }
+                var state = recovered ?? new DesktopState();
+                state.ManagerActive = false;
+                state.LastStatus = recovered is null ? "저장 파일 오류 · 원본 보존됨 · 방 설정을 확인해 주세요" : "백업 복구 완료 · 방 설정 확인 후 전체 시작을 눌러 주세요";
+
                 return state;
             }
         }
@@ -42,11 +52,12 @@ public sealed class StateStore
     {
         lock (_gate)
         {
-            OpenChatLinkRegistry.Rebuild(state.Rooms);
+
             Directory.CreateDirectory(_dir);
             var tmp = _path + ".tmp";
             File.WriteAllText(tmp, JsonSerializer.Serialize(state, _json));
-            File.Move(tmp, _path, true);
+            if (File.Exists(_path)) File.Replace(tmp, _path, _path + ".bak");
+            else File.Move(tmp, _path);
         }
     }
 

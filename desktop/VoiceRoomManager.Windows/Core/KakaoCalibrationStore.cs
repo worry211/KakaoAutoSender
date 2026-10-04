@@ -15,11 +15,6 @@ internal static class KakaoCalibrationStore
     public const string VoiceMenu = "voice_menu";
     public const string VoiceNameInput = "voice_name_input";
     public const string VoiceCreate = "voice_create";
-    public const string VoiceExitProof = "voice_exit_proof";
-    public const string MicUnmuted = "mic_unmuted";
-    public const string SpeakerUnmuted = "speaker_unmuted";
-    public const string SpeakerRequestReject = "speaker_request_reject";
-
     private sealed class CalibrationFile
     {
         public int Schema { get; set; } = 1;
@@ -42,41 +37,16 @@ internal static class KakaoCalibrationStore
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Point { public int X; public int Y; }
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Input { public uint Type; public InputUnion U; }
-    [StructLayout(LayoutKind.Explicit)]
-    private struct InputUnion { [FieldOffset(0)] public KeybdInput Ki; }
-    [StructLayout(LayoutKind.Sequential)]
-    private struct KeybdInput
-    {
-        public ushort Vk;
-        public ushort Scan;
-        public uint Flags;
-        public uint Time;
-        public UIntPtr ExtraInfo;
-    }
-
-    private const uint MouseLeftDown = 0x0002;
-    private const uint MouseLeftUp = 0x0004;
-    private const uint InputKeyboard = 1;
-    private const uint KeyeventfUnicode = 0x0004;
-    private const uint KeyeventfKeyup = 0x0002;
     private const uint InvalidColor = 0xFFFFFFFF;
 
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out Point point);
-    [DllImport("user32.dll")]
-    private static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")]
-    private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
     [DllImport("user32.dll")]
     private static extern IntPtr GetDC(IntPtr hwnd);
     [DllImport("user32.dll")]
     private static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
     [DllImport("gdi32.dll")]
     private static extern uint GetPixel(IntPtr hdc, int x, int y);
-    [DllImport("user32.dll")]
-    private static extern uint SendInput(uint count, Input[] inputs, int size);
 
     private static readonly object Gate = new();
     private static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VoiceRoomManagerWindows");
@@ -159,31 +129,19 @@ internal static class KakaoCalibrationStore
         }
         if (!TryResolve(target, requireSignature: true, out var x, out var y, out diagnostic)) return false;
 
-        GetCursorPos(out var old);
-        try
-        {
-            if (!SetCursorPos(x, y)) { diagnostic += " · cursor=0"; return false; }
-            mouse_event(MouseLeftDown, 0, 0, 0, UIntPtr.Zero);
-            Thread.Sleep(45);
-            mouse_event(MouseLeftUp, 0, 0, 0, UIntPtr.Zero);
-            diagnostic += $" · click={x},{y}";
-            return true;
-        }
-        finally
-        {
-            SetCursorPos(old.X, old.Y);
-        }
+        AutomationOperation.Check();
+        var host = KakaoSurfaceLocator.ActiveOwnedSurface(AutomationOperation.Current!.Host);
+        if (!NativeInput.OwnsPoint(host, x, y)) { diagnostic = "다른 창에 가려짐"; return false; }
+        return NativeInput.Click(host, x, y);
     }
 
     public static bool TryClickAndType(string target, string text, out string diagnostic)
     {
         if (!TryClick(target, out diagnostic)) return false;
-        Thread.Sleep(100);
-        if (!SendUnicodeText(text))
-        {
-            diagnostic += " · unicodeType=0";
-            return false;
-        }
+        AutomationOperation.Pause(100);
+        var host = KakaoSurfaceLocator.ActiveOwnedSurface(AutomationOperation.Current!.Host);
+        if (!NativeInput.ReplaceText(host, text) || LocalTextSurface.Read(host)?.Has(text) != true)
+        { diagnostic += " · 이름 입력 재확인 실패"; return false; }
         diagnostic += " · unicodeType=1";
         return true;
     }
@@ -202,9 +160,11 @@ internal static class KakaoCalibrationStore
     {
         x = y = 0;
         TargetProfile? p;
+        string capturedVersion;
         lock (Gate)
         {
             var file = LoadCore();
+            capturedVersion = file.KakaoVersion;
             if (!file.Targets.TryGetValue(target, out p))
             {
                 diagnostic = target + " 미캘리브레이션";
@@ -212,7 +172,11 @@ internal static class KakaoCalibrationStore
             }
         }
 
-        var candidates = KakaoSurfaceLocator.VisibleTopLevels()
+        if (capturedVersion == "unknown" || capturedVersion != CurrentKakaoVersion())
+        { diagnostic = "Kakao 버전 변경 · calibration 다시 등록 필요"; return false; }
+        var op = AutomationOperation.Current;
+        if (op?.HasRoomProof != true) { diagnostic = "검증된 방 세션 없음"; return false; }
+        var candidates = KakaoSurfaceLocator.VisibleTopLevels().Where(s => KakaoSurfaceLocator.OwnedBy(s.Hwnd, op.Host) && KakaoSurfaceLocator.IsForeground(s.Hwnd))
             .Where(s => string.Equals(s.ClassName, p.HostClass, StringComparison.Ordinal))
             .Where(s => string.Equals(TitleKind(s.Title), p.HostTitleKind, StringComparison.Ordinal))
             .Select(s => new
@@ -286,18 +250,6 @@ internal static class KakaoCalibrationStore
         double sum = 0;
         for (var i = 0; i < expected.Length; i++) sum += Math.Abs(expected[i] - actual[i]);
         return sum / expected.Length;
-    }
-
-    private static bool SendUnicodeText(string text)
-    {
-        if (string.IsNullOrEmpty(text)) return true;
-        var inputs = new List<Input>(text.Length * 2);
-        foreach (var ch in text)
-        {
-            inputs.Add(new Input { Type = InputKeyboard, U = new InputUnion { Ki = new KeybdInput { Scan = ch, Flags = KeyeventfUnicode } } });
-            inputs.Add(new Input { Type = InputKeyboard, U = new InputUnion { Ki = new KeybdInput { Scan = ch, Flags = KeyeventfUnicode | KeyeventfKeyup } } });
-        }
-        return SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf<Input>()) == inputs.Count;
     }
 
     private static string TitleKind(string title)

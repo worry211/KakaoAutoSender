@@ -1,34 +1,41 @@
 name: VoiceRoom Windows
-
 on:
   pull_request:
     paths:
-      - 'desktop/VoiceRoomManager.Windows/**'
+      - 'desktop/**'
+      - 'scripts/package-voiceroom-windows.ps1'
       - '.github/workflows/voiceroom-windows.yml'
   workflow_dispatch:
-
 permissions:
   contents: read
-
+concurrency:
+  group: voiceroom-windows-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
       - name: Restore
-        run: dotnet restore desktop/VoiceRoomManager.Windows/VoiceRoomManager.Windows.csproj
-      - name: Build
+        run: dotnet restore desktop/VoiceRoomManager.Windows.Tests/VoiceRoomManager.Windows.Tests.csproj
+      - name: Build Release
         run: dotnet build desktop/VoiceRoomManager.Windows/VoiceRoomManager.Windows.csproj -c Release --no-restore
-      - name: Publish single-file x64
-        run: dotnet publish desktop/VoiceRoomManager.Windows/VoiceRoomManager.Windows.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o out/windows
-      - name: Hash executable
+      - name: Regression and screenshot fixture tests
+        run: dotnet test desktop/VoiceRoomManager.Windows.Tests -c Release --no-restore --logger "trx;LogFileName=windows.trx"
+      - name: Publish self-contained EXE, ZIP and SHA-256
         shell: pwsh
-        run: Get-FileHash out/windows/VoiceRoomManager.Windows.exe -Algorithm SHA256 | Format-List | Out-File out/windows/SHA256.txt
+        run: ./scripts/package-voiceroom-windows.ps1 -OutputDirectory "$env:GITHUB_WORKSPACE/out/windows"
       - uses: actions/upload-artifact@v4
         with:
           name: VoiceRoomManager-Windows-x64
           path: out/windows/
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: VoiceRoomManager-Windows-test-results
+          path: desktop/VoiceRoomManager.Windows.Tests/TestResults/

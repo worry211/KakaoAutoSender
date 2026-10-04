@@ -60,19 +60,22 @@ internal static class KakaoOpenChatPreviewBridge
         if (exact != IntPtr.Zero)
         {
             KakaoSurfaceLocator.Activate(exact);
-            OpenChatLinkRegistry.MarkVerifiedEntry(roomTitle);
+            OpenChatLinkRegistry.ConfirmCurrentRoom(roomTitle);
             return new(true, true, "이미 열린 대상 채팅창 제목 완전일치 확인");
         }
 
         var semantic = FindSemanticEntry(out var semanticDiag);
         if (semantic is not null)
         {
+            var host = KakaoSurfaceLocator.VisibleTopLevels().FirstOrDefault(s => KakaoSurfaceLocator.IsForeground(s.Hwnd));
+            if (host is null || LocalTextSurface.Read(host.Hwnd)?.HasPreviewTitle(roomTitle) != true)
+                return new(true, false, "미리보기 방 이름 확인 실패 · 다른 방은 조작하지 않음");
             var transition = CaptureSemanticTransitionProbe(semantic);
             if (!Invoke(semantic))
                 return new(true, false, "카카오 오픈채팅 입장 버튼 UIA 호출 실패 · " + semanticDiag);
             if (WaitForEntered(roomTitle, TimeSpan.FromSeconds(7), transition, out var proof))
             {
-                OpenChatLinkRegistry.MarkVerifiedEntry(roomTitle);
+                OpenChatLinkRegistry.ConfirmCurrentRoom(roomTitle);
                 return new(true, true, "카카오 소개 화면 → 참여 중인 오픈채팅방 → " + proof);
             }
             return new(true, false, "카카오 입장 버튼은 눌렀지만 실제 채팅 화면 전환을 확인하지 못함 · " + semanticDiag + " · " + KakaoSurfaceLocator.Diagnostic());
@@ -82,6 +85,10 @@ internal static class KakaoOpenChatPreviewBridge
         if (visual is null)
             return new(true, false, "카카오 소개 화면 입장 버튼을 찾지 못함 · " + semanticDiag + " · " + visualDiag + " · " + KakaoSurfaceLocator.Diagnostic());
 
+        KakaoSurfaceLocator.Activate(visual.Surface.TopLevel);
+        AutomationOperation.Pause(140);
+        if (LocalTextSurface.Read(visual.Surface.TopLevel)?.HasPreviewTitle(roomTitle) != true)
+            return new(true, false, "미리보기 방 이름 OCR 확인 실패 · 한국어 OCR/방 이름 확인 필요");
         var visualTransition = CaptureTransitionProbe(
             visual.Surface.Rect,
             visual.X - visual.Width / 2,
@@ -90,14 +97,14 @@ internal static class KakaoOpenChatPreviewBridge
             visual.Height);
 
         KakaoSurfaceLocator.Activate(visual.Surface.TopLevel);
-        Thread.Sleep(140);
+        AutomationOperation.Pause(140);
         if (!ClickScreen(visual.X, visual.Y))
             return new(true, false, "검증된 카카오 노란 입장 버튼 클릭 실패 · " + visualDiag);
 
         if (!WaitForEntered(roomTitle, TimeSpan.FromSeconds(8), visualTransition, out var visualProof))
             return new(true, false, "노란 입장 버튼 클릭 후 실제 채팅 화면 전환을 확인하지 못함 · " + visualDiag + " · " + KakaoSurfaceLocator.Diagnostic());
 
-        OpenChatLinkRegistry.MarkVerifiedEntry(roomTitle);
+        OpenChatLinkRegistry.ConfirmCurrentRoom(roomTitle);
         return new(true, true, "카카오 소개 화면 → 검증된 노란 입장 버튼 → " + visualProof + " · " + visualDiag);
     }
 
@@ -151,94 +158,20 @@ internal static class KakaoOpenChatPreviewBridge
 
     private static VisualCandidate? FindVisualEntry(out string diagnostic)
     {
-        var hdc = GetDC(IntPtr.Zero);
-        if (hdc == IntPtr.Zero)
+        var candidates = new List<VisualCandidate>();
+        foreach(var surface in KakaoSurfaceLocator.PreviewCandidates())
         {
-            diagnostic = "screenDc=0";
-            return null;
+            if (!KakaoSurfaceLocator.IsForeground(surface.TopLevel)) continue;
+            var bytes = LocalTextSurface.Capture(surface.Rect);
+            if (bytes is null) continue;
+            var frame = new PixelFrame(bytes);
+            var hit = CtaDetector.Yellow(frame.Width,frame.Height,frame.Pixel);
+            if (hit is null) continue;
+            var c = new VisualCandidate(surface,surface.Rect.Left+hit.Value.X,surface.Rect.Top+hit.Value.Y,hit.Value.Width,hit.Value.Height,0,0);
+            if (!candidates.Any(x=>Math.Abs(x.X-c.X)<14&&Math.Abs(x.Y-c.Y)<14)) candidates.Add(c);
         }
-
-        var found = new List<VisualCandidate>();
-        try
-        {
-            foreach (var surface in KakaoSurfaceLocator.PreviewCandidates())
-            {
-                var r = surface.Rect;
-                var left = r.Left + 6;
-                var right = r.Right - 6;
-                var top = r.Top + (int)(r.Height * 0.46);
-                var bottom = r.Bottom - 6;
-                if (right - left < 170 || bottom - top < 70) continue;
-
-                var minX = int.MaxValue;
-                var maxX = int.MinValue;
-                var minY = int.MaxValue;
-                var maxY = int.MinValue;
-                var rows = 0;
-                var samples = 0;
-
-                for (var y = top; y <= bottom; y += 2)
-                {
-                    var rowMin = int.MaxValue;
-                    var rowMax = int.MinValue;
-                    var rowSamples = 0;
-                    for (var x = left; x <= right; x += 2)
-                    {
-                        var color = GetPixel(hdc, x, y);
-                        if (color == InvalidColor || !IsKakaoYellow(color)) continue;
-                        rowMin = Math.Min(rowMin, x);
-                        rowMax = Math.Max(rowMax, x);
-                        rowSamples++;
-                    }
-
-                    if (rowSamples < 18 || rowMax - rowMin < Math.Min(125, r.Width / 2)) continue;
-                    rows++;
-                    samples += rowSamples;
-                    minX = Math.Min(minX, rowMin);
-                    maxX = Math.Max(maxX, rowMax);
-                    minY = Math.Min(minY, y);
-                    maxY = Math.Max(maxY, y);
-                }
-
-                if (rows < 7 || minX == int.MaxValue) continue;
-                var width = maxX - minX;
-                var height = maxY - minY;
-                if (width < Math.Min(155, r.Width * 0.50) || height < 18 || height > 120) continue;
-                if (width > r.Width * 0.99) continue;
-
-                var centerX = minX + width / 2;
-                var centerY = minY + height / 2;
-                if (centerY < r.Top + r.Height * 0.52) continue;
-
-                long score = samples * 10L + width * 5L + rows * 100L;
-                if (centerY > r.Top + r.Height * 0.72) score += 20_000;
-                if (string.IsNullOrWhiteSpace(surface.Title)) score += 5_000;
-                found.Add(new(surface, centerX, centerY, width, height, samples, score));
-            }
-        }
-        finally
-        {
-            ReleaseDC(IntPtr.Zero, hdc);
-        }
-
-        // Parent/child HWNDs can expose the same pixels. Deduplicate near-identical candidates.
-        var unique = found
-            .OrderByDescending(x => x.Score)
-            .Aggregate(new List<VisualCandidate>(), (acc, item) =>
-            {
-                if (!acc.Any(x => Math.Abs(x.X - item.X) <= 14 && Math.Abs(x.Y - item.Y) <= 14)) acc.Add(item);
-                return acc;
-            });
-
-        var preview = string.Join(" | ", unique.Take(4).Select(x => $"{x.Surface.ClassName}:{x.Surface.Rect.Width}x{x.Surface.Rect.Height}@{x.X},{x.Y} bbox={x.Width}x{x.Height}"));
-        diagnostic = $"yellowCandidates={unique.Count} [{preview}]";
-        if (unique.Count == 0) return null;
-        if (unique.Count > 1 && unique[0].Score < unique[1].Score * 1.15)
-        {
-            diagnostic += " ambiguous=1";
-            return null;
-        }
-        return unique[0];
+        diagnostic = "yellowCandidates=" + candidates.Count;
+        return candidates.Count==1?candidates[0]:null;
     }
 
     private static TransitionProbe? CaptureSemanticTransitionProbe(AutomationElement element)
@@ -281,7 +214,7 @@ internal static class KakaoOpenChatPreviewBridge
 
         while (DateTime.UtcNow < deadline)
         {
-            Thread.Sleep(140);
+            AutomationOperation.Pause(140);
             var exact = KakaoSurfaceLocator.FindExactChat(title);
             if (exact != IntPtr.Zero)
             {
@@ -289,13 +222,6 @@ internal static class KakaoOpenChatPreviewBridge
                 proof = "독립 채팅창 제목 완전일치 확인";
                 return true;
             }
-            if (KakaoSurfaceLocator.TryFindChatComposer(out var composer) && composer is not null)
-            {
-                KakaoSurfaceLocator.Activate(composer.TopLevel);
-                proof = $"실제 채팅 composer 확인({composer.ClassName})";
-                return true;
-            }
-
             if (transition is null) continue;
             var yellowRatio = ActionYellowRatio(transition);
             var delta = SignatureDelta(transition);
@@ -308,7 +234,10 @@ internal static class KakaoOpenChatPreviewBridge
             if (changed) stableVisualTransitions++;
             else stableVisualTransitions = 0;
 
-            if (stableVisualTransitions >= 3)
+            if (stableVisualTransitions >= 3 && KakaoSurfaceLocator.VisibleTopLevels()
+                .Where(s => KakaoSurfaceLocator.IsForeground(s.Hwnd))
+                .Any(s => LocalTextSurface.Read(s.Hwnd) is { } frame && frame.HasRoom(title)
+                    && !frame.Has("참여 중인 오픈채팅방")))
             {
                 proof = $"Kakao custom-rendered 채팅 전환 확인(CTA소멸, surfaceDelta={delta:0.00}, stable={stableVisualTransitions})";
                 return true;
@@ -407,6 +336,7 @@ internal static class KakaoOpenChatPreviewBridge
 
     private static bool Invoke(AutomationElement element)
     {
+        AutomationOperation.Check();
         try
         {
             if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
@@ -426,19 +356,8 @@ internal static class KakaoOpenChatPreviewBridge
 
     private static bool ClickScreen(int x, int y)
     {
-        GetCursorPos(out var old);
-        try
-        {
-            if (!SetCursorPos(x, y)) return false;
-            mouse_event(MouseLeftDown, 0, 0, 0, UIntPtr.Zero);
-            Thread.Sleep(50);
-            mouse_event(MouseLeftUp, 0, 0, 0, UIntPtr.Zero);
-            return true;
-        }
-        finally
-        {
-            SetCursorPos(old.X, old.Y);
-        }
+        var host = KakaoSurfaceLocator.VisibleTopLevels().FirstOrDefault(s => s.Rect.Contains(x,y) && KakaoSurfaceLocator.IsForeground(s.Hwnd));
+        return host is not null && NativeInput.Click(host.Hwnd, x, y);
     }
 
     private static bool IsKakaoYellow(uint color)

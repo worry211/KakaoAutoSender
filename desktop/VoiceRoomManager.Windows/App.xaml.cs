@@ -1,7 +1,35 @@
+using System.IO;
 using System.Windows;
-
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 namespace VoiceRoomManager.Windows;
-
 public partial class App : Application
 {
+    private Mutex? _instance;
+    protected override void OnStartup(StartupEventArgs e)
+    {
+        base.OnStartup(e);
+        if (e.Args.Length >= 2 && e.Args[0] == "--render-preview")
+        {
+            RenderPreview(e.Args); return;
+        }
+        _instance = new Mutex(true, @"Local\VoiceRoomManagerWindows", out var created);
+        if (!created) { MessageBox.Show("VoiceRoom Manager가 이미 실행 중입니다."); Shutdown(); return; }
+        new MainWindow().Show();
+    }
+    private async void RenderPreview(string[] args)
+    {
+        var width = args.Length > 2 ? int.Parse(args[2]) : 1180;
+        var window = new MainWindow(preview: true) { Width = width, Height = 1000, Left = -10000, Top = -10000, ShowInTaskbar = false };
+        window.Show();
+        await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        var content = (FrameworkElement)window.Content;
+        content.UpdateLayout();
+        var bitmap = new RenderTargetBitmap((int)content.ActualWidth, (int)content.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(content);
+        var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using (var file = File.Create(args[1])) encoder.Save(file);
+        window.Close(); Shutdown();
+    }
+    protected override void OnExit(ExitEventArgs e) { _instance?.Dispose(); base.OnExit(e); }
 }

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 namespace VoiceRoomManager.Windows.Core;
 
 public sealed class RoomState
@@ -15,9 +16,20 @@ public sealed class RoomState
     public string LastError { get; set; } = "";
     public string LastDiagnostic { get; set; } = "";
     public int Failures { get; set; }
+    public DateTimeOffset? LastSuccessAt { get; set; }
+    public DateTimeOffset? LastFailureAt { get; set; }
+    public string Stage { get; set; } = "준비";
+    [JsonIgnore]
+    public string NextCheckDisplay => NextCheckAt?.ToLocalTime().ToString("MM/dd HH:mm:ss") ?? "—";
+    [JsonIgnore]
+    public string LastSuccessDisplay => LastSuccessAt?.ToLocalTime().ToString("MM/dd HH:mm") ?? "아직 없음";
+    [JsonIgnore]
+    public string AudioDisplay => MicMuted && SpeakerMuted ? "마이크 · 스피커 보호 확인" : "오디오 보호 확인 필요";
 
+    [JsonIgnore]
     public string LinkDisplay => OpenChatLinkRegistry.IsSupported(OpenChatUrl) ? "등록됨" : "미등록";
 
+    [JsonIgnore]
     public string StatusDisplay => Status switch
     {
         "NEW" => OpenChatLinkRegistry.IsSupported(OpenChatUrl) ? "시작 준비" : "링크 등록 필요",
@@ -28,13 +40,16 @@ public sealed class RoomState
         "ACTIVE_UNKNOWN_START" => "보룸 활성 · 시작시각 확인 중",
         "CHECK_DUE" => "자동 점검 중",
         "WAITING_UNLOCK" => "잠금 해제 대기",
+        "USER_ACTION_REQUIRED" => "사용자 조치 필요",
+        "STOPPED" => "관리 중단",
         "OPENING_KAKAO" => "카카오톡 여는 중",
         "ERROR" => Failures > 0 ? $"자동 재시도 ({Failures})" : "오류",
         "MANUAL_ERROR" => "수동 점검 실패",
         "PROBE_ERROR" => "진단 실패",
-        _ => string.IsNullOrWhiteSpace(Status) ? "상태 확인 중" : Status
+        _ => "상태 확인 중"
     };
 
+    [JsonIgnore]
     public string OperationDetail
     {
         get
@@ -52,6 +67,7 @@ public sealed class RoomState
         }
     }
 
+    [JsonIgnore]
     public string Remaining
     {
         get
@@ -66,6 +82,7 @@ public sealed class RoomState
 
 public sealed class DesktopState
 {
+    public int Schema { get; set; } = 2;
     public bool ManagerActive { get; set; }
     public bool RunAtLogin { get; set; }
     public List<RoomState> Rooms { get; set; } = [];

@@ -17,7 +17,7 @@ internal static class KakaoOpenChatEntry
         trace.Add(initial.Diagnostic);
         if (initial.Success)
         {
-            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
+            OpenChatLinkRegistry.ConfirmCurrentRoom(room.Title);
             return new(true, true, string.Join(" → ", trace));
         }
 
@@ -27,9 +27,12 @@ internal static class KakaoOpenChatEntry
         var browserDeadline = DateTime.UtcNow.AddSeconds(5);
         while (DateTime.UtcNow < browserDeadline)
         {
+            AutomationOperation.Stage("브라우저 참여 버튼 확인");
+            if (OpenChatLinkLauncher.TryBrowserAction(false, out var semantic))
+            { browser = new(true, true, semantic); break; }
             browser = BrowserOpenChatVisualBridge.TryInvokeJoin();
             if (browser.Clicked) break;
-            Thread.Sleep(220);
+            AutomationOperation.Pause(220);
         }
 
         trace.Add("browser=" + (browser?.Diagnostic ?? "not-attempted"));
@@ -38,11 +41,13 @@ internal static class KakaoOpenChatEntry
 
         // After the browser CTA, Windows can take time to foreground Kakao and paint the custom
         // OpenChat preview. Repeatedly try both semantic and strict yellow-CTA visual entry.
+        AutomationOperation.Stage("Kakao 미리보기 · 방 진입");
+        OpenChatLinkLauncher.TryBrowserAction(true, out _);
         var afterBrowser = TryKakaoStage(room.Title, TimeSpan.FromSeconds(8));
         trace.Add(afterBrowser.Diagnostic);
         if (afterBrowser.Success)
         {
-            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
+            OpenChatLinkRegistry.ConfirmCurrentRoom(room.Title);
             return new(true, true, string.Join(" → ", trace));
         }
 
@@ -53,7 +58,7 @@ internal static class KakaoOpenChatEntry
     {
         var deadline = DateTime.UtcNow.Add(timeout);
         KakaoOpenChatPreviewBridge.Result? lastPreview = null;
-        KakaoPreviewVisualFallback.Result? lastVisual = null;
+
 
         while (DateTime.UtcNow < deadline)
         {
@@ -61,20 +66,11 @@ internal static class KakaoOpenChatEntry
             if (lastPreview.Success)
                 return new(true, true, "preview=" + lastPreview.Diagnostic);
 
-            lastVisual = KakaoPreviewVisualFallback.TryEnter(roomTitle);
-            if (lastVisual.Success)
-                return new(true, true, "visualKakao=" + lastVisual.Diagnostic);
-
-            Thread.Sleep(180);
+            AutomationOperation.Pause(180);
         }
 
-        return new(lastPreview?.Attempted == true || lastVisual?.Attempted == true, false,
-            "preview=" + (lastPreview?.Diagnostic ?? "not-attempted") +
-            " · visualKakao=" + (lastVisual?.Diagnostic ?? "not-attempted"));
+        return new(lastPreview?.Attempted == true, false,
+            "preview=" + (lastPreview?.Diagnostic ?? "not-attempted"));
     }
 
-    public static bool HasVisibleChatComposer(IntPtr ignored)
-    {
-        return KakaoSurfaceLocator.TryFindChatComposer(out var composer) && composer is not null;
-    }
 }

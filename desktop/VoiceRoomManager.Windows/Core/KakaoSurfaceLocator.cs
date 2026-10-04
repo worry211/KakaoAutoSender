@@ -52,6 +52,28 @@ internal static class KakaoSurfaceLocator
     private static extern bool ShowWindowAsync(IntPtr hwnd, int cmdShow);
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+
+    public static bool OwnedBy(IntPtr hwnd, IntPtr owner)
+    {
+        for (var depth = 0; depth < 5 && hwnd != IntPtr.Zero; depth++)
+        {
+            if (hwnd == owner) return true;
+            hwnd = GetWindow(hwnd, 4);
+        }
+        return false;
+    }
+    public static IntPtr ActiveOwnedSurface(IntPtr owner)
+    {
+        var foreground = GetForegroundWindow();
+        return OwnedBy(foreground, owner) && ProcessId(foreground) == ProcessId(owner) ? foreground : owner;
+    }
+
+    public static bool IsForeground(IntPtr host) => GetForegroundWindow() == host;
+    public static int ProcessId(IntPtr host) { GetWindowThreadProcessId(host, out var pid); return (int)pid; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect { public int Left; public int Top; public int Right; public int Bottom; }
