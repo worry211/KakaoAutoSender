@@ -149,14 +149,7 @@ final class LicenseManager {
                 body()
                     .put("key", key.trim().toUpperCase(java.util.Locale.ROOT))
                     .put("public_key", InstallIdentity.publicKey());
-            JSONObject r;
-            try {
-              // Activation itself is sent once. If the response is lost after the server consumed the
-              // one-time key, recover() resolves the ambiguity without consuming the key twice.
-              r = request(app, "/api/v1/activate", b, "");
-            } catch (IOException uncertainActivation) {
-              r = retryRecover(app, 2);
-            }
+            JSONObject r = activateWithRecovery(app, b);
             if ("ACTIVE".equals(r.optString("state"))) {
               accept(app, r);
               v = verifyStored(app);
@@ -172,6 +165,46 @@ final class LicenseManager {
           final Verification result = v;
           MAIN.post(() -> callback.done(result));
         });
+  }
+
+  /**
+   * Makes one-time activation robust without turning the redeem key into a replayable credential.
+   * If an activation response is lost, installation-key recovery is attempted first. Only when the
+   * server confirms this installation has not claimed a license do we send the activation once more.
+   */
+  private static JSONObject activateWithRecovery(Context c, JSONObject body) throws Exception {
+    try {
+      JSONObject first = request(c, "/api/v1/activate", body, "");
+      if ("ALREADY_USED".equals(first.optString("state"))) {
+        JSONObject recovered = retryRecover(c, 2);
+        if ("ACTIVE".equals(recovered.optString("state"))) return recovered;
+      }
+      return first;
+    } catch (IOException uncertainActivation) {
+      JSONObject recovered = null;
+      try {
+        recovered = retryRecover(c, 2);
+        if ("ACTIVE".equals(recovered.optString("state"))) return recovered;
+      } catch (Exception ignoredRecovery) {
+        if (!canRetry()) throw uncertainActivation;
+      }
+
+      String recoveredState = recovered == null ? "" : recovered.optString("state", "");
+      if (!recoveredState.isEmpty()
+          && !"NOT_FOUND".equals(recoveredState)
+          && !"INVALID".equals(recoveredState)) {
+        return recovered;
+      }
+      if (!canRetry()) throw uncertainActivation;
+      pauseBeforeRetry(0);
+
+      JSONObject second = request(c, "/api/v1/activate", body, "");
+      if ("ALREADY_USED".equals(second.optString("state"))) {
+        JSONObject finalRecovery = retryRecover(c, 2);
+        if ("ACTIVE".equals(finalRecovery.optString("state"))) return finalRecovery;
+      }
+      return second;
+    }
   }
 
   static Verification validate(Context c) {
