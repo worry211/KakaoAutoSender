@@ -7,8 +7,10 @@ import android.app.PendingIntent;
 import android.app.RemoteInput;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.SystemClock;
 import android.provider.Settings;
+import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.Map;
 import org.junit.Before;
@@ -18,6 +20,7 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowContentResolver;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 28)
@@ -31,6 +34,8 @@ public class CommercialGateTest {
     c.getSharedPreferences("entitlement_v2", 0).edit().clear().commit();
     Settings.Global.putInt(c.getContentResolver(), Settings.Global.BOOT_COUNT, 4);
     KakaoNotificationListener.clearRuntimeAndBindings(c);
+    ShadowContentResolver.registerInputStream(
+        Uri.parse("content://photo/a"), new ByteArrayInputStream(new byte[] {1, 2, 3}));
     c.getSharedPreferences("entitlement_v2", 0)
         .edit()
         .putString("state", "ACTIVE")
@@ -147,6 +152,20 @@ public class CommercialGateTest {
   }
 
   @Test
+  public void unreadableConfiguredPhotoFailsClosedBeforeKakaoSend() throws Exception {
+    target("room-a", true, "image/png");
+    assertFalse(
+        KakaoMessageSender.send(
+            c,
+            "room-a",
+            "text",
+            new RoomMediaStore.Media("content://photo/missing", "image/png", "missing.png")));
+    assertTrue(KakaoMessageSender.lastError().contains("사진"));
+    for (Intent i : Shadows.shadowOf(RuntimeEnvironment.getApplication()).getBroadcastIntents())
+      assertNotEquals("TEST_REPLY", i.getAction());
+  }
+
+  @Test
   public void wrongRoomLabelFailsClosedForTextAndPhoto() throws Exception {
     target("room-b", true, "image/png");
     assertFalse(KakaoNotificationListener.sendToRoom(c, "room-a", "text"));
@@ -224,7 +243,7 @@ public class CommercialGateTest {
       if ("TEST_REPLY".equals(i.getAction())) delivered = i;
     assertNotNull(delivered);
     assertEquals(
-        android.net.Uri.parse("content://photo/a"),
+        Uri.parse("content://photo/a"),
         RemoteInput.getDataResultsFromIntent(delivered, "reply").get("image/png"));
   }
 
