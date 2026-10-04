@@ -6,11 +6,6 @@ using Microsoft.Win32;
 
 namespace VoiceRoomManager.Windows.Core;
 
-/// <summary>
-/// KakaoTalk Windows automation. Room entry is prepared once by VoiceRoomCoordinator; this class
-/// reuses the freshly verified session instead of searching for the same room again. VoiceRoom
-/// controls prefer semantic UI Automation and fail closed when the current Kakao build hides them.
-/// </summary>
 public sealed class KakaoPcAutomation
 {
     private static readonly string[] KakaoCandidates =
@@ -37,7 +32,6 @@ public sealed class KakaoPcAutomation
     {
         var process = Process.GetProcessesByName("KakaoTalk").FirstOrDefault();
         if (process is not null) return new(true, "카카오톡 실행 확인");
-
         var path = ResolveKakaoPath();
         if (path is null) return new(false, "카카오톡 Windows 설치 경로를 찾지 못함");
         try
@@ -45,10 +39,7 @@ public sealed class KakaoPcAutomation
             Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
             return new(true, "카카오톡 실행 요청 완료");
         }
-        catch (Exception ex)
-        {
-            return new(false, "카카오톡 실행 실패 · " + Short(ex));
-        }
+        catch (Exception ex) { return new(false, "카카오톡 실행 실패 · " + Short(ex)); }
     }
 
     public Result SafeProbe(RoomState room)
@@ -58,17 +49,18 @@ public sealed class KakaoPcAutomation
         if (!context.Success) return context;
         Thread.Sleep(450);
 
-        var surfaces = GetKakaoSurfaces(activateMain: false, out var error);
+        var surfaces = GetKakaoSurfaces(false, out var error);
         if (surfaces.Count == 0) return new(false, error + " · " + KakaoSurfaceLocator.Diagnostic());
-
-        if (HasStrongActiveProof(surfaces))
-            return new(true, "기존 보이스룸 활성 화면 확인 · " + context.Status, true);
+        if (HasStrongActiveProofHybrid(surfaces)) return new(true, "기존 보이스룸 활성 확인 · " + context.Status, true);
 
         var voice = FindClickableByNames(surfaces, "보이스룸", "보이스룸 시작", "보이스룸 만들기");
-        if (voice is null)
-            return new(false, "실제 채팅방 진입은 검증됐지만 보이스룸 컨트롤이 UIA에 노출되지 않음 · " + context.Status + " · " + SurfaceDiagnostic(surfaces));
+        if (voice is not null) return new(true, "방 진입/보이스룸 컨트롤 UIA 인식 성공 · 생성은 하지 않음");
+        if (KakaoCalibrationStore.IsVisualMatch(KakaoCalibrationStore.VoiceMenu, out var calibrated))
+            return new(true, "방 진입 + 캘리브레이션된 보이스룸 메뉴 시그니처 확인 · " + calibrated);
 
-        return new(true, "방 진입/보이스룸 컨트롤 인식 성공 · 생성은 하지 않음");
+        return new(false,
+            "실제 채팅방 진입은 검증됐지만 보이스룸 컨트롤을 인식하지 못함 · UI 캘리브레이션 fallback 가능 · " +
+            context.Status + " · " + SurfaceDiagnostic(surfaces));
     }
 
     public Result EnsureVoiceRoom(RoomState room)
@@ -78,66 +70,73 @@ public sealed class KakaoPcAutomation
         if (!context.Success) return context;
         Thread.Sleep(450);
 
-        var surfaces = GetKakaoSurfaces(activateMain: false, out var error);
+        var surfaces = GetKakaoSurfaces(false, out var error);
         if (surfaces.Count == 0) return new(false, error + " · " + KakaoSurfaceLocator.Diagnostic());
-
-        if (HasStrongActiveProof(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
+        if (HasStrongActiveProofHybrid(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
 
         var voice = FindClickableByNames(surfaces, "보이스룸", "보이스룸 시작", "보이스룸 만들기");
-        if (voice is null)
-            return new(false, "실제 채팅방 진입은 성공했지만 보이스룸 메뉴가 UIA에 노출되지 않음 · " + SurfaceDiagnostic(surfaces));
-        if (!Invoke(voice)) return new(false, "보이스룸 메뉴 호출 실패");
+        if (voice is not null)
+        {
+            if (!Invoke(voice)) return new(false, "보이스룸 메뉴 UIA 호출 실패");
+        }
+        else if (!KakaoCalibrationStore.TryClick(KakaoCalibrationStore.VoiceMenu, out var voiceDiag))
+        {
+            return new(false, "보이스룸 메뉴 인식 실패 · UIA=0 · calibrated=" + voiceDiag + " · " + SurfaceDiagnostic(surfaces));
+        }
         Thread.Sleep(650);
 
-        surfaces = GetKakaoSurfaces(activateMain: false, out error);
-        if (surfaces.Count == 0) return new(false, error);
-        if (HasStrongActiveProof(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
+        surfaces = GetKakaoSurfaces(false, out error);
+        if (HasStrongActiveProofHybrid(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
 
-        if (FindByNameContains(surfaces, "보이스룸 만들기") is null)
-        {
-            var createMenu = FindClickableByNames(surfaces, "보이스룸 만들기", "만들기");
-            if (createMenu is not null && Invoke(createMenu))
-            {
-                Thread.Sleep(550);
-                surfaces = GetKakaoSurfaces(activateMain: false, out error);
-                if (surfaces.Count == 0) return new(false, error);
-            }
-        }
-
-        var edit = FindBestEditable(surfaces);
-        if (edit is null) return new(false, "보이스룸 이름 입력칸을 찾지 못함 · " + SurfaceDiagnostic(surfaces));
         var voiceName = TruncateCodePoints(room.Title.Trim().Length == 0 ? "보이스룸" : room.Title.Trim(), 30);
-        if (!SetValue(edit, voiceName)) return new(false, "보이스룸 이름 입력 실패");
+        var edit = FindBestEditable(surfaces);
+        if (edit is not null)
+        {
+            if (!SetValue(edit, voiceName)) return new(false, "보이스룸 이름 UIA 입력 실패");
+        }
+        else if (!KakaoCalibrationStore.TryClickAndType(KakaoCalibrationStore.VoiceNameInput, voiceName, out var inputDiag))
+        {
+            return new(false, "보이스룸 이름 입력칸 인식 실패 · calibrated=" + inputDiag + " · " + SurfaceDiagnostic(surfaces));
+        }
         Thread.Sleep(320);
 
-        surfaces = GetKakaoSurfaces(activateMain: false, out error);
+        surfaces = GetKakaoSurfaces(false, out error);
         var create = FindClickableExact(surfaces, "만들기", "보이스룸 만들기")
             ?? FindClickableByNames(surfaces, "만들기", "보이스룸 만들기");
-        if (create is null || !Invoke(create)) return new(false, "활성화된 만들기 버튼을 찾지 못함 · " + SurfaceDiagnostic(surfaces));
-
-        for (var i = 0; i < 14; i++)
+        if (create is not null)
         {
-            Thread.Sleep(450);
-            surfaces = GetKakaoSurfaces(activateMain: false, out _);
-            if (!HasStrongActiveProof(surfaces)) continue;
-            Thread.Sleep(300);
-            surfaces = GetKakaoSurfaces(activateMain: false, out _);
-            if (!HasStrongActiveProof(surfaces)) continue;
-            var protectedResult = ProtectAudio(surfaces, "보이스룸 생성/활성 확인");
-            return protectedResult with { Created = true };
+            if (!Invoke(create)) return new(false, "활성화된 만들기 버튼 UIA 호출 실패");
+        }
+        else if (!KakaoCalibrationStore.TryClick(KakaoCalibrationStore.VoiceCreate, out var createDiag))
+        {
+            return new(false, "만들기 버튼 인식 실패 · calibrated=" + createDiag + " · " + SurfaceDiagnostic(surfaces));
         }
 
-        return new(false, "만들기 이후 보이스룸 활성 증거를 2회 확인하지 못함 · " + SurfaceDiagnostic(surfaces));
+        for (var i = 0; i < 16; i++)
+        {
+            Thread.Sleep(420);
+            surfaces = GetKakaoSurfaces(false, out _);
+            if (!HasStrongActiveProofHybrid(surfaces)) continue;
+            Thread.Sleep(280);
+            surfaces = GetKakaoSurfaces(false, out _);
+            if (!HasStrongActiveProofHybrid(surfaces)) continue;
+            return ProtectAudio(surfaces, "보이스룸 생성/활성 확인") with { Created = true };
+        }
+
+        return new(false,
+            "만들기 이후 보이스룸 활성 증거를 2회 확인하지 못함 · exitCalibration=" +
+            (KakaoCalibrationStore.Has(KakaoCalibrationStore.VoiceExitProof) ? "yes" : "no") + " · " + SurfaceDiagnostic(surfaces));
     }
 
     public Result RuntimeGuard(RoomState room)
     {
         if (DesktopSession.IsLocked()) return new(false, "Windows 잠금 상태");
-        var surfaces = GetKakaoSurfaces(activateMain: false, out var error);
+        var surfaces = GetKakaoSurfaces(false, out var error);
         if (surfaces.Count == 0) return new(false, error);
 
+        var active = HasStrongActiveProofHybrid(surfaces);
         var scoped = surfaces.Where(root => RootLooksLikeRoom(root, room.Title) || HasStrongActiveProof(root)).ToList();
-        if (scoped.Count == 0) return new(false, "관리 보이스룸 화면이 아님");
+        if (scoped.Count == 0 && !active) return new(false, "관리 보이스룸 화면이 아님");
 
         foreach (var root in scoped)
         {
@@ -145,18 +144,20 @@ public sealed class KakaoPcAutomation
             if (requestContext is null) continue;
             var reject = FindExplicitRejectNear(requestContext);
             if (reject is not null && Invoke(reject))
-                return new(true, "스피커 요청 자동 거절", HasStrongActiveProof(scoped), room.MicMuted, room.SpeakerMuted,
-                    RejectedRequest: true);
+                return new(true, "스피커 요청 자동 거절", active, room.MicMuted, room.SpeakerMuted, RejectedRequest: true);
         }
 
         var disable = FindClickableExact(scoped,
             "스피커 요청 끄기", "스피커 요청 받지 않기", "스피커 요청 차단하기",
             "스피커 신청 끄기", "스피커 신청 받지 않기", "스피커 신청 차단하기");
         if (disable is not null && Invoke(disable))
-            return new(true, "스피커 요청 받기 자동 차단", HasStrongActiveProof(scoped), room.MicMuted, room.SpeakerMuted,
-                RequestToggleDisabled: true);
+            return new(true, "스피커 요청 받기 자동 차단", active, room.MicMuted, room.SpeakerMuted, RequestToggleDisabled: true);
 
-        return ProtectAudio(scoped, "런타임 보호 확인");
+        if (KakaoCalibrationStore.IsVisualMatch(KakaoCalibrationStore.SpeakerRequestReject, out _) &&
+            KakaoCalibrationStore.TryClick(KakaoCalibrationStore.SpeakerRequestReject, out var rejectDiag))
+            return new(true, "캘리브레이션 스피커 요청 자동 거절 · " + rejectDiag, active, room.MicMuted, room.SpeakerMuted, RejectedRequest: true);
+
+        return ProtectAudio(scoped.Count > 0 ? scoped : surfaces, "런타임 보호 확인");
     }
 
     private Result EnsureRoomContext(RoomState room)
@@ -176,10 +177,8 @@ public sealed class KakaoPcAutomation
             return new(true, "최근 링크 진입 토큰 + 실제 채팅 composer 확인");
         }
 
-        // Standalone fallback for calls that did not pass through VoiceRoomCoordinator.
         var nav = _win32.OpenRoom(room.Title);
-        if (!nav.Success)
-            return new(false, "방 세션 확보 실패 · " + nav.Diagnostic + " · " + KakaoSurfaceLocator.Diagnostic());
+        if (!nav.Success) return new(false, "방 세션 확보 실패 · " + nav.Diagnostic + " · " + KakaoSurfaceLocator.Diagnostic());
         OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
         return new(true, nav.Diagnostic);
     }
@@ -190,23 +189,39 @@ public sealed class KakaoPcAutomation
         var speakerMuted = false;
         var repaired = false;
 
-        var micOffAction = FindClickableExact(roots, "마이크 끄기", "마이크 음소거");
-        var micOnAction = FindClickableExact(roots, "마이크 켜기", "마이크 음소거 해제");
-        if (micOffAction is not null)
+        var micOff = FindClickableExact(roots, "마이크 끄기", "마이크 음소거");
+        var micOn = FindClickableExact(roots, "마이크 켜기", "마이크 음소거 해제");
+        if (micOff is not null)
         {
-            if (Invoke(micOffAction)) { repaired = true; micMuted = true; Thread.Sleep(160); }
+            if (Invoke(micOff)) { repaired = true; micMuted = true; Thread.Sleep(160); }
         }
-        else if (micOnAction is not null) micMuted = true;
+        else if (micOn is not null) micMuted = true;
+        else if (KakaoCalibrationStore.IsVisualMatch(KakaoCalibrationStore.MicUnmuted, out _) &&
+                 KakaoCalibrationStore.TryClick(KakaoCalibrationStore.MicUnmuted, out _))
+        {
+            repaired = true; micMuted = true; Thread.Sleep(160);
+        }
 
-        var speakerOffAction = FindClickableExact(roots, "스피커 끄기", "스피커 음소거", "소리 끄기");
-        var speakerOnAction = FindClickableExact(roots, "스피커 켜기", "스피커 음소거 해제", "소리 켜기");
-        if (speakerOffAction is not null)
+        var speakerOff = FindClickableExact(roots, "스피커 끄기", "스피커 음소거", "소리 끄기");
+        var speakerOn = FindClickableExact(roots, "스피커 켜기", "스피커 음소거 해제", "소리 켜기");
+        if (speakerOff is not null)
         {
-            if (Invoke(speakerOffAction)) { repaired = true; speakerMuted = true; Thread.Sleep(160); }
+            if (Invoke(speakerOff)) { repaired = true; speakerMuted = true; Thread.Sleep(160); }
         }
-        else if (speakerOnAction is not null) speakerMuted = true;
+        else if (speakerOn is not null) speakerMuted = true;
+        else if (KakaoCalibrationStore.IsVisualMatch(KakaoCalibrationStore.SpeakerUnmuted, out _) &&
+                 KakaoCalibrationStore.TryClick(KakaoCalibrationStore.SpeakerUnmuted, out _))
+        {
+            repaired = true; speakerMuted = true; Thread.Sleep(160);
+        }
 
         return new(true, prefix, true, micMuted, speakerMuted, AudioRepaired: repaired);
+    }
+
+    private static bool HasStrongActiveProofHybrid(IReadOnlyCollection<AutomationElement> roots)
+    {
+        if (HasStrongActiveProof(roots)) return true;
+        return KakaoCalibrationStore.IsVisualMatch(KakaoCalibrationStore.VoiceExitProof, out _);
     }
 
     private static string? ResolveKakaoPath()
@@ -230,20 +245,11 @@ public sealed class KakaoPcAutomation
     {
         error = "";
         var processes = Process.GetProcessesByName("KakaoTalk").ToList();
-        if (processes.Count == 0)
-        {
-            error = "카카오톡 프로세스를 찾지 못함";
-            return [];
-        }
-
+        if (processes.Count == 0) { error = "카카오톡 프로세스를 찾지 못함"; return []; }
         if (activateMain)
         {
             var main = KakaoSurfaceLocator.FindMainWindow();
-            if (main != IntPtr.Zero)
-            {
-                KakaoSurfaceLocator.Activate(main);
-                Thread.Sleep(100);
-            }
+            if (main != IntPtr.Zero) { KakaoSurfaceLocator.Activate(main); Thread.Sleep(100); }
         }
 
         var roots = new List<AutomationElement>();
@@ -257,7 +263,6 @@ public sealed class KakaoPcAutomation
                     if (!roots.Any(r => SameRuntimeId(r, top))) roots.Add(top);
             }
             catch { }
-
             if (process.MainWindowHandle != IntPtr.Zero)
             {
                 try
@@ -268,7 +273,6 @@ public sealed class KakaoPcAutomation
                 catch { }
             }
         }
-
         if (roots.Count == 0) error = "카카오톡 UI Automation 창을 찾지 못함";
         return roots;
     }
@@ -293,12 +297,7 @@ public sealed class KakaoPcAutomation
     private static bool RootLooksLikeRoom(AutomationElement root, string title)
     {
         var wanted = Normalize(title);
-        try
-        {
-            var rootName = Normalize(root.Current.Name);
-            if (rootName == wanted) return true;
-        }
-        catch { }
+        try { if (Normalize(root.Current.Name) == wanted) return true; } catch { }
         return Elements(root).Any(e => Normalize(SafeName(e)) == wanted);
     }
 
@@ -311,8 +310,7 @@ public sealed class KakaoPcAutomation
         {
             try
             {
-                if (e.Current.ControlType != ControlType.Edit || !e.Current.IsEnabled) continue;
-                if (!e.TryGetCurrentPattern(ValuePattern.Pattern, out _)) continue;
+                if (e.Current.ControlType != ControlType.Edit || !e.Current.IsEnabled || !e.TryGetCurrentPattern(ValuePattern.Pattern, out _)) continue;
                 var name = Normalize(SafeName(e));
                 var score = 0;
                 if (name.Contains("보이스룸", StringComparison.Ordinal)) score += 100;
@@ -342,8 +340,7 @@ public sealed class KakaoPcAutomation
         foreach (var e in Elements(root))
         {
             var name = Normalize(SafeName(e));
-            if (name.Length == 0) continue;
-            if (!normalized.Any(n => name == n || name.Contains(n, StringComparison.Ordinal))) continue;
+            if (name.Length == 0 || !normalized.Any(n => name == n || name.Contains(n, StringComparison.Ordinal))) continue;
             var clickable = ClickableAncestor(e);
             if (clickable is not null) return clickable;
         }
@@ -357,8 +354,7 @@ public sealed class KakaoPcAutomation
         foreach (var e in Elements(root))
         {
             var name = Normalize(SafeName(e));
-            if (name.Length == 0) continue;
-            if (!normalized.Any(n => name == n || name == n + " 버튼")) continue;
+            if (name.Length == 0 || !normalized.Any(n => name == n || name == n + " 버튼")) continue;
             var clickable = ClickableAncestor(e);
             if (clickable is not null) return clickable;
         }
@@ -373,8 +369,7 @@ public sealed class KakaoPcAutomation
             var reject = FindClickableExact([root], "거절", "거부", "스피커 요청 거절", "스피커 요청 거부",
                 "스피커 신청 거절", "스피커 신청 거부", "발언 요청 거절", "발언 요청 거부");
             if (reject is not null) return reject;
-            try { root = TreeWalker.ControlViewWalker.GetParent(root); }
-            catch { break; }
+            try { root = TreeWalker.ControlViewWalker.GetParent(root); } catch { break; }
         }
         return null;
     }
@@ -395,8 +390,7 @@ public sealed class KakaoPcAutomation
         foreach (var e in Elements(root))
         {
             var name = Normalize(SafeName(e));
-            if (name.Length == 0) continue;
-            if (normalized.Any(t => name.Contains(t, StringComparison.Ordinal))) return e;
+            if (name.Length > 0 && normalized.Any(t => name.Contains(t, StringComparison.Ordinal))) return e;
         }
         return null;
     }
@@ -416,8 +410,7 @@ public sealed class KakaoPcAutomation
         {
             try
             {
-                if (current.Current.IsEnabled && (current.TryGetCurrentPattern(InvokePattern.Pattern, out _)
-                    || current.TryGetCurrentPattern(SelectionItemPattern.Pattern, out _))) return current;
+                if (current.Current.IsEnabled && (current.TryGetCurrentPattern(InvokePattern.Pattern, out _) || current.TryGetCurrentPattern(SelectionItemPattern.Pattern, out _))) return current;
                 current = TreeWalker.ControlViewWalker.GetParent(current);
             }
             catch { return null; }
@@ -429,16 +422,8 @@ public sealed class KakaoPcAutomation
     {
         try
         {
-            if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
-            {
-                ((InvokePattern)invoke).Invoke();
-                return true;
-            }
-            if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var select))
-            {
-                ((SelectionItemPattern)select).Select();
-                return true;
-            }
+            if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke)) { ((InvokePattern)invoke).Invoke(); return true; }
+            if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var select)) { ((SelectionItemPattern)select).Select(); return true; }
         }
         catch { }
         return false;
@@ -467,7 +452,7 @@ public sealed class KakaoPcAutomation
         var buttons = all.Count(e => { try { return e.Current.ControlType == ControlType.Button; } catch { return false; } });
         var edits = all.Count(e => { try { return e.Current.ControlType == ControlType.Edit; } catch { return false; } });
         var names = all.Select(SafeName).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Take(8).ToArray();
-        return $"uiaRoots={roots.Count()} buttons={buttons} edits={edits} names={string.Join('|', names)} · {KakaoSurfaceLocator.Diagnostic()}";
+        return $"uiaRoots={roots.Count()} buttons={buttons} edits={edits} names={string.Join('|', names)} · {KakaoSurfaceLocator.Diagnostic()} · {KakaoCalibrationStore.Summary()}";
     }
 
     private static string Normalize(string? value) =>
