@@ -40,9 +40,11 @@ public partial class MainWindow : Window
                 ? (System.Windows.Media.Brush)FindResource("Warn")
                 : System.Windows.Media.Brushes.White;
 
-        var kakao = System.Diagnostics.Process.GetProcessesByName("KakaoTalk").Any(p => p.MainWindowHandle != IntPtr.Zero);
-        SystemStatus.Text = $"카카오톡 {(kakao ? "확인" : "미실행")} · Windows {(DesktopSession.IsLocked() ? "잠금" : "사용 가능")} · 등록 {State.Rooms.Count}개";
-        RuntimeStats.Text = $"스피커 요청 자동거절 {State.SpeakerRequestsRejected}회 · 오디오 보호 {State.AudioRepairs}회";
+        var kakao = System.Diagnostics.Process.GetProcessesByName("KakaoTalk").Any();
+        var locked = DesktopSession.IsLocked();
+        SystemStatus.Text = $"카카오톡 {(kakao ? "확인" : "미실행")} · Windows {(locked ? "잠금" : "사용 가능")} · 등록 {State.Rooms.Count}개"
+            + (State.ManagerActive ? " · PC 절전 방지 ON / 모니터 OFF 허용" : "");
+        RuntimeStats.Text = $"스피커 요청 자동거절 {State.SpeakerRequestsRejected}회 · 요청받기 차단 {State.SpeakerRequestTogglesDisabled}회 · 오디오 재보호 {State.AudioRepairs}회";
         LastStatus.Text = State.LastStatus;
 
         RunAtLoginCheck.Checked -= RunAtLogin_Changed;
@@ -105,7 +107,7 @@ public partial class MainWindow : Window
         _coordinator.Save();
         RefreshUi();
         if (!launch.Success) return;
-        await Task.Delay(700);
+        await Task.Delay(900);
         var result = await _coordinator.SafeProbeAsync(room);
         room.Status = result.Success ? "PROBE_OK" : "PROBE_ERROR";
         room.LastError = result.Success ? "" : result.Status;
@@ -124,7 +126,7 @@ public partial class MainWindow : Window
         _coordinator.Save();
         RefreshUi();
         if (!launch.Success) return;
-        await Task.Delay(700);
+        await Task.Delay(900);
         var result = await _coordinator.LiveCheckAsync(room);
         MessageBox.Show(this, result.Status, result.Success ? "점검 완료" : "점검 실패",
             MessageBoxButton.OK, result.Success ? MessageBoxImage.Information : MessageBoxImage.Warning);
