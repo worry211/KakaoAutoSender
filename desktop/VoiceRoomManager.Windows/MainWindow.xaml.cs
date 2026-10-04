@@ -72,17 +72,18 @@ public partial class MainWindow : Window
             "방 추가 · 이름", "").Trim();
         if (title.Length == 0) return;
 
+        var existing = State.Rooms.FirstOrDefault(r => string.Equals(r.Title, title, StringComparison.Ordinal));
         var url = Interaction.InputBox(
             "오픈채팅 링크를 입력해줘.\n예: https://open.kakao.com/o/xxxx",
-            "방 추가 · 오픈채팅 링크", "").Trim();
-        if (!TryNormalizeLink(url, null, out var normalized)) return;
+            "방 추가 · 오픈채팅 링크", existing?.OpenChatUrl ?? "").Trim();
+        if (!TryNormalizeLink(url, existing?.Id, out var normalized)) return;
 
-        var existing = State.Rooms.FirstOrDefault(r => string.Equals(r.Title, title, StringComparison.Ordinal));
         if (existing is not null)
         {
-            if (LinkUsedByOtherRoom(normalized, existing.Id, out var owner))
+            if (string.Equals(existing.OpenChatUrl, normalized, StringComparison.OrdinalIgnoreCase))
             {
-                MessageBox.Show(this, $"이 링크는 이미 ‘{owner}’ 방에 등록돼 있어.", "중복 링크", MessageBoxButton.OK, MessageBoxImage.Warning);
+                State.LastStatus = title + " · 기존 방/링크가 이미 등록돼 있음";
+                RefreshUi();
                 return;
             }
             if (MessageBox.Show(this,
@@ -94,11 +95,6 @@ public partial class MainWindow : Window
         }
         else
         {
-            if (LinkUsedByOtherRoom(normalized, null, out var owner))
-            {
-                MessageBox.Show(this, $"이 링크는 이미 ‘{owner}’ 방에 등록돼 있어.", "중복 링크", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
             State.Rooms.Add(new RoomState { Title = title, OpenChatUrl = normalized, Enabled = true });
             State.LastStatus = title + " · 방/링크 추가 · 안전 점검 필요";
         }
@@ -115,7 +111,7 @@ public partial class MainWindow : Window
             "오픈채팅 링크 설정", room.OpenChatUrl).Trim();
         if (url.Length == 0) return;
         if (!TryNormalizeLink(url, room.Id, out var normalized)) return;
-        if (string.Equals(room.OpenChatUrl, normalized, StringComparison.Ordinal)) return;
+        if (string.Equals(room.OpenChatUrl, normalized, StringComparison.OrdinalIgnoreCase)) return;
 
         room.OpenChatUrl = normalized;
         ResetVerification(room);
