@@ -451,6 +451,8 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     }
 
     private void finishProbe(VoiceRoomStore.Room room, String message) {
+        room.safeProbePassed = true;
+        room.verifiedAt = System.currentTimeMillis();
         room.status = "PROBE_OK";
         room.lastError = "";
         room.stageStartedAt = 0L;
@@ -461,10 +463,15 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     }
 
     private void markActive(VoiceRoomStore.Room room, long now) {
+        boolean manual = VoiceRoomStore.isManualPending(this);
         boolean createdByUs = "CREATING".equals(room.status)
                 || "CREATING_NAMED".equals(room.status)
                 || "CREATING_CONFIRMING".equals(room.status);
         if (createdByUs) room.startedAt = now;
+        if (manual) {
+            room.liveCheckPassed = true;
+            room.verifiedAt = now;
+        }
         room.failures = 0;
         room.lastError = "";
         room.stageStartedAt = 0L;
