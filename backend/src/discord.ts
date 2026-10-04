@@ -224,13 +224,12 @@ export function renderDiscord(result: any) {
         ? `## ⏳ ${result.days}일 이내 만료 예정`
         : "## 📋 라이선스 목록";
     const body = result.licenses
-      .map(
-        (l: Row) =>
-          [
-            `**${l.license_id}** · ${stateLabel(l.state)}`,
-            `• 만료: ${l.expires_at === null ? "영구" : date(l.expires_at)}`,
-            `• 고객: ${oneLine(l.customer_memo) || "메모 없음"}`,
-          ].join("\n"),
+      .map((l: Row) =>
+        [
+          `**${l.license_id}** · ${stateLabel(l.state)}`,
+          `• 만료: ${l.expires_at === null ? "영구" : date(l.expires_at)}`,
+          `• 고객: ${oneLine(l.customer_memo) || "메모 없음"}`,
+        ].join("\n"),
       )
       .join("\n\n");
     return [
