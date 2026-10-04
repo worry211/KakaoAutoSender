@@ -8,7 +8,8 @@ namespace VoiceRoomManager.Windows.Core;
 /// Verified KakaoTalk Windows room navigator for current custom-rendered clients.
 /// Main-window UIA can expose no descendants, while the Win32 HWND tree still exposes
 /// ChatRoomListView_*, standard Edit search controls and separate chat windows.
-/// Every search-open is verified by an exact top-level chat-window title before success.
+/// A recent verified OpenChat-link session is reused directly so a custom-rendered inline chat
+/// is not immediately invalidated by a second fragile search.
 /// </summary>
 public sealed class KakaoWin32Navigator
 {
@@ -109,29 +110,30 @@ public sealed class KakaoWin32Navigator
         if (main == IntPtr.Zero)
             return new(false, IntPtr.Zero, "카카오톡 메인 Win32 창(EVA_Window_Dblclk)을 찾지 못함");
 
-        // Link-based entry can legitimately open the room inside Kakao's main window rather than
-        // an independent chat window. Reuse it only when a very recent verified link-entry token
-        // exists AND the real chat composer is visible. This avoids re-running a fragile search.
-        if (OpenChatLinkRegistry.IsRecentlyVerifiedEntry(title)
-            && KakaoOpenChatEntry.HasVisibleChatComposer(main))
+        // OpenChatLinkLauncher/PreviewBridge issues this token only after a verified room-entry
+        // proof (exact title, composer, or stable Kakao CTA->chat visual transition). Do not demand
+        // a RICHEDIT control again: some Kakao 26.x clients custom-render the actual composer too.
+        if (OpenChatLinkRegistry.IsRecentlyVerifiedEntry(title, TimeSpan.FromSeconds(35)))
         {
-            Activate(main);
-            return new(true, main, "최근 링크 진입 검증 + 메인창 실제 채팅 입력창 확인 · 방 재검색 생략");
+            var sessionSurface = KakaoSurfaceLocator.VisibleTopLevels()
+                .Where(x => x.Hwnd != main && x.Rect.Width >= 220 && x.Rect.Height >= 220)
+                .OrderByDescending(x => x.Rect.Area)
+                .FirstOrDefault();
+            var hwnd = sessionSurface?.Hwnd ?? main;
+            KakaoSurfaceLocator.Activate(hwnd);
+            return new(true, hwnd,
+                "최근 링크 진입 검증 세션 재사용 · custom-rendered 채팅 허용 · 방 재검색 생략");
         }
 
         Activate(main);
         Thread.Sleep(180);
 
-        // Current Kakao builds commonly accept Ctrl+2 for the Chats tab. Never trust the
-        // shortcut by itself: verify ChatRoomListView_* is actually visible afterwards.
+        // Final fallback only. Current Kakao builds commonly accept Ctrl+2 for the Chats tab.
+        // Never trust the shortcut by itself: verify ChatRoomListView_* is actually visible.
         SendChord(VkControl, Vk2);
         Thread.Sleep(220);
         var children = EnumerateChildren(main);
         var chatView = children.FirstOrDefault(x => x.Visible && x.Title.StartsWith(ChatViewPrefix, StringComparison.Ordinal));
-        if (chatView is null)
-        {
-            chatView = children.FirstOrDefault(x => x.Visible && x.Title.StartsWith(ChatViewPrefix, StringComparison.Ordinal));
-        }
         if (chatView is null)
             return new(false, IntPtr.Zero, BuildMainDiagnostic(main, "채팅 탭(ChatRoomListView_*) 활성 확인 실패"));
 
