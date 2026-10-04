@@ -85,8 +85,7 @@ final class PremiumChrome {
   private static void polishScroll(ScrollView scroll) {
     scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
     scroll.setFillViewport(true);
-    // The stock Android scrollbar made the premium screens read like a debug/settings surface.
-    // Content remains fully scrollable; only the decorative gutter indicator is hidden.
+    // Content remains fully scrollable; only the stock settings-style gutter is hidden.
     scroll.setVerticalScrollBarEnabled(false);
     scroll.setHorizontalScrollBarEnabled(false);
     scroll.setFadingEdgeLength(0);
@@ -94,16 +93,13 @@ final class PremiumChrome {
 
   private static void polishText(TextView text) {
     text.setIncludeFontPadding(false);
-    if (Build.VERSION.SDK_INT >= 23) {
-      text.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_HIGH_QUALITY);
-      text.setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE);
-    }
+    text.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_HIGH_QUALITY);
+    text.setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE);
   }
 
   private static void polishEdit(EditText edit, float density) {
     edit.setElevation(dp(density, 1));
     edit.setSelectAllOnFocus(false);
-    edit.setSingleLine(edit.isSingleLine());
   }
 
   private static void polishCompound(CompoundButton button) {
