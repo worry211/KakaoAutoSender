@@ -30,6 +30,21 @@ class ModelTest(unittest.TestCase):
             self.assertEqual("a", config.rooms[0].id)
             self.assertEqual(172800, config.rooms[0].reopen_after_seconds)
 
+    def test_config_save_round_trip(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "config.json"
+            original = AppConfig(
+                adb_path="C:/platform-tools/adb.exe",
+                device_serial="emulator-5554",
+                rooms=[RoomConfig(id="a", title="방 A", room_url="https://open.kakao.com/o/example")],
+            )
+            original.save(path)
+            loaded = AppConfig.load(path)
+            self.assertEqual("C:/platform-tools/adb.exe", loaded.adb_path)
+            self.assertEqual("emulator-5554", loaded.device_serial)
+            self.assertEqual("방 A", loaded.rooms[0].title)
+            self.assertEqual("https://open.kakao.com/o/example", loaded.rooms[0].room_url)
+
     def test_duplicate_room_ids_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "config.json"
@@ -52,7 +67,7 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(180, retry_delay_seconds(2))
         self.assertEqual(3600, retry_delay_seconds(99))
 
-    def test_state_store_round_trip(self):
+    def test_state_store_round_trip_and_remove(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "state.json"
             store = StateStore(path)
@@ -63,6 +78,10 @@ class ModelTest(unittest.TestCase):
             reloaded = StateStore(path)
             self.assertEqual("ACTIVE", reloaded.get("a").status)
             self.assertEqual(1234, reloaded.get("a").next_check_at)
+            reloaded.remove("a")
+            reloaded.save()
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            self.assertNotIn("a", raw["rooms"])
 
 
 if __name__ == "__main__":
