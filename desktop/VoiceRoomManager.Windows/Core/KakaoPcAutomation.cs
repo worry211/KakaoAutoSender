@@ -7,9 +7,9 @@ using Microsoft.Win32;
 namespace VoiceRoomManager.Windows.Core;
 
 /// <summary>
-/// KakaoTalk Windows automation.
-/// Room navigation is Win32-HWND-first because current Kakao main UI can expose an empty UIA tree.
-/// VoiceRoom controls still prefer semantic UI Automation and fail closed when Kakao does not expose them.
+/// KakaoTalk Windows automation. Room entry is prepared once by VoiceRoomCoordinator; this class
+/// reuses the freshly verified session instead of searching for the same room again. VoiceRoom
+/// controls prefer semantic UI Automation and fail closed when the current Kakao build hides them.
 /// </summary>
 public sealed class KakaoPcAutomation
 {
@@ -54,20 +54,19 @@ public sealed class KakaoPcAutomation
     public Result SafeProbe(RoomState room)
     {
         if (DesktopSession.IsLocked()) return new(false, "Windows가 잠겨 있어 UI 자동화를 대기함");
-
-        var nav = _win32.OpenRoom(room.Title);
-        if (!nav.Success) return new(false, "방 진입 실패 · " + nav.Diagnostic);
-        Thread.Sleep(650);
+        var context = EnsureRoomContext(room);
+        if (!context.Success) return context;
+        Thread.Sleep(450);
 
         var surfaces = GetKakaoSurfaces(activateMain: false, out var error);
-        if (surfaces.Count == 0) return new(false, error + " · " + _win32.DiagnosticSnapshot());
+        if (surfaces.Count == 0) return new(false, error + " · " + KakaoSurfaceLocator.Diagnostic());
 
         if (HasStrongActiveProof(surfaces))
-            return new(true, "기존 보이스룸 활성 화면 확인 · " + nav.Diagnostic, true);
+            return new(true, "기존 보이스룸 활성 화면 확인 · " + context.Status, true);
 
         var voice = FindClickableByNames(surfaces, "보이스룸", "보이스룸 시작", "보이스룸 만들기");
         if (voice is null)
-            return new(false, "방 진입은 Win32로 검증 성공했지만 보이스룸 컨트롤이 UIA에 노출되지 않음 · " + _win32.DiagnosticSnapshot());
+            return new(false, "실제 채팅방 진입은 검증됐지만 보이스룸 컨트롤이 UIA에 노출되지 않음 · " + context.Status + " · " + SurfaceDiagnostic(surfaces));
 
         return new(true, "방 진입/보이스룸 컨트롤 인식 성공 · 생성은 하지 않음");
     }
@@ -75,19 +74,18 @@ public sealed class KakaoPcAutomation
     public Result EnsureVoiceRoom(RoomState room)
     {
         if (DesktopSession.IsLocked()) return new(false, "Windows가 잠겨 있어 자동화를 대기함");
-
-        var nav = _win32.OpenRoom(room.Title);
-        if (!nav.Success) return new(false, "방 진입 실패 · " + nav.Diagnostic);
-        Thread.Sleep(650);
+        var context = EnsureRoomContext(room);
+        if (!context.Success) return context;
+        Thread.Sleep(450);
 
         var surfaces = GetKakaoSurfaces(activateMain: false, out var error);
-        if (surfaces.Count == 0) return new(false, error + " · " + _win32.DiagnosticSnapshot());
+        if (surfaces.Count == 0) return new(false, error + " · " + KakaoSurfaceLocator.Diagnostic());
 
         if (HasStrongActiveProof(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
 
         var voice = FindClickableByNames(surfaces, "보이스룸", "보이스룸 시작", "보이스룸 만들기");
         if (voice is null)
-            return new(false, "방 진입은 성공했지만 보이스룸 메뉴가 UIA에 노출되지 않음 · " + _win32.DiagnosticSnapshot());
+            return new(false, "실제 채팅방 진입은 성공했지만 보이스룸 메뉴가 UIA에 노출되지 않음 · " + SurfaceDiagnostic(surfaces));
         if (!Invoke(voice)) return new(false, "보이스룸 메뉴 호출 실패");
         Thread.Sleep(650);
 
@@ -95,7 +93,6 @@ public sealed class KakaoPcAutomation
         if (surfaces.Count == 0) return new(false, error);
         if (HasStrongActiveProof(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
 
-        // Some builds expose a first VoiceRoom menu item and then a separate create dialog.
         if (FindByNameContains(surfaces, "보이스룸 만들기") is null)
         {
             var createMenu = FindClickableByNames(surfaces, "보이스룸 만들기", "만들기");
@@ -162,6 +159,31 @@ public sealed class KakaoPcAutomation
         return ProtectAudio(scoped, "런타임 보호 확인");
     }
 
+    private Result EnsureRoomContext(RoomState room)
+    {
+        var exact = KakaoSurfaceLocator.FindExactChat(room.Title);
+        if (exact != IntPtr.Zero)
+        {
+            KakaoSurfaceLocator.Activate(exact);
+            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
+            return new(true, "독립 채팅창 제목 완전일치 확인");
+        }
+
+        if (OpenChatLinkRegistry.IsRecentlyVerifiedEntry(room.Title, TimeSpan.FromSeconds(25)) &&
+            KakaoSurfaceLocator.TryFindChatComposer(out var composer) && composer is not null)
+        {
+            KakaoSurfaceLocator.Activate(composer.TopLevel);
+            return new(true, "최근 링크 진입 토큰 + 실제 채팅 composer 확인");
+        }
+
+        // Standalone fallback for calls that did not pass through VoiceRoomCoordinator.
+        var nav = _win32.OpenRoom(room.Title);
+        if (!nav.Success)
+            return new(false, "방 세션 확보 실패 · " + nav.Diagnostic + " · " + KakaoSurfaceLocator.Diagnostic());
+        OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
+        return new(true, nav.Diagnostic);
+    }
+
     private Result ProtectAudio(IReadOnlyCollection<AutomationElement> roots, string prefix)
     {
         var micMuted = false;
@@ -216,10 +238,10 @@ public sealed class KakaoPcAutomation
 
         if (activateMain)
         {
-            var mainProcess = processes.FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero);
-            if (mainProcess is not null)
+            var main = KakaoSurfaceLocator.FindMainWindow();
+            if (main != IntPtr.Zero)
             {
-                DesktopSession.ActivateWindow(mainProcess.MainWindowHandle);
+                KakaoSurfaceLocator.Activate(main);
                 Thread.Sleep(100);
             }
         }
@@ -445,7 +467,7 @@ public sealed class KakaoPcAutomation
         var buttons = all.Count(e => { try { return e.Current.ControlType == ControlType.Button; } catch { return false; } });
         var edits = all.Count(e => { try { return e.Current.ControlType == ControlType.Edit; } catch { return false; } });
         var names = all.Select(SafeName).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Take(8).ToArray();
-        return $"uiaRoots={roots.Count()} buttons={buttons} edits={edits} names={string.Join('|', names)}";
+        return $"uiaRoots={roots.Count()} buttons={buttons} edits={edits} names={string.Join('|', names)} · {KakaoSurfaceLocator.Diagnostic()}";
     }
 
     private static string Normalize(string? value) =>
