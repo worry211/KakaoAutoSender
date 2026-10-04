@@ -15,13 +15,24 @@ public class BootReceiver extends BroadcastReceiver {
         boolean boot = Intent.ACTION_BOOT_COMPLETED.equals(action);
         boolean updated = Intent.ACTION_MY_PACKAGE_REPLACED.equals(action);
         boolean alarmAccess = AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED.equals(action);
-        if (!boot && !updated && !alarmAccess) return;
+        boolean userPresent = Intent.ACTION_USER_PRESENT.equals(action);
+        if (!boot && !updated && !alarmAccess && !userPresent) return;
 
         AudioGuard.recoverIfStale(context);
         if (boot || updated) recoverInterruptedPending(context, boot ? "재부팅" : "앱 업데이트");
 
         if (!VoiceRoomStore.managerActive(context)) {
             VoiceRoomScheduler.cancel(context);
+            return;
+        }
+
+        if (userPresent) {
+            int resumed = resumeWaitingUnlock(context);
+            if (resumed > 0) {
+                VoiceRoomStore.setLastStatus(context,
+                        "잠금 해제 감지 · 대기 중이던 보이스룸 자동점검 즉시 재예약 " + resumed + "개");
+                VoiceRoomScheduler.scheduleNext(context);
+            }
             return;
         }
 
@@ -37,6 +48,21 @@ public class BootReceiver extends BroadcastReceiver {
             VoiceRoomStore.setLastStatus(context, "정확 알람 권한 변경 확인 · 예약 다시 설정");
         }
         VoiceRoomScheduler.scheduleNext(context);
+    }
+
+    private int resumeWaitingUnlock(Context context) {
+        long now = System.currentTimeMillis();
+        int resumed = 0;
+        for (VoiceRoomStore.Room room : VoiceRoomStore.list(context)) {
+            if (!room.enabled || !room.liveCheckPassed || !"WAITING_UNLOCK".equals(room.status)) continue;
+            room.status = "CHECK_DUE";
+            room.stageStartedAt = 0L;
+            room.lastError = "";
+            room.nextCheckAt = now + 2_000L + (resumed * 3_000L);
+            VoiceRoomStore.update(context, room);
+            resumed += 1;
+        }
+        return resumed;
     }
 
     private void forcePostBootRecheck(Context context) {
