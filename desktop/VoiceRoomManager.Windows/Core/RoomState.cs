@@ -20,15 +20,18 @@ public sealed class RoomState
 
     public string StatusDisplay => Status switch
     {
-        "NEW" => OpenChatLinkRegistry.IsSupported(OpenChatUrl) ? "등록 대기" : "링크 등록 필요",
-        "PROBE_OK" => "안전 점검 완료",
+        "NEW" => OpenChatLinkRegistry.IsSupported(OpenChatUrl) ? "시작 준비" : "링크 등록 필요",
+        "BOOTSTRAP_PENDING" => "자동 시작 대기",
+        "BOOTSTRAPPING" => "자동 시작 중",
+        "PROBE_OK" => "진단 통과",
         "ACTIVE" => Enabled ? "보룸 활성 · 관리 ON" : "보룸 활성 · 관리 OFF",
-        "CHECK_DUE" => "점검 예정",
+        "ACTIVE_UNKNOWN_START" => "보룸 활성 · 시작시각 확인 중",
+        "CHECK_DUE" => "자동 점검 중",
         "WAITING_UNLOCK" => "잠금 해제 대기",
         "OPENING_KAKAO" => "카카오톡 여는 중",
-        "ERROR" => Failures > 0 ? $"재시도 대기 ({Failures})" : "오류",
-        "MANUAL_ERROR" => "실제 점검 실패",
-        "PROBE_ERROR" => "안전 점검 실패",
+        "ERROR" => Failures > 0 ? $"자동 재시도 ({Failures})" : "오류",
+        "MANUAL_ERROR" => "수동 점검 실패",
+        "PROBE_ERROR" => "진단 실패",
         _ => string.IsNullOrWhiteSpace(Status) ? "상태 확인 중" : Status
     };
 
@@ -38,8 +41,14 @@ public sealed class RoomState
         {
             if (!string.IsNullOrWhiteSpace(LastError)) return LastError;
             if (!string.IsNullOrWhiteSpace(LastDiagnostic)) return LastDiagnostic;
-            if (!OpenChatLinkRegistry.IsSupported(OpenChatUrl)) return "오픈채팅 링크를 등록하면 링크로 먼저 진입해";
-            return Status == "NEW" ? "안전 점검부터 진행해줘" : "정상";
+            if (!OpenChatLinkRegistry.IsSupported(OpenChatUrl)) return "오픈채팅 링크 등록 필요";
+            return Status switch
+            {
+                "NEW" => "전체 시작을 누르면 방 진입부터 보이스룸 생성/검증까지 자동 진행",
+                "BOOTSTRAP_PENDING" => "자동 부트스트랩 대기 중",
+                "BOOTSTRAPPING" => "방 진입 → 보이스룸 생성/검증 진행 중",
+                _ => "정상"
+            };
         }
     }
 
