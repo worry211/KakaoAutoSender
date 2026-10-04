@@ -42,11 +42,11 @@ v0.4.0에서 실제 보룸 없이 `실제 ✓`가 찍힌 오탐은 v0.4.1에서 
 - 자동관리 중 Kakao가 명확한 mic/speaker action label을 다시 노출하면 runtime guard가 재음소거한다
 - mic와 speaker 의미가 한 컨테이너에 동시에 섞인 broad control은 runtime guard가 클릭하지 않는다
 
-전역 휴대폰 미디어 볼륨은 자동화 트랜잭션 동안만 임시 0으로 만들고 성공/실패/복구 시 원래 값으로 돌린다. 48시간 동안 휴대폰 전체를 강제 무음으로 두는 방식은 사용하지 않는다.
+전역 휴대폰 미디어 볼륨은 자동화 트랜잭션 동안만 임시 0으로 만든다. 복구 시 현재 볼륨이 아직 0일 때만 이전 값을 복원하며, 사용자가 작업 도중 직접 다른 볼륨으로 바꿨다면 그 값을 덮어쓰지 않는다. 48시간 동안 휴대폰 전체를 강제 무음으로 두는 방식은 사용하지 않는다.
 
 ## v0.5.0 speaker-request protection
 
-카카오 VoiceRoom의 스피커 요청은 runtime event guard가 처리한다. 앱이 48시간 점검을 수행하지 않는 평상시에도 접근성 서비스가 Kakao 창/오버레이 이벤트를 관찰한다.
+카카오 VoiceRoom의 스피커 요청은 runtime event guard가 처리한다. 앱이 48시간 점검을 수행하지 않는 평상시에도 접근성 서비스가 Kakao 창/오버레이/관련 이벤트를 관찰한다.
 
 - 관리가 ON이고 `실제 활성 ✓`인 방만 요청 보호 대상이다
 - 카카오가 `스피커 요청 끄기`, `스피커 요청 받지 않기`, `...차단하기`처럼 **행동 의미가 명확한** request-control label을 제공할 때만 자동으로 요청 받기를 끈다
@@ -54,6 +54,7 @@ v0.4.0에서 실제 보룸 없이 `실제 ✓`가 찍힌 오탐은 v0.4.1에서 
 - 들어온 요청은 explicit speaker-request context와 같은 작은 UI subtree 안에 explicit `거절/거부` action이 함께 있을 때만 자동 거절한다
 - `수락`, `승인`, `스피커로 참여/전환/승격` 계열 action은 보호 대상이 아니라 금지 action으로 취급하며 자동 클릭하지 않는다
 - generic `취소`, profile name, 좌표/아이콘 추측으로 요청을 처리하지 않는다
+- 현재 Kakao interactive windows에서 관리 VoiceRoom identity가 확인돼야 요청 popup을 해당 방에 연결한다
 - 여러 관리 보룸 중 어느 방 요청인지 확정되지 않으면 자동 클릭하지 않고 ambiguous 진단을 남긴다
 - request notification text만 감지되고 안전한 reject action이나 room identity가 없을 때도 자동 조작하지 않는다
 - 런타임 운영 지표로 요청거절 횟수, request-toggle 차단 횟수, passive audio re-protection 횟수를 표시한다
@@ -84,7 +85,8 @@ v0.4.0에서 실제 보룸 없이 `실제 ✓`가 찍힌 오탐은 v0.4.1에서 
 - privacy-safe boolean diagnostics and aggregate runtime counters
 - progressive unattended retry: 1m -> 3m -> 10m -> 30m -> 1h
 - ~47h55m precheck; actual Kakao UI remains source of truth
-- crash/stale-pending/reboot/app-update recovery
+- crash/stale-pending/app-update recovery
+- device reboot never trusts the old 47h55m timer: verified managed rooms are staggered into a real health check starting ~15 seconds after boot
 - AUTO work defers 5 minutes while the user is actively using the phone
 - scheduled jobs remain single-flight
 
