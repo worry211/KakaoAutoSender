@@ -3,12 +3,15 @@ on:
   push:
     branches: [feat/seller-ux-quality-v2-1]
 permissions:
-  contents: read
+  contents: write
 jobs:
   format:
+    if: github.event.head_commit.message != 'chore: apply prettier formatting'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: feat/seller-ux-quality-v2-1
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -18,11 +21,15 @@ jobs:
         working-directory: backend
       - run: npx prettier --write src/admin.ts src/commands.ts src/discord.ts test/seller-ux.test.ts
         working-directory: backend
-      - uses: actions/upload-artifact@v4
-        with:
-          name: prettier-preview
-          path: |
-            backend/src/admin.ts
-            backend/src/commands.ts
-            backend/src/discord.ts
-            backend/test/seller-ux.test.ts
+      - name: Commit formatting when needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No formatting changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/admin.ts backend/src/commands.ts backend/src/discord.ts backend/test/seller-ux.test.ts
+          git commit -m "chore: apply prettier formatting"
+          git push origin HEAD:feat/seller-ux-quality-v2-1
