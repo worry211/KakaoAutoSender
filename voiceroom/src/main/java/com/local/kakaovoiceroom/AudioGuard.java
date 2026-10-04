@@ -43,6 +43,10 @@ final class AudioGuard {
         p.edit().clear().apply();
         if (audio == null || previous < 0) return;
         try {
+            int current = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+            // The automation itself only drives this stream to zero. If it is non-zero now, the
+            // user (or another app) changed it while the task was running; do not overwrite that.
+            if (current != 0) return;
             int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
             audio.setStreamVolume(AudioManager.STREAM_MUSIC, Math.min(previous, max), 0);
         } catch (SecurityException ignored) {}
