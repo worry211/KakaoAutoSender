@@ -34,8 +34,12 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Test, lint and build
-        run: ANDROID_HOME=/usr/local/lib/android/sdk ANDROID_SDK_ROOT=/usr/local/lib/android/sdk gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: Test, lint and build both standalone apps
+        run: >-
+          ANDROID_HOME=/usr/local/lib/android/sdk ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+          gradle --no-daemon
+          :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+          :voiceroom:testDebugUnitTest :voiceroom:lintDebug :voiceroom:assembleDebug
       - name: Validate minified release using ephemeral CI fixture
         env:
           ANDROID_API_BASE_URL: https://license.example.com
@@ -50,3 +54,7 @@ jobs:
         with:
           name: KakaoAutoSender-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KakaoVoiceRoomManager-debug-apk
+          path: voiceroom/build/outputs/apk/debug/voiceroom-debug.apk

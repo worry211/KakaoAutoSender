@@ -1,0 +1,613 @@
+package com.local.kakaovoiceroom;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+
+public class MainActivity extends Activity {
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private LinearLayout roomList;
+    private TextView masterStatus;
+    private TextView systemStatus;
+    private TextView footerStatus;
+    private Button startButton;
+    private Button stopButton;
+
+    private final Runnable ticker = new Runnable() {
+        @Override public void run() {
+            refreshUi();
+            handler.postDelayed(this, 1000L);
+        }
+    };
+
+    @Override protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(buildUi());
+        refreshUi();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        handler.removeCallbacks(ticker);
+        handler.post(ticker);
+    }
+
+    @Override protected void onPause() {
+        handler.removeCallbacks(ticker);
+        super.onPause();
+    }
+
+    private View buildUi() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(Color.rgb(12, 13, 16));
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(16), dp(20), dp(16), dp(40));
+        scroll.addView(root);
+
+        root.addView(text("보이스룸 매니저", 28, true));
+        TextView subtitle = text("카톡매크로와 완전히 분리된 별도 앱 · 현재 휴대폰의 카카오톡 계정을 사용", 12, false);
+        subtitle.setTextColor(Color.rgb(145, 151, 164));
+        root.addView(subtitle, top(5));
+
+        LinearLayout info = card(Color.rgb(24, 28, 35));
+        TextView privacy = text("카카오 아이디·비밀번호를 이 앱에 입력하지 않아.", 14, true);
+        privacy.setTextColor(Color.rgb(111, 192, 255));
+        info.addView(privacy);
+        TextView privacy2 = text("공식 카카오톡 앱에 이미 로그인된 본인 계정으로, 등록한 오픈채팅방만 자동관리해.", 12, false);
+        privacy2.setTextColor(Color.rgb(177, 183, 194));
+        info.addView(privacy2, top(6));
+        root.addView(info, top(16));
+
+        LinearLayout master = card(Color.rgb(28, 31, 38));
+        masterStatus = text("", 19, true);
+        master.addView(masterStatus);
+        systemStatus = text("", 12, false);
+        systemStatus.setTextColor(Color.rgb(174, 180, 192));
+        master.addView(systemStatus, top(7));
+
+        LinearLayout masterButtons = new LinearLayout(this);
+        masterButtons.setOrientation(LinearLayout.HORIZONTAL);
+        startButton = button("전체 시작", Color.rgb(43, 132, 87));
+        startButton.setOnClickListener(v -> startManager());
+        masterButtons.addView(startButton, weight());
+        stopButton = button("전체 중단", Color.rgb(145, 59, 67));
+        stopButton.setOnClickListener(v -> stopManager());
+        LinearLayout.LayoutParams stopLp = weight();
+        stopLp.leftMargin = dp(8);
+        masterButtons.addView(stopButton, stopLp);
+        master.addView(masterButtons, top(14));
+        root.addView(master, top(14));
+
+        LinearLayout section = new LinearLayout(this);
+        section.setOrientation(LinearLayout.HORIZONTAL);
+        section.setGravity(Gravity.CENTER_VERTICAL);
+        section.addView(text("관리할 오픈채팅방", 18, true), weight());
+        Button add = compactButton("＋ 방 추가", Color.rgb(55, 94, 164));
+        add.setOnClickListener(v -> showRoomDialog(null));
+        section.addView(add);
+        root.addView(section, top(22));
+
+        roomList = new LinearLayout(this);
+        roomList.setOrientation(LinearLayout.VERTICAL);
+        root.addView(roomList, top(5));
+
+        root.addView(text("필수 설정", 18, true), top(24));
+        LinearLayout tools1 = new LinearLayout(this);
+        tools1.setOrientation(LinearLayout.HORIZONTAL);
+        Button accessibility = compactButton("접근성 켜기", Color.rgb(64, 69, 80));
+        accessibility.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        tools1.addView(accessibility, weight());
+        Button exact = compactButton("정확 알람", Color.rgb(64, 69, 80));
+        exact.setOnClickListener(v -> openExactAlarmSettings());
+        LinearLayout.LayoutParams exactLp = weight();
+        exactLp.leftMargin = dp(7);
+        tools1.addView(exact, exactLp);
+        root.addView(tools1, top(8));
+
+        LinearLayout tools2 = new LinearLayout(this);
+        tools2.setOrientation(LinearLayout.HORIZONTAL);
+        Button battery = compactButton("배터리 설정", Color.rgb(64, 69, 80));
+        battery.setOnClickListener(v -> openBatterySettings());
+        tools2.addView(battery, weight());
+        Button kakao = compactButton("카카오톡 열기", Color.rgb(64, 69, 80));
+        kakao.setOnClickListener(v -> openKakao());
+        LinearLayout.LayoutParams kakaoLp = weight();
+        kakaoLp.leftMargin = dp(7);
+        tools2.addView(kakao, kakaoLp);
+        root.addView(tools2, top(7));
+
+        TextView note = text("처음에는 방별 ‘안전 점검’부터 실행해. 생성 버튼은 누르지 않고 방/보이스룸 화면 인식까지만 검증해. 화면 OFF 자동화는 보안 잠금을 우회하지 않아.", 11, false);
+        note.setTextColor(Color.rgb(132, 138, 150));
+        root.addView(note, top(14));
+
+        footerStatus = text("", 12, false);
+        footerStatus.setTextColor(Color.rgb(174, 180, 192));
+        root.addView(footerStatus, top(18));
+        return scroll;
+    }
+
+    private void refreshUi() {
+        if (masterStatus == null) return;
+        boolean active = VoiceRoomStore.managerActive(this);
+        boolean accessibility = VoiceRoomAccessibilityService.isEnabled(this);
+        boolean exact = VoiceRoomScheduler.canExact(this);
+        boolean kakao = getPackageManager().getLaunchIntentForPackage("com.kakao.talk") != null;
+        List<VoiceRoomStore.Room> rooms = VoiceRoomStore.list(this);
+
+        masterStatus.setText(active ? "● 보이스룸 자동관리 실행 중" : "● 보이스룸 자동관리 중지됨");
+        masterStatus.setTextColor(active ? Color.rgb(93, 224, 148) : Color.rgb(218, 221, 227));
+        systemStatus.setText("접근성 " + (accessibility ? "정상" : "설정 필요")
+                + "  ·  카카오톡 " + (kakao ? "확인" : "미설치")
+                + "  ·  알람 " + (exact ? "정확" : "근사"));
+        startButton.setEnabled(!active);
+        stopButton.setEnabled(active);
+
+        roomList.removeAllViews();
+        if (rooms.isEmpty()) {
+            LinearLayout empty = card(Color.rgb(28, 31, 38));
+            empty.addView(text("아직 등록한 방이 없어", 16, true));
+            TextView guide = text("방 이름을 정확히 입력하고, 가능하면 오픈채팅 링크도 같이 등록해줘.", 12, false);
+            guide.setTextColor(Color.rgb(166, 172, 183));
+            empty.addView(guide, top(6));
+            roomList.addView(empty, top(7));
+        } else {
+            for (VoiceRoomStore.Room room : rooms) roomList.addView(roomCard(room), top(7));
+        }
+
+        String last = VoiceRoomStore.lastStatus(this);
+        String busy = VoiceRoomStore.pendingRoomId(this).isEmpty() ? "" : " · 작업 처리 중";
+        footerStatus.setText("등록 " + rooms.size() + "개" + busy
+                + (last.isEmpty() ? "" : "\n최근  " + last));
+    }
+
+    private View roomCard(VoiceRoomStore.Room room) {
+        LinearLayout card = card(Color.rgb(29, 32, 39));
+        card.setOnClickListener(v -> showRoomDialog(room));
+
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.CENTER_VERTICAL);
+        topRow.addView(text(room.title, 17, true), weight());
+        TextView badge = pill(room.enabled ? "ON" : "OFF",
+                room.enabled ? Color.rgb(40, 122, 81) : Color.rgb(78, 82, 92));
+        topRow.addView(badge);
+        card.addView(topRow);
+
+        TextView status = text(statusLabel(room.status) + "  ·  " + remainingLabel(room), 12, true);
+        status.setTextColor(statusColor(room.status));
+        card.addView(status, top(7));
+
+        if (room.nextCheckAt > 0L) {
+            TextView next = text("다음 확인  " + date(room.nextCheckAt), 11, false);
+            next.setTextColor(Color.rgb(155, 161, 173));
+            card.addView(next, top(5));
+        }
+        if (room.lastError != null && !room.lastError.isEmpty()) {
+            TextView error = text(room.lastError, 11, false);
+            error.setTextColor(Color.rgb(235, 126, 126));
+            card.addView(error, top(5));
+        }
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+
+        Button toggle = compactButton(room.enabled ? "중지" : "사용", Color.rgb(65, 69, 80));
+        toggle.setOnClickListener(v -> {
+            VoiceRoomStore.Room current = VoiceRoomStore.get(this, room.id);
+            if (current == null) return;
+            current.enabled = !current.enabled;
+            if (current.enabled && current.nextCheckAt <= 0L) {
+                current.nextCheckAt = System.currentTimeMillis() + 3_000L;
+            }
+            VoiceRoomStore.update(this, current);
+            VoiceRoomScheduler.scheduleNext(this);
+            refreshUi();
+        });
+        actions.addView(toggle, weight());
+
+        Button probe = compactButton("안전 점검", Color.rgb(73, 91, 126));
+        probe.setOnClickListener(v -> startSafeProbe(room));
+        LinearLayout.LayoutParams probeLp = weight();
+        probeLp.leftMargin = dp(6);
+        actions.addView(probe, probeLp);
+
+        Button check = compactButton("실제 점검", Color.rgb(58, 91, 151));
+        check.setOnClickListener(v -> confirmImmediateCheck(room));
+        LinearLayout.LayoutParams checkLp = weight();
+        checkLp.leftMargin = dp(6);
+        actions.addView(check, checkLp);
+
+        card.addView(actions, top(10));
+        return card;
+    }
+
+    private void startSafeProbe(VoiceRoomStore.Room room) {
+        if (VoiceRoomStore.managerActive(this)) {
+            toast("안전 점검은 전체 자동관리를 잠깐 중단한 뒤 실행해줘.");
+            return;
+        }
+        if (!VoiceRoomAccessibilityService.isEnabled(this)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("접근성 설정 필요")
+                    .setMessage("안전 점검에는 ‘보이스룸 자동화’ 접근성 서비스가 필요해.")
+                    .setNegativeButton("취소", null)
+                    .setPositiveButton("설정 열기", (d, w) -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
+                    .show();
+            return;
+        }
+        if (getPackageManager().getLaunchIntentForPackage("com.kakao.talk") == null) {
+            toast("카카오톡이 설치되어 있지 않아.");
+            return;
+        }
+        if (VoiceRoomStore.hasFreshPending(this)) {
+            toast("이미 다른 점검을 처리 중이야.");
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("안전 인식 점검")
+                .setMessage("‘" + room.title + "’ 방을 열고 보이스룸 메뉴/생성 화면 또는 기존 활성 상태까지만 확인해. 새 보이스룸 생성 버튼은 누르지 않아.")
+                .setNegativeButton("취소", null)
+                .setPositiveButton("점검 시작", (d, w) -> launchSafeProbeFromForeground(room))
+                .show();
+    }
+
+    private void launchSafeProbeFromForeground(VoiceRoomStore.Room room) {
+        VoiceRoomStore.Room current = VoiceRoomStore.get(this, room.id);
+        if (current == null) {
+            toast("등록된 방을 찾지 못했어.");
+            return;
+        }
+
+        current.status = "PROBE_OPENING_KAKAO";
+        current.lastError = "";
+        VoiceRoomStore.update(this, current);
+        VoiceRoomStore.setPending(this, current.id, VoiceRoomStore.MODE_PROBE);
+        VoiceRoomStore.setLastStatus(this, current.title + " · 전경 안전 점검 시작");
+
+        Exception last = null;
+        if (current.roomUrl != null && !current.roomUrl.trim().isEmpty()) {
+            try {
+                Intent deepLink = new Intent(Intent.ACTION_VIEW, Uri.parse(current.roomUrl.trim()));
+                deepLink.setPackage("com.kakao.talk");
+                startActivity(deepLink);
+                toast("안전 인식 점검을 시작했어.");
+                return;
+            } catch (Exception e) {
+                last = e;
+            }
+        }
+
+        try {
+            Intent launcher = getPackageManager().getLaunchIntentForPackage("com.kakao.talk");
+            if (launcher == null) throw new IllegalStateException("카카오톡 런처 없음");
+            startActivity(launcher);
+            toast("안전 인식 점검을 시작했어.");
+            return;
+        } catch (Exception e) {
+            last = e;
+        }
+
+        VoiceRoomStore.clearPending(this);
+        current.status = "PROBE_ERROR";
+        current.lastError = "카카오톡 실행 실패 · " + shortError(last);
+        VoiceRoomStore.update(this, current);
+        VoiceRoomStore.setLastStatus(this, current.title + " · " + current.lastError);
+        refreshUi();
+    }
+
+    private String shortError(Exception error) {
+        if (error == null) return "원인 미확인";
+        String message = error.getMessage();
+        if (message == null || message.trim().isEmpty()) return error.getClass().getSimpleName();
+        message = message.replace('\n', ' ').replace('\r', ' ').trim();
+        if (message.length() > 100) message = message.substring(0, 100);
+        return error.getClass().getSimpleName() + ": " + message;
+    }
+
+    private void confirmImmediateCheck(VoiceRoomStore.Room room) {
+        if (!VoiceRoomStore.managerActive(this)) {
+            toast("실제 점검은 먼저 전체 시작을 켜야 해.");
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("실제 자동 점검")
+                .setMessage("보이스룸이 없는 것으로 확인되면 이 작업은 실제로 새 보이스룸을 만들 수 있어. 계속할까?")
+                .setNegativeButton("취소", null)
+                .setPositiveButton("실행", (d, w) -> {
+                    VoiceRoomStore.Room current = VoiceRoomStore.get(this, room.id);
+                    if (current == null) return;
+                    current.nextCheckAt = System.currentTimeMillis() + 2_000L;
+                    current.status = "CHECK_DUE";
+                    current.lastError = "";
+                    VoiceRoomStore.update(this, current);
+                    VoiceRoomScheduler.scheduleNext(this);
+                    toast("실제 점검 예약을 앞당겼어.");
+                    refreshUi();
+                })
+                .show();
+    }
+
+    private void showRoomDialog(VoiceRoomStore.Room existing) {
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(18);
+        wrap.setPadding(pad, dp(6), pad, 0);
+
+        EditText title = new EditText(this);
+        title.setHint("오픈채팅방 이름");
+        title.setSingleLine(true);
+        title.setText(existing == null ? "" : existing.title);
+        wrap.addView(title);
+
+        EditText url = new EditText(this);
+        url.setHint("오픈채팅 링크 (선택, 권장)");
+        url.setSingleLine(true);
+        url.setText(existing == null ? "" : existing.roomUrl);
+        wrap.addView(url, top(8));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(existing == null ? "방 추가" : "방 수정")
+                .setView(wrap)
+                .setNegativeButton("취소", null)
+                .setPositiveButton("저장", null)
+                .create();
+        if (existing != null) dialog.setButton(AlertDialog.BUTTON_NEUTRAL, "삭제", (d, which) -> {});
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                String t = title.getText().toString().trim();
+                if (t.isEmpty()) {
+                    title.setError("방 이름을 입력해줘.");
+                    return;
+                }
+                if (existing == null) {
+                    VoiceRoomStore.add(this, t, url.getText().toString().trim());
+                } else {
+                    VoiceRoomStore.Room current = VoiceRoomStore.get(this, existing.id);
+                    if (current == null) return;
+                    current.title = t;
+                    current.roomUrl = url.getText().toString().trim();
+                    VoiceRoomStore.update(this, current);
+                }
+                VoiceRoomScheduler.scheduleNext(this);
+                dialog.dismiss();
+                refreshUi();
+            });
+            if (existing != null) {
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> new AlertDialog.Builder(this)
+                        .setTitle("방 삭제")
+                        .setMessage("‘" + existing.title + "’ 자동관리 설정을 삭제할까?")
+                        .setNegativeButton("취소", null)
+                        .setPositiveButton("삭제", (d, w) -> {
+                            VoiceRoomStore.remove(this, existing.id);
+                            VoiceRoomScheduler.scheduleNext(this);
+                            dialog.dismiss();
+                            refreshUi();
+                        }).show());
+            }
+        });
+        dialog.show();
+    }
+
+    private void startManager() {
+        if (!VoiceRoomAccessibilityService.isEnabled(this)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("접근성 설정 필요")
+                    .setMessage("보이스룸 매니저가 카카오톡 화면을 확인하려면 접근성 서비스가 필요해. 설정에서 ‘보이스룸 자동화’를 켜줘.")
+                    .setNegativeButton("나중에", null)
+                    .setPositiveButton("설정 열기", (d, w) -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
+                    .show();
+            return;
+        }
+        if (getPackageManager().getLaunchIntentForPackage("com.kakao.talk") == null) {
+            toast("카카오톡이 설치되어 있지 않아.");
+            return;
+        }
+        if (VoiceRoomStore.hasFreshPending(this)) {
+            toast("진행 중인 점검이 끝난 뒤 시작해줘.");
+            return;
+        }
+
+        List<VoiceRoomStore.Room> rooms = VoiceRoomStore.list(this);
+        boolean any = false;
+        long now = System.currentTimeMillis();
+        for (VoiceRoomStore.Room room : rooms) {
+            if (!room.enabled) continue;
+            any = true;
+            if (room.nextCheckAt <= 0L) {
+                room.nextCheckAt = now + 3_000L;
+                VoiceRoomStore.update(this, room);
+            }
+        }
+        if (!any) {
+            toast("자동관리할 방을 먼저 추가해줘.");
+            return;
+        }
+        VoiceRoomStore.setManagerActive(this, true);
+        VoiceRoomStore.setLastStatus(this, "보이스룸 자동관리 시작");
+        VoiceRoomScheduler.scheduleNext(this);
+        refreshUi();
+    }
+
+    private void stopManager() {
+        VoiceRoomStore.setManagerActive(this, false);
+        VoiceRoomStore.clearPending(this);
+        VoiceRoomScheduler.cancel(this);
+        VoiceRoomStore.setLastStatus(this, "보이스룸 자동관리 중단");
+        refreshUi();
+    }
+
+    private void openExactAlarmSettings() {
+        if (Build.VERSION.SDK_INT < 31) {
+            toast("이 Android 버전에서는 별도 정확 알람 설정이 필요하지 않아.");
+            return;
+        }
+        try {
+            Intent i = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(i);
+        } catch (Exception e) {
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + getPackageName())));
+        }
+    }
+
+    private void openBatterySettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+        } catch (Exception e) {
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + getPackageName())));
+        }
+    }
+
+    private void openKakao() {
+        Intent i = getPackageManager().getLaunchIntentForPackage("com.kakao.talk");
+        if (i == null) toast("카카오톡이 설치되어 있지 않아.");
+        else startActivity(i);
+    }
+
+    private String remainingLabel(VoiceRoomStore.Room room) {
+        if (room.startedAt <= 0L) return "시작시간 확인 전";
+        long remain = room.startedAt + VoiceRoomStore.VOICE_ROOM_LIFETIME_MS - System.currentTimeMillis();
+        if (remain <= 0L) return "종료 확인 중";
+        long h = remain / 3_600_000L;
+        long m = (remain % 3_600_000L) / 60_000L;
+        return h + "시간 " + String.format(Locale.KOREA, "%02d", m) + "분";
+    }
+
+    private String statusLabel(String status) {
+        if (status == null) return "대기";
+        switch (status) {
+            case "ACTIVE": return "실행 중";
+            case "ACTIVE_UNKNOWN_START": return "실행 중 · 시작시간 확인 중";
+            case "CREATING": return "재개설 중";
+            case "OPENING_KAKAO": return "카카오톡 여는 중";
+            case "OPENING_ROOM": return "방 진입 중";
+            case "ROOM_VERIFIED": return "대상 방 확인됨";
+            case "ROOM_MENU": return "방 메뉴 확인 중";
+            case "VOICE_MENU": return "보이스룸 메뉴 확인 중";
+            case "WAITING_UNLOCK": return "잠금 해제 대기";
+            case "ERROR": return "오류 · 재시도 예정";
+            case "CHECK_DUE": return "점검 대기";
+            case "PROBE_OPENING_KAKAO": return "안전 점검 · 카카오톡 여는 중";
+            case "PROBE_OPENING_ROOM": return "안전 점검 · 방 진입 중";
+            case "PROBE_ROOM_VERIFIED": return "안전 점검 · 대상 방 확인됨";
+            case "PROBE_ROOM_MENU": return "안전 점검 · 방 메뉴 확인 중";
+            case "PROBE_VOICE_MENU": return "안전 점검 · 보이스룸 메뉴 확인 중";
+            case "PROBE_OK": return "안전 점검 성공";
+            case "PROBE_ERROR": return "안전 점검 실패";
+            default: return "대기";
+        }
+    }
+
+    private int statusColor(String status) {
+        if ("ACTIVE".equals(status) || "ACTIVE_UNKNOWN_START".equals(status)
+                || "PROBE_OK".equals(status)) {
+            return Color.rgb(90, 220, 145);
+        }
+        if ("ERROR".equals(status) || "WAITING_UNLOCK".equals(status)
+                || "PROBE_ERROR".equals(status)) {
+            return Color.rgb(235, 137, 102);
+        }
+        return Color.rgb(164, 177, 205);
+    }
+
+    private String date(long value) {
+        return new SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA).format(new Date(value));
+    }
+
+    private TextView text(String value, int sp, boolean bold) {
+        TextView v = new TextView(this);
+        v.setText(value);
+        v.setTextColor(Color.WHITE);
+        v.setTextSize(sp);
+        if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        return v;
+    }
+
+    private TextView pill(String value, int color) {
+        TextView v = text(value, 11, true);
+        v.setGravity(Gravity.CENTER);
+        v.setPadding(dp(10), dp(5), dp(10), dp(5));
+        v.setBackground(round(color, 99));
+        return v;
+    }
+
+    private Button button(String value, int color) {
+        Button b = new Button(this);
+        b.setText(value);
+        b.setAllCaps(false);
+        b.setTextColor(Color.WHITE);
+        b.setMinHeight(dp(48));
+        b.setBackground(round(color, 12));
+        return b;
+    }
+
+    private Button compactButton(String value, int color) {
+        Button b = button(value, color);
+        b.setMinHeight(dp(42));
+        b.setTextSize(11);
+        b.setPadding(dp(7), 0, dp(7), 0);
+        return b;
+    }
+
+    private LinearLayout card(int color) {
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(LinearLayout.VERTICAL);
+        l.setPadding(dp(14), dp(14), dp(14), dp(14));
+        l.setBackground(round(color, 16));
+        return l;
+    }
+
+    private GradientDrawable round(int color, int radiusDp) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color);
+        d.setCornerRadius(dp(radiusDp));
+        return d;
+    }
+
+    private LinearLayout.LayoutParams top(int value) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(value);
+        return lp;
+    }
+
+    private LinearLayout.LayoutParams weight() {
+        return new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+    }
+
+    private int dp(int value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private void toast(String value) {
+        Toast.makeText(this, value, Toast.LENGTH_SHORT).show();
+    }
+}
