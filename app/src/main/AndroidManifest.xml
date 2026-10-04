@@ -24,6 +24,14 @@
         </activity>
 
         <activity
+            android:name=".HomeActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".VoiceRoomManagerActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".MainActivityV4"
             android:exported="false" />
 
