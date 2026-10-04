@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import json
+import threading
 import time
 
 from .adb import Adb, AdbError
@@ -86,21 +87,27 @@ class VoiceRoomEngine:
                 pass
             return ProbeResult("ERROR", state.last_error)
 
-    def run_once(self) -> int:
+    def run_once(self, stop_event: threading.Event | None = None) -> int:
         due = self.due_rooms()
+        processed = 0
         for index, room in enumerate(due):
+            if stop_event is not None and stop_event.is_set():
+                break
             self.process_room(room)
-            if index < len(due) - 1:
-                time.sleep(self.config.room_gap_seconds)
-        return len(due)
+            processed += 1
+            if index < len(due) - 1 and not self._wait(self.config.room_gap_seconds, stop_event):
+                break
+        return processed
 
-    def run_forever(self) -> None:
+    def run_forever(self, stop_event: threading.Event | None = None) -> None:
         self.prepare()
         self.log("DAEMON_START")
-        while True:
-            count = self.run_once()
+        while stop_event is None or not stop_event.is_set():
+            count = self.run_once(stop_event)
             if count == 0:
-                time.sleep(self.config.poll_seconds)
+                if not self._wait(self.config.poll_seconds, stop_event):
+                    break
+        self.log("DAEMON_STOP")
 
     def snapshot(self, prefix: str = "manual") -> tuple[Path, Path]:
         self.prepare()
@@ -117,6 +124,12 @@ class VoiceRoomEngine:
                 "failures": state.failures, "last_error": state.last_error,
             })
         return rows
+
+    def _wait(self, seconds: float, stop_event: threading.Event | None) -> bool:
+        if stop_event is None:
+            time.sleep(seconds)
+            return True
+        return not stop_event.wait(seconds)
 
     def _open_room(self, room: RoomConfig) -> None:
         selectors = room.merged_selectors()
