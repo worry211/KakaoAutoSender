@@ -93,8 +93,6 @@ final class PremiumChrome {
 
   private static void polishText(TextView text) {
     text.setIncludeFontPadding(false);
-    text.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_HIGH_QUALITY);
-    text.setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE);
   }
 
   private static void polishEdit(EditText edit, float density) {
