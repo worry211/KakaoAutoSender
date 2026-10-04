@@ -227,13 +227,18 @@ public class KakaoNotificationListener extends NotificationListenerService {
             target = bindTarget(this, mappedAlias, target, false);
             Prefs.setStatus(this, "검증된 방 연결 자동복구: " + mappedAlias);
         } else {
-            String liveAlias = liveAliasForToken(token);
+            String liveAlias = liveAliasForTarget(target);
             if (liveAlias != null && Prefs.isRoomConfirmed(this, liveAlias)) {
                 MultiRoomStore.Profile profile = MultiRoomStore.get(this, liveAlias);
                 if (profile != null && parsed.candidateRoom != null
                         && RoomRouting.sameTitle(profile.actualRoomName, parsed.candidateRoom)) {
                     target = bindTarget(this, liveAlias, target, false);
                     Prefs.setStatus(this, "현재 카카오 알림 세션 연결 유지: " + profile.title());
+                } else if (profile != null && sameRuntimeEndpoint(target, sessions.get(normalize(liveAlias)))) {
+                    // The reply endpoint is the same physical Kakao conversation even when a weak
+                    // metadata field changes. Keep the verified route; do not create a duplicate.
+                    target = bindTarget(this, liveAlias, target, false);
+                    Prefs.setStatus(this, "동일 카카오 답장 세션의 표시 이름 변경 감지 · 기존 방으로 통합");
                 } else {
                     sessions.remove(normalize(liveAlias));
                     Prefs.setStatus(this, "방 식별 정보 변경 감지 · 기존 실시간 연결 안전 중지");
@@ -557,7 +562,14 @@ public class KakaoNotificationListener extends NotificationListenerService {
 
     private void rememberRecent(ReplyTarget target) {
         synchronized (recentLock) {
-            recentTargets.remove(target.token);
+            Iterator<Map.Entry<String, ReplyTarget>> iterator = recentTargets.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<String, ReplyTarget> entry = iterator.next();
+                ReplyTarget old = entry.getValue();
+                if (entry.getKey().equals(target.token) || sameRuntimeEndpoint(old, target)) {
+                    iterator.remove();
+                }
+            }
             recentTargets.put(target.token, target);
             while (recentTargets.size() > MAX_RECENT_TARGETS) {
                 Iterator<String> it = recentTargets.keySet().iterator();
@@ -582,12 +594,22 @@ public class KakaoNotificationListener extends NotificationListenerService {
         return bound;
     }
 
+    private static boolean sameRuntimeEndpoint(ReplyTarget a, ReplyTarget b) {
+        if (a == null || b == null || a.pendingIntent == null || b.pendingIntent == null) return false;
+        try {
+            return a.pendingIntent.equals(b.pendingIntent);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private static void evictConflictingLiveSessions(String keepAlias, ReplyTarget source) {
         for (Map.Entry<String, ReplyTarget> entry : new ArrayList<>(sessions.entrySet())) {
             ReplyTarget other = entry.getValue();
             if (other == null || same(keepAlias, other.label)) continue;
             boolean sameStable = RoomRouting.identitiesOverlap(source.stableIdentityKeys, other.stableIdentityKeys);
-            boolean sameRuntime = !source.token.isEmpty() && source.token.equals(other.token);
+            boolean sameRuntime = (!source.token.isEmpty() && source.token.equals(other.token))
+                    || sameRuntimeEndpoint(source, other);
             if (sameStable || sameRuntime) sessions.remove(entry.getKey(), other);
         }
     }
@@ -610,8 +632,25 @@ public class KakaoNotificationListener extends NotificationListenerService {
         return target != null && Prefs.aliasesForIdentity(context, target.stableIdentityKeys).size() > 1;
     }
 
+    private static String liveAliasForTarget(ReplyTarget selected) {
+        if (selected == null) return null;
+        String found = null;
+        for (ReplyTarget target : sessions.values()) {
+            if (target == null || !target.verified) continue;
+            boolean sameToken = !selected.token.isEmpty() && selected.token.equals(target.token);
+            boolean sameStable = RoomRouting.identitiesOverlap(selected.stableIdentityKeys, target.stableIdentityKeys);
+            boolean sameEndpoint = sameRuntimeEndpoint(selected, target);
+            if (!sameToken && !sameStable && !sameEndpoint) continue;
+            if (found != null && !same(found, target.label)) return null;
+            found = target.label;
+        }
+        return found;
+    }
+
     static String liveAliasForToken(String token) {
         if (token == null || token.trim().isEmpty()) return null;
+        ReplyTarget selected = recentTarget(token);
+        if (selected != null) return liveAliasForTarget(selected);
         String found = null;
         for (ReplyTarget target : sessions.values()) {
             if (target == null || !target.verified || !token.equals(target.token)) continue;
@@ -657,9 +696,9 @@ public class KakaoNotificationListener extends NotificationListenerService {
             Prefs.setStatus(context, "이미 다른 등록 방에 연결된 고유 식별자입니다. 중복 연결을 차단했습니다.");
             return false;
         }
-        String liveAlias = liveAliasForToken(target.token);
+        String liveAlias = liveAliasForTarget(target);
         if (liveAlias != null && !same(liveAlias, requestedAlias)) {
-            Prefs.setStatus(context, "같은 카카오 알림 세션의 중복 연결을 차단했습니다.");
+            Prefs.setStatus(context, "같은 카카오 답장 엔드포인트의 중복 연결을 차단했습니다.");
             return false;
         }
         return true;
@@ -831,7 +870,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         StringBuilder sb = new StringBuilder();
         sb.append("앱 버전: ").append(BuildConfig.VERSION_NAME);
         sb.append("\n라우팅 정책: FAIL-CLOSED / 확인된 세션만 전송");
-        sb.append("\n방 감지: 카카오 대화 제목 우선 · 고유 식별자/알림 세션으로 중복 병합");
+        sb.append("\n방 감지: 카카오 대화 제목 우선 · 고유 식별자/답장 엔드포인트로 중복 병합");
         sb.append("\n알림 리스너: ").append(isListenerConnected() ? "연결됨" : "연결 대기");
         sb.append("\n검증된 실시간 방 세션: ").append(liveLabels().size()).append("개");
         sb.append("\n저장 자동복구 식별자: ").append(Prefs.bindingCount(context)).append("개");
