@@ -4,6 +4,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
 {
     private readonly StateStore _store;
     private readonly KakaoPcAutomation _kakao;
+    private readonly KakaoRoomNavigator _navigator = new();
     private readonly SemaphoreSlim _singleFlight = new(1, 1);
     private readonly Timer _timer;
     private DesktopState _state;
@@ -24,12 +25,18 @@ public sealed class VoiceRoomCoordinator : IDisposable
     public void Save() => _store.Save(_state);
 
     public async Task<KakaoPcAutomation.Result> SafeProbeAsync(RoomState room) =>
-        await RunExclusiveAsync(() => _kakao.SafeProbe(room));
+        await RunExclusiveAsync(() =>
+        {
+            var preflight = PrepareRoom(room);
+            if (!preflight.Success) return preflight;
+            return _kakao.SafeProbe(room);
+        });
 
     public async Task<KakaoPcAutomation.Result> LiveCheckAsync(RoomState room) =>
         await RunExclusiveAsync(() =>
         {
-            var result = _kakao.EnsureVoiceRoom(room);
+            var preflight = PrepareRoom(room);
+            var result = preflight.Success ? _kakao.EnsureVoiceRoom(room) : preflight;
             ApplyResult(room, result, manual: true);
             Save();
             StateChanged?.Invoke();
@@ -89,17 +96,8 @@ public sealed class VoiceRoomCoordinator : IDisposable
                     return;
                 }
 
-                var launch = _kakao.EnsureKakaoRunning();
-                if (!launch.Success)
-                {
-                    ApplyResult(due, launch, manual: false);
-                    Save();
-                    StateChanged?.Invoke();
-                    return;
-                }
-                await Task.Delay(800);
-
-                var result = _kakao.EnsureVoiceRoom(due);
+                var preflight = PrepareRoom(due);
+                var result = preflight.Success ? _kakao.EnsureVoiceRoom(due) : preflight;
                 ApplyResult(due, result, manual: false);
                 Save();
                 StateChanged?.Invoke();
@@ -134,6 +132,22 @@ public sealed class VoiceRoomCoordinator : IDisposable
         {
             _singleFlight.Release();
         }
+    }
+
+    private KakaoPcAutomation.Result PrepareRoom(RoomState room)
+    {
+        if (DesktopSession.IsLocked())
+            return new(false, "Windows 잠금 상태 · 정상 잠금 해제 후 다시 시도");
+
+        var launch = _kakao.EnsureKakaoRunning();
+        if (!launch.Success) return launch;
+        Thread.Sleep(450);
+
+        var navigation = _navigator.OpenRoom(room.Title);
+        if (!navigation.Success)
+            return new(false, "방 진입 실패 · " + navigation.Diagnostic);
+
+        return new(true, navigation.Diagnostic);
     }
 
     private void ApplyResult(RoomState room, KakaoPcAutomation.Result result, bool manual)
