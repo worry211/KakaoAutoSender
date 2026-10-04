@@ -8,6 +8,7 @@ import time
 
 from .adb import Adb, AdbError
 from .model import AppConfig, RoomConfig, StateStore, next_check_for_active, retry_delay_seconds
+from .power import keep_windows_awake
 from .ui import UiTree, center, valid_bounds
 
 
@@ -100,14 +101,18 @@ class VoiceRoomEngine:
         return processed
 
     def run_forever(self, stop_event: threading.Event | None = None) -> None:
-        self.prepare()
-        self.log("DAEMON_START")
-        while stop_event is None or not stop_event.is_set():
-            count = self.run_once(stop_event)
-            if count == 0:
-                if not self._wait(self.config.poll_seconds, stop_event):
-                    break
-        self.log("DAEMON_STOP")
+        keep_windows_awake(True)
+        try:
+            self.prepare()
+            self.log("DAEMON_START")
+            while stop_event is None or not stop_event.is_set():
+                count = self.run_once(stop_event)
+                if count == 0:
+                    if not self._wait(self.config.poll_seconds, stop_event):
+                        break
+            self.log("DAEMON_STOP")
+        finally:
+            keep_windows_awake(False)
 
     def snapshot(self, prefix: str = "manual") -> tuple[Path, Path]:
         self.prepare()
