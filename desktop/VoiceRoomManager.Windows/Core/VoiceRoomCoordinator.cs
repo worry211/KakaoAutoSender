@@ -47,6 +47,23 @@ public sealed class VoiceRoomCoordinator : IDisposable
             return result;
         });
 
+    public void StartAll()
+    {
+        var enabled = _state.Rooms.Where(r => r.Enabled).ToList();
+        if (enabled.Count == 0) throw new InvalidOperationException("관리 ON 방이 없어.");
+        var missingLinks = enabled.Where(r => !OpenChatLinkRegistry.IsSupported(r.OpenChatUrl)).Select(r => r.Title).ToList();
+        if (missingLinks.Count > 0)
+            throw new InvalidOperationException("오픈채팅 링크 등록이 먼저 필요해: " + string.Join(", ", missingLinks));
+
+        _ = StartAllAsync().ContinueWith(t =>
+        {
+            if (t.Exception is null) return;
+            _state.LastStatus = "자동 시작 예외 · " + t.Exception.GetBaseException().Message;
+            Save();
+            StateChanged?.Invoke();
+        }, TaskScheduler.Default);
+    }
+
     public async Task StartAllAsync()
     {
         var enabled = _state.Rooms.Where(r => r.Enabled).ToList();
@@ -70,7 +87,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
                 room.Failures = 0;
             }
         }
-        _state.LastStatus = $"자동관리 시작 · {enabled.Count}개 방을 안전점검 없이 자동 부트스트랩 중";
+        _state.LastStatus = $"자동관리 시작 · {enabled.Count}개 방을 수동 점검 없이 자동 부트스트랩 중";
         Save();
         StateChanged?.Invoke();
 
@@ -136,8 +153,6 @@ public sealed class VoiceRoomCoordinator : IDisposable
 
             if (due is not null)
             {
-                // Routine checks should avoid stealing focus while the user is actively working.
-                // Initial bootstrap is user-requested by pressing Start All, so it must not be blocked by idle time.
                 if (due.LiveVerified && DesktopSession.IdleFor() < TimeSpan.FromSeconds(30))
                 {
                     due.NextCheckAt = DateTimeOffset.Now.AddMinutes(1);
@@ -207,8 +222,6 @@ public sealed class VoiceRoomCoordinator : IDisposable
         if (!launch.Success) return launch;
         Thread.Sleep(500);
 
-        // A verified entry token is a short-lived room-session contract. Do not throw it away
-        // just because this Kakao build custom-renders its composer and exposes no RICHEDIT/UIA node.
         if (OpenChatLinkRegistry.IsRecentlyVerifiedEntry(room.Title, TimeSpan.FromSeconds(30)))
             return new(true, "최근 링크/CTA 진입 세션 재사용 · 같은 작업에서 방 재검색 생략");
 
