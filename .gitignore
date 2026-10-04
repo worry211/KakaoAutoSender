@@ -1,5 +1,12 @@
+*.apk
 .gradle/
-.idea/
+build/
+app/build/
 local.properties
-**/build/
-*.iml
+desktop/voiceroom_config.json
+desktop/voiceroom_state.json
+desktop/logs/
+desktop/diagnostics/
+desktop/__pycache__/
+desktop/voiceroom_manager/__pycache__/
+desktop/tests/__pycache__/

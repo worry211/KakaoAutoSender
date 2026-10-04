@@ -1,61 +1,34 @@
 # KakaoAutoSender
 
-KakaoAutoSender is a local Android automation app that reuses KakaoTalk's Android notification reply action (`RemoteInput`) to send configured messages to confirmed conversations.
+KakaoAutoSender contains two local automation paths:
 
-## Privacy and routing policy
-- No remote-control server.
-- No `INTERNET` permission.
-- Runs locally on the phone.
-- Requires Android notification-listener access.
-- KakaoTalk notifications must remain enabled so reply sessions can be captured. Sound, vibration and pop-ups may be disabled separately.
-- Sends are **fail-closed**: if the app cannot confirm the exact saved reply session, it does not guess another room.
-- Newly added rooms use an internal routing alias that is separate from the visible Kakao room name. The internal alias is never shown in the normal UI.
+- Android notification-reply based scheduled message sending.
+- Experimental Windows + Android-emulator **VoiceRoom Manager** for multi-room VoiceRoom lifecycle management.
 
-## v1.1.0 final reliability pass
-- Keeps the v1.0 room-first dashboard and multi-room configuration model.
-- **One room per alarm dispatch** instead of firing a whole due batch in one receiver run.
-- When several rooms are due together, the next room is scheduled **2-5 seconds later**. This avoids back-to-back Kakao reply actions and also keeps Android `BroadcastReceiver` work short.
-- Interval schedules keep the configured minute value as the base and add a **stable 3-10 second per-cycle offset**. Example: a 15-minute room runs at roughly `15 minutes + 3-10 seconds` each cycle.
-- The interval offset is deterministic for that room/cycle, so repeated scheduler scans do not keep adding more delay.
-- Fixed daily times remain fixed; if several rooms share the same fixed time, cross-room 2-5 second spacing still applies.
-- Failed sends retry up to three times with a short randomized retry gap, then fail closed and move on without rerouting to another room.
-- Pressing global stop prevents the next room in a staggered batch from being scheduled.
-- Alarm scheduling clamps past timestamps to a safe near-future time and still uses exact-alarm support when Android grants it.
-- Timing policy has dedicated regression tests in addition to existing schedule/title tests, Android Lint and APK build gates.
+## VoiceRoom Manager v0.3
 
-## Core features
-- Room-first dashboard: the normal UI and room chooser show the actual Kakao room name only.
-- Multiple rooms with independent messages and schedules.
-- Per-room pause/resume and one-shot test send.
-- Global start and immediate stop.
-- Repeating schedules from **1 minute** upward.
-- Fixed daily schedules such as `09:00, 13:30, 20:00`.
-- 1/5/10/30/60-minute quick presets.
-- Per-room daily limit or unlimited mode.
-- Next-send time, connection state, send count and failures visible on each room card.
-- Android exact-alarm support when the device grants it, with safe inexact fallback.
-- Automatic schedule restore after reboot/app update.
-- Android conversation-shortcut (`shortcutId`) based recovery when KakaoTalk exposes a stable conversation identity.
-- Legacy v0.8/v0.9 profiles are migrated without discarding message/schedule settings.
+The desktop module under `desktop/` is GUI-first and does not require Kakao chat commands.
 
-## Normal setup
-1. Install and open the APK.
-2. Grant notification access.
-3. Receive a new message in the Open Chat room you want to add.
-4. Tap **새 방 추가** and select the Kakao room name.
-5. Set the message and either an interval or daily send times.
-6. Use **지금 1회 전송** to verify the exact target.
-7. Enable the room and tap **전체 시작** on the dashboard.
-8. Use **전체 중단** at any time to cancel pending automation.
+- multiple Open Chat rooms with independent lifecycle state
+- 48-hour baseline and real-UI verification before reopening
+- Windows monitor may turn off while automation keeps system sleep blocked
+- Android audio mute and keep-awake handling
+- ADB device auto-discovery with explicit selection when several devices are connected
+- environment preflight for ADB, KakaoTalk package and UIAutomator
+- **safe recognition check** that verifies the room and VoiceRoom menu without pressing the create button
+- separate **actual reopen test** with an explicit warning before a VoiceRoom may be created
+- serialized multi-room work, retry backoff, logs and XML/PNG diagnostics
 
-## Important platform limitations
-KakaoTalk does not expose a supported public API for arbitrary Open Chat posting. This app therefore depends on reply actions attached to KakaoTalk notifications. KakaoTalk/Android updates, reboot, process death, cleared/expired reply actions, OEM battery policy, or notification changes can temporarily invalidate a session. Receiving a new message in that room normally provides a fresh reply session, and a saved Android conversation shortcut can restore the correct binding automatically when available.
+See `desktop/README.md` for the current setup flow.
 
-A 1-minute schedule is supported by the app, but Android may defer alarms while the phone is idle if exact-alarm access is unavailable or the OS applies battery restrictions. Fixed-time mode is most precise when exact-alarm access is granted.
+## Android message sender
 
-Very frequent automated posting can also be limited by KakaoTalk or an Open Chat room's anti-spam policy. The app does not attempt to bypass platform rate limits or moderation.
+The Android app reuses KakaoTalk notification reply actions (`RemoteInput`) for confirmed conversations. It is fail-closed: if the exact saved reply session cannot be confirmed, it does not guess another room. Existing v1.1 reliability behavior, per-room schedules, exact-alarm support and reboot recovery remain unchanged.
 
-## Build
-GitHub Actions runs unit tests, Android Lint, and creates a debug APK on pushes/PRs.
+## Platform limitations
 
-Artifact: `KakaoAutoSender-debug-apk`
+KakaoTalk does not expose a supported public API for arbitrary Open Chat posting or VoiceRoom lifecycle automation. KakaoTalk/Android UI changes can invalidate desktop UI automation, so live selector validation on the exact emulator/KakaoTalk version remains a release gate. The project does not attempt to bypass platform rate limits, moderation or anti-abuse systems.
+
+## CI
+
+GitHub Actions runs desktop Python syntax/unit tests, Android unit tests, Android Lint and builds the debug APK.
