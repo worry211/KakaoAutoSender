@@ -53,6 +53,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        cancelDirectCheckIfReturnedToManager();
         recoverStalePendingOnForeground();
         handler.removeCallbacks(ticker);
         handler.post(ticker);
@@ -72,7 +73,8 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         root.addView(text("보이스룸 매니저", 28, true));
-        TextView subtitle = text("카톡매크로와 완전히 분리된 별도 앱 · 현재 휴대폰의 카카오톡 계정을 사용", 12, false);
+        TextView subtitle = text("v" + BuildConfig.VERSION_NAME
+                + " · 카톡매크로와 완전히 분리된 별도 앱 · 현재 휴대폰의 카카오톡 계정을 사용", 12, false);
         subtitle.setTextColor(Color.rgb(145, 151, 164));
         root.addView(subtitle, top(5));
 
@@ -183,7 +185,7 @@ public class MainActivity extends Activity {
 
         String last = VoiceRoomStore.lastStatus(this);
         String busy = VoiceRoomStore.pendingRoomId(this).isEmpty() ? "" : " · 작업 처리 중";
-        footerStatus.setText("등록 " + rooms.size() + "개" + busy
+        footerStatus.setText("v" + BuildConfig.VERSION_NAME + " · 등록 " + rooms.size() + "개" + busy
                 + (last.isEmpty() ? "" : "\n최근  " + last));
     }
 
@@ -506,6 +508,27 @@ public class MainActivity extends Activity {
         VoiceRoomScheduler.cancel(this);
         VoiceRoomStore.setLastStatus(this, "보이스룸 자동관리 중단");
         refreshUi();
+    }
+
+    private void cancelDirectCheckIfReturnedToManager() {
+        String pendingId = VoiceRoomStore.pendingRoomId(this);
+        if (pendingId.isEmpty()) return;
+        boolean probe = VoiceRoomStore.isProbePending(this);
+        boolean manual = VoiceRoomStore.isManualPending(this);
+        if (!probe && !manual) return;
+
+        VoiceRoomStore.Room room = VoiceRoomStore.get(this, pendingId);
+        VoiceRoomStore.clearPending(this);
+        VoiceRoomScheduler.scheduleNext(this);
+        if (room == null) return;
+
+        room.stageStartedAt = 0L;
+        room.status = probe ? "PROBE_ERROR" : "MANUAL_ERROR";
+        room.lastError = probe
+                ? "안전 점검 중 보룸 매니저로 돌아와 점검을 중단함"
+                : "실제 점검 중 보룸 매니저로 돌아와 점검을 중단함";
+        VoiceRoomStore.update(this, room);
+        VoiceRoomStore.setLastStatus(this, room.title + " · 사용자가 점검 중단");
     }
 
     private void recoverStalePendingOnForeground() {
