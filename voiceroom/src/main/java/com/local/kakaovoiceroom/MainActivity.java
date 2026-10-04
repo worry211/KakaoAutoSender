@@ -145,7 +145,7 @@ public class MainActivity extends Activity {
         tools2.addView(kakao, kakaoLp);
         root.addView(tools2, top(7));
 
-        TextView note = text("설정 후에는 방별 ‘안전 점검’ 1회 → ‘실제 점검’ 1회만 통과시키면 돼. 이후 전체 시작은 검증된 방만 자동관리해. 수동 점검은 버튼을 누르는 즉시 실행되고 예약 알람을 기다리지 않아.", 11, false);
+        TextView note = text("방마다 안전 점검/실제 점검을 한 번 통과시키면 이후에는 전체 시작만 켜두면 돼. 실제 점검은 즉시 실행되며 예약 알람을 기다리지 않아. 방 이름이나 링크를 바꾸면 해당 방 검증은 자동으로 다시 필요해져.", 11, false);
         note.setTextColor(Color.rgb(132, 138, 150));
         root.addView(note, top(14));
 
@@ -206,7 +206,16 @@ public class MainActivity extends Activity {
         status.setTextColor(statusColor(room.status));
         card.addView(status, top(7));
 
-        if (room.nextCheckAt > 0L) {
+        String verification = "검증  "
+                + (room.safeProbePassed ? "안전 ✓" : "안전 필요")
+                + "  ·  "
+                + (room.liveCheckPassed ? "실제 ✓" : "실제 필요");
+        TextView verified = text(verification, 11, true);
+        verified.setTextColor(room.liveCheckPassed
+                ? Color.rgb(102, 205, 145) : Color.rgb(198, 171, 104));
+        card.addView(verified, top(5));
+
+        if (room.nextCheckAt > 0L && room.liveCheckPassed) {
             TextView next = text("다음 확인  " + date(room.nextCheckAt), 11, false);
             next.setTextColor(Color.rgb(155, 161, 173));
             card.addView(next, top(5));
@@ -232,7 +241,7 @@ public class MainActivity extends Activity {
             VoiceRoomStore.Room current = VoiceRoomStore.get(this, room.id);
             if (current == null) return;
             current.enabled = !current.enabled;
-            if (current.enabled && current.nextCheckAt <= 0L) {
+            if (current.enabled && current.liveCheckPassed && current.nextCheckAt <= 0L) {
                 current.nextCheckAt = System.currentTimeMillis() + 3_000L;
             }
             VoiceRoomStore.update(this, current);
@@ -241,13 +250,16 @@ public class MainActivity extends Activity {
         });
         actions.addView(toggle, weight());
 
-        Button probe = compactButton("안전 점검", Color.rgb(73, 91, 126));
+        String probeLabel = room.safeProbePassed ? "안전 ✓" : "안전 점검";
+        Button probe = compactButton(probeLabel, Color.rgb(73, 91, 126));
         probe.setOnClickListener(v -> startSafeProbe(room));
         LinearLayout.LayoutParams probeLp = weight();
         probeLp.leftMargin = dp(6);
         actions.addView(probe, probeLp);
 
-        String liveLabel = "MANUAL_RUNNING".equals(room.status) ? "점검 중…" : "실제 점검";
+        String liveLabel;
+        if ("MANUAL_RUNNING".equals(room.status)) liveLabel = "점검 중…";
+        else liveLabel = room.liveCheckPassed ? "실제 ✓" : "실제 점검";
         Button check = compactButton(liveLabel, Color.rgb(58, 91, 151));
         check.setEnabled(!VoiceRoomStore.hasFreshPending(this));
         check.setOnClickListener(v -> confirmImmediateCheck(room));
@@ -370,6 +382,7 @@ public class MainActivity extends Activity {
             return;
         }
 
+        VoiceRoomScheduler.cancel(this);
         long now = System.currentTimeMillis();
         current.status = "MANUAL_RUNNING";
         current.stageStartedAt = now;
@@ -391,6 +404,7 @@ public class MainActivity extends Activity {
             current.lastError = "실제 점검 실행 실패 · " + shortError(e);
             VoiceRoomStore.update(this, current);
             VoiceRoomStore.setLastStatus(this, current.title + " · " + current.lastError);
+            VoiceRoomScheduler.scheduleNext(this);
             refreshUi();
         }
     }
@@ -462,8 +476,11 @@ public class MainActivity extends Activity {
                     current.title = t;
                     current.roomUrl = u;
                     if (identityChanged) {
+                        current.safeProbePassed = false;
+                        current.liveCheckPassed = false;
+                        current.verifiedAt = 0L;
                         current.startedAt = 0L;
-                        current.nextCheckAt = System.currentTimeMillis() + 5_000L;
+                        current.nextCheckAt = 0L;
                         current.failures = 0;
                         current.status = "NEW";
                         current.stageStartedAt = 0L;
@@ -500,23 +517,40 @@ public class MainActivity extends Activity {
         }
 
         List<VoiceRoomStore.Room> rooms = VoiceRoomStore.list(this);
-        boolean any = false;
-        long now = System.currentTimeMillis();
+        boolean anyEnabled = false;
+        StringBuilder unverified = new StringBuilder();
         for (VoiceRoomStore.Room room : rooms) {
             if (!room.enabled) continue;
-            any = true;
-            if (room.nextCheckAt <= 0L || "MANUAL_ERROR".equals(room.status)) {
+            anyEnabled = true;
+            if (!room.liveCheckPassed) {
+                if (unverified.length() > 0) unverified.append(", ");
+                unverified.append(room.title);
+            }
+        }
+        if (!anyEnabled) {
+            toast("자동관리할 방을 먼저 추가하거나 사용으로 켜줘.");
+            return;
+        }
+        if (unverified.length() > 0) {
+            new AlertDialog.Builder(this)
+                    .setTitle("실제 점검이 먼저 필요해")
+                    .setMessage("다음 ON 방은 아직 실제 생성/활성 검증을 통과하지 않았어:\n\n"
+                            + unverified + "\n\n각 방의 ‘실제 점검’을 1회 성공시킨 뒤 전체 시작을 눌러줘.")
+                    .setPositiveButton("확인", null)
+                    .show();
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        for (VoiceRoomStore.Room room : rooms) {
+            if (!room.enabled || !room.liveCheckPassed) continue;
+            if (room.nextCheckAt <= 0L) {
                 room.nextCheckAt = now + 3_000L;
-                if ("MANUAL_ERROR".equals(room.status)) room.status = "CHECK_DUE";
                 VoiceRoomStore.update(this, room);
             }
         }
-        if (!any) {
-            toast("자동관리할 방을 먼저 추가해줘.");
-            return;
-        }
         VoiceRoomStore.setManagerActive(this, true);
-        VoiceRoomStore.setLastStatus(this, "보이스룸 자동관리 시작");
+        VoiceRoomStore.setLastStatus(this, "검증된 방 보이스룸 자동관리 시작");
         VoiceRoomScheduler.scheduleNext(this);
         refreshUi();
     }
@@ -641,6 +675,7 @@ public class MainActivity extends Activity {
             case "PROBE_VOICE_MENU": return "안전 점검 · 보이스룸 화면 확인 중";
             case "PROBE_OK": return "안전 점검 성공";
             case "PROBE_ERROR": return "안전 점검 실패";
+            case "NEW": return "검증 필요";
             default: return "대기";
         }
     }
