@@ -4,10 +4,12 @@ import android.app.Activity;
 import android.app.KeyguardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.hardware.display.DisplayManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
+import android.view.Display;
 import android.view.WindowManager;
 
 import java.util.ArrayList;
@@ -26,7 +28,11 @@ public class WakeActivity extends Activity {
         Intent source = getIntent();
         boolean probe = source != null && source.getBooleanExtra(EXTRA_PROBE, false);
         boolean manual = source != null && source.getBooleanExtra(VoiceRoomScheduler.EXTRA_MANUAL, false);
-        boolean wasInteractive = isDeviceInteractive();
+        boolean powerInteractiveAtTrigger = isPowerInteractive();
+        int displayStateAtTrigger = currentDisplayState();
+        KeyguardManager keyguard = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+        boolean lockedAtTrigger = keyguard != null && keyguard.isDeviceLocked();
+        boolean secureKeyguard = keyguard != null && keyguard.isKeyguardSecure();
         acquireWakeLock();
 
         if (!VoiceRoomStore.managerActive(this) && !probe && !manual) {
@@ -45,6 +51,12 @@ public class WakeActivity extends Activity {
             finishSafely();
             return;
         }
+
+        room.lastDiagnostic = "trigger{interactive=" + powerInteractiveAtTrigger
+                + ",display=" + displayStateName(displayStateAtTrigger)
+                + ",locked=" + lockedAtTrigger
+                + ",secure=" + secureKeyguard + "}";
+        VoiceRoomStore.update(this, room);
 
         String pendingId = VoiceRoomStore.pendingRoomId(this);
         if (!pendingId.isEmpty()) {
@@ -89,8 +101,7 @@ public class WakeActivity extends Activity {
             }
         }
 
-        KeyguardManager keyguard = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
-        if (keyguard != null && keyguard.isDeviceLocked()) {
+        if (lockedAtTrigger) {
             if (probe) {
                 room.status = "PROBE_ERROR";
                 room.lastError = "안전 점검 전 휴대폰 잠금 해제가 필요함";
@@ -99,28 +110,31 @@ public class WakeActivity extends Activity {
                 room.lastError = "실제 점검 전 휴대폰 잠금 해제가 필요함";
             } else {
                 room.status = "WAITING_UNLOCK";
-                room.lastError = "휴대폰 잠금 해제가 필요함";
+                room.lastError = secureKeyguard
+                        ? "화면은 꺼졌지만 지문/패턴 잠금 상태 · 정상 잠금 해제 시 즉시 재시도"
+                        : "휴대폰 잠금 상태 · 잠금 해제 시 즉시 재시도";
                 room.nextCheckAt = System.currentTimeMillis() + 5L * 60L * 1000L;
             }
             room.stageStartedAt = 0L;
             VoiceRoomStore.update(this, room);
             VoiceRoomStore.clearPending(this);
             AudioGuard.restore(this);
-            VoiceRoomStore.setLastStatus(this, room.title + " · 잠금 해제 필요");
+            VoiceRoomStore.setLastStatus(this, room.title + " · " + room.lastError);
             VoiceRoomScheduler.scheduleNext(this);
             finishSafely();
             return;
         }
 
-        // Unattended work must never steal the foreground from the user. Direct probe/manual
-        // checks are the only operations allowed to interrupt because the user explicitly asked.
-        if (!probe && !manual && wasInteractive) {
+        // Samsung/Android can expose AOD/DOZE while PowerManager still looks awake around a wake
+        // transition. Treat only an actually ON/interactive display as active user use.
+        if (!probe && !manual && isUserActivelyUsingPhone(powerInteractiveAtTrigger, displayStateAtTrigger)) {
             room.stageStartedAt = 0L;
             room.lastError = "";
             room.nextCheckAt = System.currentTimeMillis() + USER_BUSY_RETRY_MS;
             VoiceRoomStore.update(this, room);
             VoiceRoomStore.setLastStatus(this,
-                    room.title + " · 휴대폰 사용 중이라 자동 점검을 5분 미룸");
+                    room.title + " · 화면 ON 사용 중이라 자동 점검을 5분 미룸"
+                            + " (display=" + displayStateName(displayStateAtTrigger) + ")");
             VoiceRoomScheduler.scheduleNext(this);
             finishSafely();
             return;
@@ -145,7 +159,11 @@ public class WakeActivity extends Activity {
         room.status = probe ? "PROBE_OPENING_KAKAO" : "OPENING_KAKAO";
         room.stageStartedAt = now;
         room.lastError = "";
-        room.lastDiagnostic = "launch=scheduled";
+        if (room.lastDiagnostic == null || room.lastDiagnostic.isEmpty()) {
+            room.lastDiagnostic = "launch=scheduled";
+        } else {
+            room.lastDiagnostic += ";launch=scheduled";
+        }
         if (!probe && !manual) room.nextCheckAt = now + VoiceRoomStore.PENDING_TIMEOUT_MS + 5_000L;
         VoiceRoomStore.update(this, room);
 
@@ -215,12 +233,48 @@ public class WakeActivity extends Activity {
         return out;
     }
 
-    private boolean isDeviceInteractive() {
+    private boolean isPowerInteractive() {
         try {
             PowerManager power = (PowerManager) getSystemService(Context.POWER_SERVICE);
             return power != null && power.isInteractive();
         } catch (Exception ignored) {
             return false;
+        }
+    }
+
+    private int currentDisplayState() {
+        try {
+            DisplayManager manager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
+            if (manager == null) return Display.STATE_UNKNOWN;
+            Display display = manager.getDisplay(Display.DEFAULT_DISPLAY);
+            return display == null ? Display.STATE_UNKNOWN : display.getState();
+        } catch (Exception ignored) {
+            return Display.STATE_UNKNOWN;
+        }
+    }
+
+    private boolean isUserActivelyUsingPhone(boolean interactive, int displayState) {
+        if (!interactive) return false;
+        if (displayState == Display.STATE_OFF
+                || displayState == Display.STATE_DOZE
+                || displayState == Display.STATE_DOZE_SUSPEND) {
+            return false;
+        }
+        // UNKNOWN fails closed; ON/VR are active surfaces.
+        return displayState == Display.STATE_UNKNOWN
+                || displayState == Display.STATE_ON
+                || displayState == Display.STATE_VR;
+    }
+
+    private String displayStateName(int state) {
+        switch (state) {
+            case Display.STATE_OFF: return "OFF";
+            case Display.STATE_ON: return "ON";
+            case Display.STATE_DOZE: return "DOZE";
+            case Display.STATE_DOZE_SUSPEND: return "DOZE_SUSPEND";
+            case Display.STATE_VR: return "VR";
+            case Display.STATE_UNKNOWN:
+            default: return "UNKNOWN";
         }
     }
 
