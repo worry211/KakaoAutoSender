@@ -30,25 +30,30 @@ export async function verifyDiscord(req: Request, raw: string, env: Env) {
     return false;
   }
 }
+
 export const needsConfirmation = (group: string, action: string) =>
   group === "license"
     ? ["revoke", "delete", "reset-device"].includes(action)
     : action === "kill-switch";
+
 const response = (content: string, components: any[] = []) => ({
   content,
   components,
   allowed_mentions: { parse: [] },
 });
+
 const date = (t: any) =>
   t == null || !Number.isFinite(Number(t))
     ? "—"
     : `<t:${Number(t)}:f> · <t:${Number(t)}:R>`;
+
 const oneLine = (v: any, max = 90) => {
   const s = String(v ?? "")
     .replaceAll(/\s+/g, " ")
     .trim();
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 };
+
 const stateLabel = (state: any) => {
   const labels: Record<string, string> = {
     UNUSED: "🟡 미사용",
@@ -60,6 +65,28 @@ const stateLabel = (state: any) => {
   };
   return labels[String(state)] ?? String(state ?? "알 수 없음");
 };
+
+const actionLabel = (action: any) => {
+  const labels: Record<string, string> = {
+    CREATE: "발급",
+    EXTEND: "기간 연장",
+    SUSPEND: "일시 정지",
+    RESUME: "정지 해제",
+    REVOKE: "영구 취소",
+    DELETE: "삭제/차단",
+    RESET_DEVICE: "기기 초기화",
+    REPLACE_UNUSED_KEY: "미사용 키 교체",
+    NOTE: "관리 메모 변경",
+    ACTIVATE: "활성화",
+    MAINTENANCE_CHANGE: "점검 모드 변경",
+    KILL_SWITCH_CHANGE: "긴급 중단 변경",
+    MIN_VERSION_CHANGE: "최소 버전 변경",
+    LATEST_VERSION_CHANGE: "최신 버전 변경",
+    POLICY_CHANGE: "정책 변경",
+  };
+  return labels[String(action)] ?? String(action ?? "처리");
+};
+
 export function friendlyError(state: string) {
   const messages: Record<string, string> = {
     NOT_FOUND:
@@ -86,65 +113,111 @@ export function friendlyError(state: string) {
   };
   return messages[state] ?? `처리할 수 없습니다. 오류 코드: ${state}`;
 }
+
 export function renderDiscord(result: any) {
   if (result?.kind === "license_help")
     return [
-      "## 🔑 카톡매크로 라이선스 관리",
-      "**일상 판매**  `/license create` → 구매자에게 새 KM 키만 전달",
-      "**조회/지원**  `/license info` · `/license search` · `/license list` · `/license expiring` · `/license history`",
-      "**기간/상태**  `/license extend` · `/license suspend` · `/license resume`",
-      "**기기 변경**  `/license reset-device` → 새 1회용 키 발급",
-      "**분실 대응**  미사용 키만 `/license replace-unused-key`로 교체",
-      "**영구 차단**  `/license revoke` 또는 `/license delete`는 확인 버튼이 필요합니다.",
-      "**현황**  `/license stats`",
+      "## 🔑 카톡매크로 · 라이선스 관리",
+      "판매할 때 가장 자주 쓰는 명령어부터 정리했습니다.",
       "",
-      "KM 키 원문은 발급/교체 순간에만 표시됩니다. 고객 기록에는 LIC ID를 보관하는 것을 권장합니다.",
+      "**🛒 발급 / 판매**",
+      "• `/license create` — 새 1회용 KM 키 발급",
+      "• `/license stats` — 전체 라이선스 현황 확인",
+      "",
+      "**🔎 고객 조회 / 지원**",
+      "• `/license info` — 라이선스 상세 상태",
+      "• `/license search` — 메모 또는 LIC ID 검색",
+      "• `/license list` — 상태별 라이선스 목록",
+      "• `/license expiring` — 곧 만료되는 고객 확인",
+      "• `/license history` — 변경 이력 / 감사 로그",
+      "",
+      "**🛠️ 기간 / 상태 관리**",
+      "• `/license extend` — 기간 연장",
+      "• `/license suspend` — 일시 정지",
+      "• `/license resume` — 정지 해제",
+      "",
+      "**📱 기기 / 키 문제**",
+      "• `/license reset-device` — 기기 변경용 새 1회용 키 발급",
+      "• `/license replace-unused-key` — 분실한 미사용 키 교체",
+      "",
+      "**⛔ 영구 차단**",
+      "• `/license revoke` — 라이선스 취소",
+      "• `/license delete` — 삭제 표시 + 사용 차단",
+      "",
+      "> ⚠️ KM 키 원문은 발급/교체 순간에만 표시됩니다. 고객 관리에는 **LIC ID**를 남겨두세요.",
     ].join("\n");
+
   if (result?.kind === "system_help")
     return [
-      "## ⚙️ 카톡매크로 운영 관리",
-      "`/system status` 현재 운영 설정 확인",
-      "`/system maintenance` 점검 모드 켜기/끄기",
-      "`/system kill-switch` 오배송 등 긴급 상황에서 전체 자동전송 중단",
-      "`/system min-version` 위험한 구버전 강제 차단",
-      "`/system latest-version` 최신 APK 안내",
-      "`/system policy` 서버 확인 주기와 오프라인 유예 설정",
+      "## ⚙️ 카톡매크로 · 운영 관리",
+      "서비스 전체에 영향을 주는 관리자 명령어입니다.",
       "",
-      "kill-switch는 라이선스를 삭제하지 않으며, 고객 설정도 보존합니다.",
+      "**📊 상태 확인**",
+      "• `/system status` — 현재 운영 설정 확인",
+      "",
+      "**🧰 운영 제어**",
+      "• `/system maintenance` — 점검 모드 켜기 / 끄기",
+      "• `/system kill-switch` — 긴급 상황에서 전체 자동전송 중단",
+      "",
+      "**📦 버전 관리**",
+      "• `/system min-version` — 위험한 구버전 강제 차단",
+      "• `/system latest-version` — 최신 APK versionCode / 다운로드 주소 설정",
+      "",
+      "**🌐 통신 정책**",
+      "• `/system policy` — 서버 확인 주기 / 오프라인 유예 설정",
+      "",
+      "> 🛡️ `kill-switch`는 고객 라이선스와 설정을 삭제하지 않고 **자동전송만 안전하게 중단**합니다.",
     ].join("\n");
+
   if (result?.kind === "system_status")
     return [
       "## ⚙️ 서비스 운영 현황",
-      `자동전송 안전중단: **${result.kill_switch ? "켜짐 🔴" : "꺼짐 🟢"}**`,
-      `점검 모드: **${result.maintenance ? "켜짐 🟠" : "꺼짐 🟢"}**`,
-      `최소 지원 versionCode: **${result.min_version}**`,
-      `최신 versionCode: **${result.latest_version}**`,
-      `라이선스 확인 주기: **${result.heartbeat_seconds}초**`,
-      `오프라인 유예: **${result.grace_seconds}초**`,
-      result.download_url
-        ? `업데이트: ${result.download_url}`
-        : "업데이트 URL: —",
-      result.message
-        ? `고객 안내: ${oneLine(result.message, 180)}`
-        : "고객 안내: —",
+      "",
+      "**🛡️ 안전 상태**",
+      `• 전체 자동전송 중단: **${result.kill_switch ? "켜짐 🔴" : "꺼짐 🟢"}**`,
+      `• 점검 모드: **${result.maintenance ? "켜짐 🟠" : "꺼짐 🟢"}**`,
+      "",
+      "**📦 앱 버전**",
+      `• 최소 지원 versionCode: **${result.min_version}**`,
+      `• 최신 versionCode: **${result.latest_version}**`,
+      `• 업데이트 주소: ${result.download_url || "—"}`,
+      "",
+      "**🌐 라이선스 정책**",
+      `• 서버 확인 주기: **${result.heartbeat_seconds}초**`,
+      `• 오프라인 유예: **${result.grace_seconds}초**`,
+      "",
+      `**📢 고객 안내**\n${result.message ? oneLine(result.message, 180) : "—"}`,
     ].join("\n");
+
   if (Array.isArray(result))
-    return (
-      "## ✅ 라이선스 발급 완료\n" +
-      result
-        .map((l) => `**${l.license_id}**\n새 키: \`${l.key}\``)
-        .join("\n\n") +
-      "\n\n⚠️ **KM 키는 지금 한 번만 표시됩니다.** 구매자에게 키를 전달하고 LIC ID를 고객 기록에 남겨두세요."
-    );
+    return [
+      "## ✅ 라이선스 발급 완료",
+      "구매자에게는 **KM 키만 전달**하고, 판매 기록에는 LIC ID를 남겨두세요.",
+      "",
+      ...result.flatMap((l) => [
+        `**${l.license_id}**`,
+        `🔑 KM 키: \`${l.key}\``,
+        "",
+      ]),
+      "> ⚠️ **KM 키는 지금 한 번만 표시됩니다.** 분실 시 원문을 다시 조회할 수 없습니다.",
+    ].join("\n");
+
   if (result?.kind === "history") {
     const body = (result.events ?? [])
       .map(
         (e: Row) =>
-          `• ${date(e.timestamp)} · **${e.action}**${e.reason ? ` · ${oneLine(e.reason, 80)}` : ""} · 관리자 ${e.admin_discord_id}`,
+          `• ${date(e.timestamp)}\n  **${actionLabel(e.action)}**${e.reason ? ` · ${oneLine(e.reason, 80)}` : ""}\n  관리자: ${e.admin_discord_id}`,
       )
-      .join("\n");
-    return `## 🧾 변경 이력\n**${result.license_id}** · 페이지 ${result.page}${result.has_more ? " · 다음 페이지 있음" : ""}\n\n${body || "기록이 없습니다."}`;
+      .join("\n\n");
+    return [
+      "## 🧾 라이선스 변경 이력",
+      `**${result.license_id}**`,
+      `페이지 **${result.page}**${result.has_more ? " · 다음 페이지 있음" : ""}`,
+      "",
+      body || "기록이 없습니다.",
+    ].join("\n");
   }
+
   if (result?.licenses) {
     const title =
       result.kind === "expiring"
@@ -153,38 +226,66 @@ export function renderDiscord(result: any) {
     const body = result.licenses
       .map(
         (l: Row) =>
-          `**${l.license_id}** · ${stateLabel(l.state)}\n만료 ${l.expires_at === null ? "영구" : date(l.expires_at)}\n${oneLine(l.customer_memo) || "고객 메모 없음"}`,
+          [
+            `**${l.license_id}** · ${stateLabel(l.state)}`,
+            `• 만료: ${l.expires_at === null ? "영구" : date(l.expires_at)}`,
+            `• 고객: ${oneLine(l.customer_memo) || "메모 없음"}`,
+          ].join("\n"),
       )
       .join("\n\n");
-    return `${title}\n페이지 ${result.page}${result.has_more ? " · 다음 페이지 있음" : ""}\n\n${body || "조건에 맞는 라이선스가 없습니다."}`;
+    return [
+      title,
+      `페이지 **${result.page}**${result.has_more ? " · 다음 페이지 있음" : ""}`,
+      "",
+      body || "조건에 맞는 라이선스가 없습니다.",
+    ].join("\n");
   }
+
   if (result?.license_id) {
     return [
       `## ${stateLabel(result.state)} · 라이선스 상세`,
       `**${result.license_id}**`,
-      `생성: ${date(result.created_at)}`,
-      `활성화: ${date(result.activated_at)}`,
-      `만료: ${result.expires_at === null ? "영구" : date(result.expires_at)}`,
-      `최근 확인: ${date(result.last_seen_at)}`,
-      `기기 등록: **${result.device_bound ? "예" : "아니오"}** · 기기 초기화 **${result.device_reset_count ?? 0}회**`,
-      `고객 메모: ${oneLine(result.customer_memo, 180) || "—"}`,
-      `관리 메모: ${oneLine(result.admin_memo, 180) || "—"}`,
-      result.key ? `\n🔑 **새 키 (이번에만 표시)**\n\`${result.key}\`` : "",
+      "",
+      "**🗓️ 사용 정보**",
+      `• 생성: ${date(result.created_at)}`,
+      `• 활성화: ${date(result.activated_at)}`,
+      `• 만료: ${result.expires_at === null ? "영구" : date(result.expires_at)}`,
+      `• 최근 서버 확인: ${date(result.last_seen_at)}`,
+      "",
+      "**📱 기기 정보**",
+      `• 기기 등록: **${result.device_bound ? "예" : "아니오"}**`,
+      `• 기기 초기화: **${result.device_reset_count ?? 0}회**`,
+      "",
+      "**📝 메모**",
+      `• 고객 메모: ${oneLine(result.customer_memo, 180) || "—"}`,
+      `• 관리 메모: ${oneLine(result.admin_memo, 180) || "—"}`,
+      result.key ? `\n🔑 **새 KM 키 · 이번에만 표시**\n\`${result.key}\`` : "",
     ]
       .filter(Boolean)
       .join("\n");
   }
+
   if (result && Object.prototype.hasOwnProperty.call(result, "total")) {
     return [
       "## 📊 라이선스 현황",
-      `전체 **${Number(result.total) || 0}** · 사용 중 **${Number(result.active) || 0}** · 미사용 **${Number(result.unused) || 0}**`,
-      `만료 **${Number(result.expired) || 0}** · 정지 **${Number(result.suspended) || 0}** · 취소 **${Number(result.revoked) || 0}** · 삭제 **${Number(result.deleted) || 0}**`,
-      `오늘 생성 **${Number(result.created_today) || 0}** · 오늘 활성화 **${Number(result.activated_today) || 0}**`,
-      `7일 내 만료 **${Number(result.expiring_7d) || 0}** · 최근 24시간 확인 **${Number(result.recently_seen) || 0}**`,
+      "",
+      "**👥 전체 상태**",
+      `• 전체 **${Number(result.total) || 0}**`,
+      `• 사용 중 **${Number(result.active) || 0}** · 미사용 **${Number(result.unused) || 0}**`,
+      `• 만료 **${Number(result.expired) || 0}** · 정지 **${Number(result.suspended) || 0}**`,
+      `• 취소 **${Number(result.revoked) || 0}** · 삭제 **${Number(result.deleted) || 0}**`,
+      "",
+      "**📈 최근 운영 지표**",
+      `• 오늘 생성 **${Number(result.created_today) || 0}**`,
+      `• 오늘 활성화 **${Number(result.activated_today) || 0}**`,
+      `• 7일 내 만료 **${Number(result.expiring_7d) || 0}**`,
+      `• 최근 24시간 확인 **${Number(result.recently_seen) || 0}**`,
     ].join("\n");
   }
-  return "처리가 완료되었습니다.";
+
+  return "✅ 처리가 완료되었습니다.";
 }
+
 export async function executeDiscord(
   env: Env,
   actor: string,
@@ -239,7 +340,17 @@ export async function executeDiscord(
             ? "끄기"
             : "실행";
       return response(
-        `## ⚠️ 최종 확인\n**${command.action}** ${mode}\n대상: **${target}**${command.params.reason ? `\n사유: ${oneLine(command.params.reason, 180)}` : ""}\n\n2분 안에 확인해야 하며, 취소하면 아무 변경도 적용되지 않습니다.`,
+        [
+          "## ⚠️ 최종 확인",
+          `**${actionLabel(command.action.toUpperCase().replaceAll("-", "_"))} · ${mode}**`,
+          "",
+          `• 대상: **${target}**`,
+          command.params.reason
+            ? `• 사유: ${oneLine(command.params.reason, 180)}`
+            : "• 사유: —",
+          "",
+          "> 2분 안에 확인해야 합니다. **취소**를 누르면 아무 변경도 적용되지 않습니다.",
+        ].join("\n"),
         [
           {
             type: 1,
@@ -272,6 +383,7 @@ export async function executeDiscord(
   );
   return response(renderDiscord(result).slice(0, 1950));
 }
+
 export async function discord(
   req: Request,
   raw: string,
