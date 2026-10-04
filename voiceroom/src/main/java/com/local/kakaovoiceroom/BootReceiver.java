@@ -35,6 +35,7 @@ public class BootReceiver extends BroadcastReceiver {
     private void recoverInterruptedPending(Context context, String reason) {
         String pendingId = VoiceRoomStore.pendingRoomId(context);
         boolean probe = VoiceRoomStore.isProbePending(context);
+        boolean manual = VoiceRoomStore.isManualPending(context);
         VoiceRoomStore.clearPending(context);
         if (pendingId.isEmpty()) return;
 
@@ -44,9 +45,12 @@ public class BootReceiver extends BroadcastReceiver {
         if (probe) {
             room.status = "PROBE_ERROR";
             room.lastError = reason + "으로 안전 점검이 중단됨";
+        } else if (manual) {
+            room.status = "MANUAL_ERROR";
+            room.lastError = reason + "으로 실제 점검이 중단됨 · 자동으로 다시 실행하지 않음";
         } else {
             room.status = "CHECK_DUE";
-            room.lastError = reason + "으로 이전 작업이 중단됨 · 자동 재시도 예정";
+            room.lastError = reason + "으로 이전 자동관리 작업이 중단됨 · 자동 재시도 예정";
             room.nextCheckAt = System.currentTimeMillis() + 15_000L;
         }
         VoiceRoomStore.update(context, room);
