@@ -34,5 +34,6 @@ public sealed class DesktopState
     public List<RoomState> Rooms { get; set; } = [];
     public string LastStatus { get; set; } = "";
     public int SpeakerRequestsRejected { get; set; }
+    public int SpeakerRequestTogglesDisabled { get; set; }
     public int AudioRepairs { get; set; }
 }
