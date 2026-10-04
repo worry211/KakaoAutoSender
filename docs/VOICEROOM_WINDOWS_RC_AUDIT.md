@@ -25,13 +25,13 @@
 UIA 없는 client를 위해 Windows 한국어 로컬 OCR을 추가했다. OCR label/name readback은 자동화 근거이며 임의 아이콘을 이름에 따라 추측해서 클릭하지 않는다. 브라우저 주소가 등록 URL과 일치하지 않으면 visual CTA를 호출하지 않는다. 권한/보안/로그인/플랫폼 한도는 우회하지 않는다.
 
 ## 자동 검증
-- Windows unit + workflow simulation + 실제 screenshot fixture tests: 51 PASS (초기 테스트 float 1tick 비교를 분 단위 입력으로 수정).
+- Windows unit + workflow simulation + 실제 screenshot fixture tests: 53 PASS (초기 테스트 float 1tick 비교를 분 단위 입력으로 수정).
 - 실제 browser landing 및 redacted preview CTA fixture: 100%, 150%, 200% 검출. 이 테스트는 실제 handoff나 생성 성공의 증거가 아니다.
 - WPF dashboard를 직접 render하고 화면 검토. 첫 render에서 Button template이 DataGridRow에도 적용되는 오류를 발견·제거. 1180px와 최소 840px 렌더를 검사한다.
 - Windows Release build: warning/error 0. self-contained win-x64 single-file publish + ZIP + SHA-256를 재현 가능한 PowerShell script로 생성.
 - 두 Android 모듈 testDebugUnitTest/lintDebug/assembleDebug PASS. Android 소스/리소스/build 설정 변경 없음.
 - backend typecheck/lint/59 tests/audit(취약점 0), secret scanner/self-test PASS. CRLF checkout 때문에 생긴 로컬 prettier 경고는 작업 파일 line ending만 정규화; backend 커밋 변경 없음.
-- Android minified release smoke 및 새 head GitHub CI 결과는 PR/checks에서 확인. 로컬/CI와 실기를 혼동하지 않는다.
+- Android 두 앱 minified release smoke/Release Lint도 로컬 PASS. 새 head GitHub CI 결과는 PR/checks에서 확인. 로컬/CI와 실기를 혼동하지 않는다.
 
 ## 남은 제품 승인 한계
 Windows 실제 Kakao 보이스룸 생성/PIP 및 icon-only audio/요청 UI, 모니터 OFF, 잠금 도중 cancellation, Kakao/Windows 재시작, 계정 다중 보룸 한도, 실제 48h cycle은 이 세션에서 검증되지 않았다. 사용자 제공 화면은 landing/preview 증거이며 보이스룸 active fixture가 아니다. 소유 관계 없는 PIP, Korean OCR 미설치, UIA address 미노출은 conservative 실패가 날 수 있다.

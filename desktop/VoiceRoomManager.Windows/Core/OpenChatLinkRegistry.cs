@@ -4,7 +4,7 @@ namespace VoiceRoomManager.Windows.Core;
 
 internal static partial class OpenChatLinkRegistry
 {
-    [GeneratedRegex("^[A-Za-z0-9_-]{3,128}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("^/o/[A-Za-z0-9_-]{3,128}/?$", RegexOptions.CultureInvariant)]
     private static partial Regex SlugPattern();
 
     public static bool IsSupported(string? value)
@@ -15,11 +15,7 @@ internal static partial class OpenChatLinkRegistry
         if (!string.Equals(uri.Host, "open.kakao.com", StringComparison.OrdinalIgnoreCase)) return false;
         if (!uri.IsDefaultPort || !string.IsNullOrEmpty(uri.UserInfo)) return false;
 
-        var segments = uri.AbsolutePath
-            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (segments.Length != 2) return false;
-        if (!string.Equals(segments[0], "o", StringComparison.OrdinalIgnoreCase)) return false;
-        return SlugPattern().IsMatch(segments[1]);
+        return SlugPattern().IsMatch(uri.AbsolutePath);
     }
 
     public static string Normalize(string value)

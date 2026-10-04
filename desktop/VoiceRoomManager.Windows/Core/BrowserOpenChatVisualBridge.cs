@@ -62,6 +62,9 @@ internal static class BrowserOpenChatVisualBridge
         ShowWindowAsync(target.Hwnd, 9);
         SetForegroundWindow(target.Hwnd);
         AutomationOperation.Pause(120);
+        var fresh = FindOutlineCta(target.Hwnd, out _);
+        if (fresh is null || Math.Abs(fresh.Value.X-target.X) > 5 || Math.Abs(fresh.Value.Y-target.Y) > 5)
+            return new(true, false, "CTA 위치 변경 · 화면 안정 후 재시도");
         if (!NativeInput.Click(target.Hwnd, target.X, target.Y))
             return new(true, false, "검증된 브라우저 OpenChat CTA 클릭 실패");
 

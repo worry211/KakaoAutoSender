@@ -42,7 +42,7 @@ public partial class MainWindow : Window
         if (selectedId is not null) RoomsGrid.SelectedItem = State.Rooms.FirstOrDefault(r => r.Id == selectedId);
 
         var version = typeof(MainWindow).Assembly.GetName().Version;
-        VersionBadge.Text = version is null ? "Windows" : $"Windows v{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
+        VersionBadge.Text = version is null ? "Windows" : $"Windows v{version.Major}.{version.Minor}.{Math.Max(0, version.Build)} RC1";
 
         MasterStatus.Text = State.ManagerActive
             ? "● 보이스룸 자동관리 실행 중"
@@ -224,6 +224,8 @@ public partial class MainWindow : Window
         if (target == "clear") { KakaoCalibrationStore.Clear(); State.LastStatus = "호환성 설정 초기화 완료"; RefreshUi(); return; }
         if (target.Length == 0) return;
 
+        _coordinator.StopAll();
+
         MessageBox.Show(this,
             "확인을 누르면 이 창이 숨고 6초 뒤 현재 마우스 위치를 저장해.\n" +
             "그 사이 카카오톡에서 해당 UI를 화면에 띄우고, 정확한 버튼/입력칸 중앙에 마우스만 올려둬. 클릭할 필요는 없어.",
@@ -283,7 +285,8 @@ public partial class MainWindow : Window
     {
         if (SelectedStatus is null) return;
         if (RoomsGrid.SelectedItem is not RoomState room) { SelectedStatus.Text = "방을 선택하면 보호 상태와 필요한 조치를 확인할 수 있습니다."; SelectedError.Text = ""; return; }
-        SelectedStatus.Text = room.Title + " · " + (room.Enabled ? "관리 ON" : "관리 OFF") + " · " + room.AudioDisplay;
+        SelectedStatus.Text = room.Title + " · " + (room.Enabled ? "관리 ON" : "관리 OFF") + " · " + room.AudioDisplay
+            + (room.LastFailureAt is null ? "" : " · 최근 실패 " + room.LastFailureAt.Value.ToLocalTime().ToString("MM/dd HH:mm"));
         SelectedError.Text = room.LastError.Length > 200 ? room.LastError[..200] + "… 고급 진단에서 전체 확인" : room.LastError;
         LastStatus.Text = room.LastDiagnostic;
     }

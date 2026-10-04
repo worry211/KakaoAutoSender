@@ -42,8 +42,7 @@ internal static class KakaoOpenChatEntry
         // After the browser CTA, Windows can take time to foreground Kakao and paint the custom
         // OpenChat preview. Repeatedly try both semantic and strict yellow-CTA visual entry.
         AutomationOperation.Stage("Kakao 미리보기 · 방 진입");
-        OpenChatLinkLauncher.TryBrowserAction(true, out _);
-        var afterBrowser = TryKakaoStage(room.Title, TimeSpan.FromSeconds(8));
+        var afterBrowser = TryKakaoStage(room.Title, TimeSpan.FromSeconds(8), allowConfirmation: true);
         trace.Add(afterBrowser.Diagnostic);
         if (afterBrowser.Success)
         {
@@ -54,7 +53,7 @@ internal static class KakaoOpenChatEntry
         return new(true, false, string.Join(" → ", trace));
     }
 
-    private static Result TryKakaoStage(string roomTitle, TimeSpan timeout)
+    private static Result TryKakaoStage(string roomTitle, TimeSpan timeout, bool allowConfirmation = false)
     {
         var deadline = DateTime.UtcNow.Add(timeout);
         KakaoOpenChatPreviewBridge.Result? lastPreview = null;
@@ -62,6 +61,7 @@ internal static class KakaoOpenChatEntry
 
         while (DateTime.UtcNow < deadline)
         {
+            if (allowConfirmation) OpenChatLinkLauncher.TryBrowserAction(true, out _);
             lastPreview = KakaoOpenChatPreviewBridge.TryEnter(roomTitle);
             if (lastPreview.Success)
                 return new(true, true, "preview=" + lastPreview.Diagnostic);

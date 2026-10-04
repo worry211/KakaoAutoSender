@@ -16,6 +16,8 @@ public class ReliabilityTests
     [InlineData("https://open.kakao.com:444/o/AbC",false)]
     [InlineData("https://open.kakao.com/o/",false)]
     [InlineData("https://open.kakao.com/o/AbC/more",false)]
+    [InlineData("https://open.kakao.com/o//AbC",false)]
+    [InlineData("https://open.kakao.com/O/AbC",false)]
     public void LinkValidation(string link,bool valid) => Assert.Equal(valid,OpenChatLinkRegistry.IsSupported(link));
     [Fact] public void LinkCaseIsIdentity() => Assert.NotEqual(OpenChatLinkRegistry.Normalize("https://open.kakao.com/o/AbC"),OpenChatLinkRegistry.Normalize("https://open.kakao.com/o/abc"));
     [Fact] public void NewUnverifiedRoomIsDue() { var r=new RoomState(); Assert.Same(r,LifecyclePolicy.Due([r],Now)); }

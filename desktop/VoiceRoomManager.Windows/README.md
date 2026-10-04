@@ -31,7 +31,7 @@ UI 작업은 전역 단일 실행입니다. 새 방이나 한 방의 실패가 �
 `%LOCALAPPDATA%/VoiceRoomManagerWindows/`에 state/backup/calibration과 최대 약 4MB 회전 로그를 저장합니다. 손상된 state 원본을 보존하고 백업을 복구할 때 자동관리는 OFF로 시작합니다. 고급 진단에서 ZIP을 내보낼 수 있습니다. 진단에 방 이름이 들어갈 수 있으니 공유 전 확인하세요.
 
 ## 검증 범위와 한계
-로컬 Windows 자동 테스트 51개: 수명/재시도/신규 방/실패 격리/취소/백업/URL/강한 활성 증거/전체 workflow simulation/실제 screenshot CTA 100·150·200% 검출. 이 fixture는 **브라우저→Kakao 전환이나 보이스룸 생성 성공을 증명하지 않습니다.**
+로컬 Windows 자동 테스트 53개: 수명/재시도/신규 방/실패 격리/취소/백업/URL/강한 활성 증거/전체 workflow simulation/실제 screenshot CTA 100·150·200% 검출. 이 fixture는 **브라우저→Kakao 전환이나 보이스룸 생성 성공을 증명하지 않습니다.**
 
 UIA와 한국어 OCR 모두 사용할 수 없거나, icon-only 보이스룸 컨트롤/제목 없는 별도 PIP/소유 관계 없는 popup을 확정할 수 없으면 fail closed합니다. 자동 캘리브레이션 없이 모든 Kakao 버전이 동작한다는 보장은 아직 없습니다. native UIA provider 호출 자체가 장시간 멈추는 경우 90초 cooperative 제한을 넘길 수 있습니다. 한 계정의 다중 보이스룸 제한은 실기에서 확인해야 합니다.
 

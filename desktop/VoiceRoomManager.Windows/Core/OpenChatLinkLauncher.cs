@@ -59,6 +59,14 @@ internal static class OpenChatLinkLauncher
         }
 
         var url = OpenChatLinkRegistry.Normalize(room.OpenChatUrl);
+        var existingLanding = EnumerateBrowserWindows().Where(w => BrowserUrlEvidence.Matches(w.Hwnd, url)).ToArray();
+        if (existingLanding.Length > 1) return new(true, false, "동일 OpenChat 페이지가 여러 창에 있습니다. 한 창만 남겨 주세요.");
+        if (existingLanding.Length == 1)
+        {
+            Activate(existingLanding[0].Hwnd);
+            var resume = KakaoOpenChatEntry.TryEnter(room);
+            return new(true, resume.Success, resume.Diagnostic);
+        }
         try
         {
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });

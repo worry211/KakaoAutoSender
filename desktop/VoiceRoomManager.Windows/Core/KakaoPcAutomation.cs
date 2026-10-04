@@ -149,6 +149,11 @@ public sealed class KakaoPcAutomation
     {
         if (DesktopSession.IsLocked()) return new(false, "Windows 잠금 상태");
         var host = KakaoSurfaceLocator.FindExactChat(room.Title);
+        if (host == IntPtr.Zero)
+        {
+            var foreground = KakaoSurfaceLocator.VisibleTopLevels().FirstOrDefault(s => KakaoSurfaceLocator.IsForeground(s.Hwnd));
+            if (foreground is not null && LocalTextSurface.Read(foreground.Hwnd)?.HasRoom(room.Title) == true) host = foreground.Hwnd;
+        }
         if (host == IntPtr.Zero || !KakaoSurfaceLocator.IsForeground(host)) return new(false, "현재 방이 전경이 아님 · 정기점검에서 재확인");
         if (!AutomationOperation.Current!.Prove(host)) return new(false, "방 증거 없음");
         var surfaces = ScopedSurfaces();
@@ -170,6 +175,15 @@ public sealed class KakaoPcAutomation
             "스피커 신청 끄기", "스피커 신청 받지 않기", "스피커 신청 차단하기");
         if (disable is not null && Invoke(disable))
             return new(true, "스피커 요청 받기 자동 차단", active, room.MicMuted, room.SpeakerMuted, RequestToggleDisabled: true);
+
+        var frame = LocalTextSurface.Read(host);
+        if (frame is not null && frame.HasRoom(room.Title))
+        {
+            if (LocalTextSurface.ClickExact(host, "스피커 요청 거절", "스피커 신청 거절", "발언 요청 거절"))
+                return new(true, "스피커 요청 자동 거절 · 명시적 OCR action", active, room.MicMuted, room.SpeakerMuted, RejectedRequest: true);
+            if (LocalTextSurface.ClickExact(host, "스피커 요청 끄기", "스피커 요청 받지 않기", "스피커 요청 차단하기"))
+                return new(true, "스피커 요청 차단 · 명시적 OCR action", active, room.MicMuted, room.SpeakerMuted, RequestToggleDisabled: true);
+        }
 
         return ProtectAudio(scoped.Count > 0 ? scoped : surfaces, "런타임 보호 확인");
     }
