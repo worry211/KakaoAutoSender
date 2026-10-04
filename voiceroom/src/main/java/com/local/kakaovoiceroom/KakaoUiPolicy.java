@@ -14,32 +14,22 @@ final class KakaoUiPolicy {
         return s.replaceAll("\\s+", " ");
     }
 
-    /**
-     * Kakao can expose the room title and the participant count as one accessibility label
-     * (for example "게임방 386" or, for a room literally named "1", "1 1").
-     * Accept only an exact title or an exact title followed by a numeric count. This keeps
-     * matching strict enough to avoid treating a similarly-prefixed room as the target.
-     */
+    /** Kakao may expose title + participant count as one accessibility label (e.g. "1 1"). */
     static boolean roomTitleMatches(String expected, String visible) {
         String want = normalize(expected);
         String got = normalize(visible);
         if (want.isEmpty() || got.isEmpty()) return false;
         if (want.equals(got)) return true;
         if (!got.startsWith(want + " ")) return false;
-        String suffix = got.substring(want.length()).trim();
+        String suffix = got.substring(want.length()).trim().replace(",", "");
         if (suffix.isEmpty()) return false;
-        suffix = suffix.replace(",", "");
         for (int i = 0; i < suffix.length(); i++) {
             if (!Character.isDigit(suffix.charAt(i))) return false;
         }
         return true;
     }
 
-    /**
-     * Kakao's current create sheet accepts 1..30 characters. Use the configured Open Chat
-     * title as the default VoiceRoom name so unattended recreation never stalls on an empty
-     * required field. Count/truncate by Unicode code point to avoid splitting emoji/surrogates.
-     */
+    /** Create-sheet names are 1..30 chars; truncate by Unicode code point, never surrogate unit. */
     static String voiceRoomName(String roomTitle) {
         String value = normalize(roomTitle);
         if (value.isEmpty()) value = "보이스룸";
@@ -49,6 +39,7 @@ final class KakaoUiPolicy {
         return value.substring(0, end).trim();
     }
 
+    /** Accept only official HTTPS Open Chat links; reject look-alike hosts and unsafe schemes. */
     static boolean isOpenChatUrl(String value) {
         if (value == null || value.trim().isEmpty()) return false;
         try {
