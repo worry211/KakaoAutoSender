@@ -21,25 +21,27 @@ import java.util.Set;
 public class VoiceRoomAccessibilityService extends AccessibilityService {
     private static final String KAKAO_PACKAGE = "com.kakao.talk";
     private static final long JOB_TIMEOUT_MS = VoiceRoomStore.PENDING_TIMEOUT_MS;
-    private static final long STAGE_TIMEOUT_MS = 18_000L;
     private static final long STEP_DEBOUNCE_MS = 300L;
     private static final long FOLLOW_UP_MS = 700L;
 
     private static final List<String> ROOM_READY_TERMS = Arrays.asList(
-            "메시지 입력", "메시지를 입력", "채팅 입력", "메시지 보내기");
+            "메시지 입력", "메시지를 입력", "메시지 입력하기", "채팅 입력", "메시지 보내기");
     private static final List<String> OPEN_CHAT_CONTEXT_TERMS = Arrays.asList(
             "공유하기", "링크 공유", "QR 코드", "오픈채팅");
     private static final List<String> COMPOSER_ACTION_TERMS = Arrays.asList(
-            "+", "추가", "첨부");
-    private static final List<String> VOICE_TERMS = Arrays.asList("보이스룸");
+            "+", "추가", "첨부", "더하기");
+    private static final List<String> VOICE_TERMS = Arrays.asList("보이스룸", "보이스 룸");
     private static final List<String> CREATE_STRONG_TERMS = Arrays.asList(
-            "보이스룸 만들기", "보이스룸 시작", "보이스룸 열기", "보이스룸 개설");
+            "보이스룸 만들기", "보이스룸 시작", "보이스룸 열기", "보이스룸 개설",
+            "보이스 룸 만들기", "보이스 룸 시작");
     private static final List<String> CREATE_WEAK_TERMS = Arrays.asList("시작하기");
     private static final List<String> CONFIRM_TERMS = Arrays.asList("시작", "만들기", "확인");
     private static final List<String> STRONG_ACTIVE_TERMS = Arrays.asList(
-            "보이스룸 종료", "보이스룸 나가기");
-    private static final List<String> SPEAKER_TERMS = Arrays.asList("스피커 신청", "스피커");
-    private static final List<String> LISTENER_TERMS = Arrays.asList("리스너", "청취자");
+            "보이스룸 종료", "보이스룸 나가기", "보이스 룸 종료", "보이스 룸 나가기");
+    private static final List<String> SPEAKER_TERMS = Arrays.asList(
+            "스피커 신청", "스피커로 참여", "스피커");
+    private static final List<String> LISTENER_TERMS = Arrays.asList(
+            "리스너로 참여", "리스너", "청취자");
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private long lastStepAt;
@@ -128,8 +130,6 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         try {
             CharSequence rootPackage = root.getPackageName();
             if (rootPackage == null || !KAKAO_PACKAGE.contentEquals(rootPackage)) {
-                // Delayed callbacks can fire after the UI returned to this app. Never click
-                // anything unless the active root itself belongs to KakaoTalk.
                 if (stageExpired(room, now)) fail(room, stageError(room.status, "카카오톡이 전경이 아님"));
                 else scheduleFollowUp();
                 return;
@@ -138,7 +138,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
             saveDiagnostic(room, diagnosticSummary(root, room));
 
             boolean titleVisible = containsRoomTitle(root, room.title);
-            boolean composerVisible = containsAny(root, ROOM_READY_TERMS);
+            boolean composerVisible = hasComposerInput(root);
             boolean openChatContext = containsAny(root, OPEN_CHAT_CONTEXT_TERMS);
             boolean trustedLinkEntry = VoiceRoomStore.pendingEnteredByLink(this);
             boolean roomScreen = composerVisible
@@ -272,7 +272,17 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     }
 
     private boolean stageExpired(VoiceRoomStore.Room room, long now) {
-        return room.stageStartedAt > 0L && now - room.stageStartedAt > STAGE_TIMEOUT_MS;
+        return room.stageStartedAt > 0L
+                && now - room.stageStartedAt > stageTimeoutMs(room.status);
+    }
+
+    private long stageTimeoutMs(String status) {
+        String s = safe(status);
+        if (s.contains("OPENING_KAKAO") || s.contains("OPENING_ROOM")) return 25_000L;
+        if (s.contains("ROOM_VERIFIED") || s.contains("ROOM_MENU")) return 15_000L;
+        if (s.contains("VOICE_MENU")) return 18_000L;
+        if (s.contains("CREATING")) return 25_000L;
+        return 18_000L;
     }
 
     private String stageError(String status, String detail) {
@@ -289,7 +299,9 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
 
     private boolean isActiveVoiceRoom(AccessibilityNodeInfo root) {
         if (containsAny(root, STRONG_ACTIVE_TERMS)) return true;
-        return containsAny(root, SPEAKER_TERMS) && containsAny(root, LISTENER_TERMS);
+        return containsAny(root, VOICE_TERMS)
+                && containsAny(root, SPEAKER_TERMS)
+                && containsAny(root, LISTENER_TERMS);
     }
 
     private void finishProbe(VoiceRoomStore.Room room, String message) {
@@ -359,6 +371,11 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
 
     /** Click only a bottom-left composer/add control, never the top-right room menu. */
     private boolean clickComposerAction(AccessibilityNodeInfo root) {
+        AccessibilityNodeInfo best = bestComposerControl(root, true);
+        return best != null && best.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+    }
+
+    private AccessibilityNodeInfo bestComposerControl(AccessibilityNodeInfo root, boolean allowGeometryFallback) {
         Rect rootBounds = new Rect();
         root.getBoundsInScreen(rootBounds);
         int width = Math.max(1, rootBounds.width());
@@ -366,31 +383,117 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         AccessibilityNodeInfo best = null;
         long bestScore = Long.MIN_VALUE;
 
-        for (AccessibilityNodeInfo candidate : findAllContains(root, COMPOSER_ACTION_TERMS)) {
+        List<AccessibilityNodeInfo> semantic = findAllContains(root, COMPOSER_ACTION_TERMS);
+        for (AccessibilityNodeInfo candidate : semantic) {
             AccessibilityNodeInfo clickable = clickableAncestor(candidate);
-            if (clickable == null) continue;
-            Rect b = new Rect();
-            clickable.getBoundsInScreen(b);
-            int cx = b.centerX() - rootBounds.left;
-            int cy = b.centerY() - rootBounds.top;
-            if (cy < (int) (height * 0.60) || cx > (int) (width * 0.42)) continue;
-            long score = (long) cy * 10L - cx;
+            if (clickable == null || !clickable.isVisibleToUser()) continue;
+            long score = composerScore(rootBounds, clickable, width, height);
             if (score > bestScore) {
                 bestScore = score;
                 best = clickable;
             }
         }
-        return best != null && best.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        if (best != null || !allowGeometryFallback) return best;
+
+        // Some Kakao builds expose the round composer '+' as a clickable node with no text or
+        // content description. Once the target chat room itself is already verified, selecting
+        // the left-most lower control by geometry is safer than failing or clicking the top menu.
+        for (AccessibilityNodeInfo node : findAllNodes(root)) {
+            if (!node.isClickable() || !node.isVisibleToUser()) continue;
+            long score = composerScore(rootBounds, node, width, height);
+            if (score > bestScore) {
+                bestScore = score;
+                best = node;
+            }
+        }
+        return best;
+    }
+
+    private long composerScore(Rect rootBounds, AccessibilityNodeInfo node, int width, int height) {
+        Rect b = new Rect();
+        node.getBoundsInScreen(b);
+        if (b.isEmpty()) return Long.MIN_VALUE;
+        int cx = b.centerX() - rootBounds.left;
+        int cy = b.centerY() - rootBounds.top;
+        int bw = b.width();
+        int bh = b.height();
+
+        if (cy < (int) (height * 0.70) || cx > (int) (width * 0.30)) return Long.MIN_VALUE;
+        if (bw > (int) (width * 0.30) || bh > (int) (height * 0.22)) return Long.MIN_VALUE;
+
+        long targetX = (long) (width * 0.09);
+        long targetY = (long) (height * 0.90);
+        long dx = cx - targetX;
+        long dy = cy - targetY;
+        long distancePenalty = dx * dx + dy * dy;
+        long areaPenalty = (long) bw * (long) bh;
+        return -distancePenalty * 10L - areaPenalty;
+    }
+
+    private boolean hasComposerAction(AccessibilityNodeInfo root) {
+        return bestComposerControl(root, true) != null;
+    }
+
+    private boolean hasComposerInput(AccessibilityNodeInfo root) {
+        if (containsAny(root, ROOM_READY_TERMS)) return true;
+        Rect rootBounds = new Rect();
+        root.getBoundsInScreen(rootBounds);
+        int width = Math.max(1, rootBounds.width());
+        int height = Math.max(1, rootBounds.height());
+        for (AccessibilityNodeInfo node : findAllNodes(root)) {
+            CharSequence className = node.getClassName();
+            if (className == null || !className.toString().contains("EditText")) continue;
+            if (!node.isVisibleToUser()) continue;
+            Rect b = new Rect();
+            node.getBoundsInScreen(b);
+            int cy = b.centerY() - rootBounds.top;
+            if (cy >= (int) (height * 0.65) && b.width() >= (int) (width * 0.30)) return true;
+        }
+        return false;
     }
 
     private boolean clickAny(AccessibilityNodeInfo root, List<String> terms) {
-        AccessibilityNodeInfo node = findContains(root, terms);
-        return node != null && clickNodeOrParent(node);
+        AccessibilityNodeInfo node = bestClickableMatching(root, terms, false);
+        return node != null && node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
     }
 
     private boolean clickAnyExact(AccessibilityNodeInfo root, List<String> terms) {
-        AccessibilityNodeInfo node = findExactAny(root, new HashSet<>(terms));
-        return node != null && clickNodeOrParent(node);
+        AccessibilityNodeInfo node = bestClickableMatching(root, terms, true);
+        return node != null && node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+    }
+
+    private AccessibilityNodeInfo bestClickableMatching(
+            AccessibilityNodeInfo root, List<String> terms, boolean exact) {
+        AccessibilityNodeInfo best = null;
+        long bestArea = Long.MAX_VALUE;
+        for (AccessibilityNodeInfo node : findAllNodes(root)) {
+            String text = value(node.getText());
+            String desc = value(node.getContentDescription());
+            if (!matchesAny(text, desc, terms, exact)) continue;
+            AccessibilityNodeInfo clickable = clickableAncestor(node);
+            if (clickable == null || !clickable.isVisibleToUser()) continue;
+            Rect b = new Rect();
+            clickable.getBoundsInScreen(b);
+            if (b.isEmpty()) continue;
+            long area = (long) b.width() * (long) b.height();
+            if (area < bestArea) {
+                bestArea = area;
+                best = clickable;
+            }
+        }
+        return best;
+    }
+
+    private boolean matchesAny(String text, String desc, List<String> terms, boolean exact) {
+        for (String term : terms) {
+            if (exact) {
+                if (term.equals(text) || term.equals(desc)) return true;
+            } else if ((!text.isEmpty() && text.contains(term))
+                    || (!desc.isEmpty() && desc.contains(term))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean clickNodeOrParent(AccessibilityNodeInfo node) {
@@ -416,30 +519,13 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     private String diagnosticSummary(AccessibilityNodeInfo root, VoiceRoomStore.Room room) {
         return "pkg=kakao"
                 + " · title=" + containsRoomTitle(root, room.title)
-                + " · input=" + containsAny(root, ROOM_READY_TERMS)
+                + " · input=" + hasComposerInput(root)
                 + " · openChat=" + containsAny(root, OPEN_CHAT_CONTEXT_TERMS)
                 + " · add=" + hasComposerAction(root)
                 + " · voice=" + containsAny(root, VOICE_TERMS)
                 + " · create=" + (containsAny(root, CREATE_STRONG_TERMS) || containsAny(root, CREATE_WEAK_TERMS))
                 + " · active=" + isActiveVoiceRoom(root)
                 + " · entry=" + VoiceRoomStore.pendingEntry(this);
-    }
-
-    private boolean hasComposerAction(AccessibilityNodeInfo root) {
-        Rect rootBounds = new Rect();
-        root.getBoundsInScreen(rootBounds);
-        int width = Math.max(1, rootBounds.width());
-        int height = Math.max(1, rootBounds.height());
-        for (AccessibilityNodeInfo candidate : findAllContains(root, COMPOSER_ACTION_TERMS)) {
-            AccessibilityNodeInfo clickable = clickableAncestor(candidate);
-            if (clickable == null) continue;
-            Rect b = new Rect();
-            clickable.getBoundsInScreen(b);
-            int cx = b.centerX() - rootBounds.left;
-            int cy = b.centerY() - rootBounds.top;
-            if (cy >= (int) (height * 0.60) && cx <= (int) (width * 0.42)) return true;
-        }
-        return false;
     }
 
     private static boolean containsAny(AccessibilityNodeInfo root, List<String> terms) {
@@ -492,21 +578,28 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     private static List<AccessibilityNodeInfo> findAllContains(AccessibilityNodeInfo root, List<String> terms) {
         ArrayList<AccessibilityNodeInfo> out = new ArrayList<>();
         if (root == null) return out;
+        for (AccessibilityNodeInfo node : findAllNodes(root)) {
+            String text = value(node.getText());
+            String desc = value(node.getContentDescription());
+            for (String term : terms) {
+                if ((!text.isEmpty() && text.contains(term))
+                        || (!desc.isEmpty() && desc.contains(term))) {
+                    out.add(node);
+                    break;
+                }
+            }
+        }
+        return out;
+    }
+
+    private static List<AccessibilityNodeInfo> findAllNodes(AccessibilityNodeInfo root) {
+        ArrayList<AccessibilityNodeInfo> out = new ArrayList<>();
+        if (root == null) return out;
         ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
         queue.add(root);
         while (!queue.isEmpty()) {
             AccessibilityNodeInfo node = queue.removeFirst();
-            String text = value(node.getText());
-            String desc = value(node.getContentDescription());
-            boolean match = false;
-            for (String term : terms) {
-                if ((!text.isEmpty() && text.contains(term))
-                        || (!desc.isEmpty() && desc.contains(term))) {
-                    match = true;
-                    break;
-                }
-            }
-            if (match) out.add(node);
+            out.add(node);
             for (int i = 0; i < node.getChildCount(); i++) {
                 AccessibilityNodeInfo child = node.getChild(i);
                 if (child != null) queue.addLast(child);
