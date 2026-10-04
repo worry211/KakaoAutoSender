@@ -1,6 +1,7 @@
 import { Env, ApiError, now, id, json, rate, config, metadata } from "./core";
 import { activate, entitlement, deactivate, recover } from "./license";
 import { discord } from "./discord";
+import { enforceDiscordScope } from "./discordGuard";
 
 async function boundedBody(req: Request) {
   if (Number(req.headers.get("Content-Length") ?? 0) > 16384)
@@ -56,8 +57,11 @@ export default {
       ];
       if (path === "/api/v1/client-config" && req.method === "GET")
         return json(metadata(await config(env), null, "CONFIG"), 200, request);
-      if (path === "/discord/interactions" && req.method === "POST")
-        return await discord(req, await boundedBody(req), env, ctx);
+      if (path === "/discord/interactions" && req.method === "POST") {
+        const raw = await boundedBody(req);
+        enforceDiscordScope(raw, env);
+        return await discord(req, raw, env, ctx);
+      }
       if (!routes.includes(path)) throw new ApiError("NOT_FOUND", 404);
       if (req.method !== (path === "/api/v1/entitlement" ? "GET" : "POST"))
         throw new ApiError("METHOD_NOT_ALLOWED", 405);

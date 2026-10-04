@@ -17,13 +17,17 @@
         android:usesCleartextTraffic="false">
 
         <activity
-            android:name=".LicenseActivity"
+            android:name=".IntegrityGateActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".LicenseActivity"
+            android:exported="false" />
 
         <activity
             android:name=".MainActivityV4"

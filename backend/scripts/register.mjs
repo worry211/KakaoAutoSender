@@ -1,9 +1,9 @@
-// Register Discord application commands from the shared TypeScript definition.
-// For immediate seller-panel updates, set DISCORD_GUILD_ID to register to one guild.
+// Register seller-only Discord application commands to exactly one administration guild.
 import { build } from "esbuild";
 import { unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+const ADMIN_GUILD_ID = "1550530984783646835";
 const bundleUrl = new URL("../.commands.mjs", import.meta.url);
 
 await build({
@@ -24,34 +24,38 @@ const { DISCORD_APPLICATION_ID, DISCORD_BOT_TOKEN, DISCORD_GUILD_ID } =
 if (!DISCORD_APPLICATION_ID || !DISCORD_BOT_TOKEN)
   throw new Error("Set DISCORD_APPLICATION_ID and DISCORD_BOT_TOKEN locally.");
 
-if (DISCORD_GUILD_ID && !/^\d{5,25}$/.test(DISCORD_GUILD_ID))
-  throw new Error("DISCORD_GUILD_ID must be a numeric Discord server ID.");
+if (!DISCORD_GUILD_ID || DISCORD_GUILD_ID !== ADMIN_GUILD_ID)
+  throw new Error(
+    `DISCORD_GUILD_ID must be the dedicated seller guild (${ADMIN_GUILD_ID}). Global registration is disabled.`,
+  );
 
-const scopePath = DISCORD_GUILD_ID
-  ? `/applications/${DISCORD_APPLICATION_ID}/guilds/${DISCORD_GUILD_ID}/commands`
-  : `/applications/${DISCORD_APPLICATION_ID}/commands`;
-const endpoint = `https://discord.com/api/v10${scopePath}`;
 const headers = {
   Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
   "Content-Type": "application/json",
 };
 
-const response = await fetch(endpoint, {
-  method: "PUT",
-  headers,
-  body: JSON.stringify(commands),
-});
-
-const raw = await response.text();
-if (!response.ok)
-  throw new Error(`Registration failed: HTTP ${response.status} ${raw}`);
-
-let registered;
-try {
-  registered = JSON.parse(raw);
-} catch {
-  throw new Error("Discord returned a non-JSON registration response.");
+async function put(path, body) {
+  const response = await fetch(`https://discord.com/api/v10${path}`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify(body),
+  });
+  const raw = await response.text();
+  if (!response.ok)
+    throw new Error(
+      `Discord registration failed: HTTP ${response.status} ${raw}`,
+    );
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error("Discord returned a non-JSON registration response.");
+  }
 }
+
+const registered = await put(
+  `/applications/${DISCORD_APPLICATION_ID}/guilds/${DISCORD_GUILD_ID}/commands`,
+  commands,
+);
 
 const command = (name) => registered.find((c) => c.name === name);
 const subcommands = (name) =>
@@ -65,16 +69,16 @@ if (!license.includes("help") || !system.includes("help")) {
   );
 }
 
+// Remove any stale global copies so seller commands are not advertised outside the admin guild.
+const global = await put(
+  `/applications/${DISCORD_APPLICATION_ID}/commands`,
+  [],
+);
+if (!Array.isArray(global) || global.length !== 0)
+  throw new Error("Failed to clear stale global commands.");
+
 console.log(
-  `Registered and verified /license and /system (${
-    DISCORD_GUILD_ID ? `guild ${DISCORD_GUILD_ID}` : "global"
-  }).`,
+  `Registered and verified /license and /system (guild ${DISCORD_GUILD_ID}); global command copies cleared.`,
 );
 console.log(`/license: ${license.join(", ")}`);
 console.log(`/system: ${system.join(", ")}`);
-
-if (!DISCORD_GUILD_ID) {
-  console.log(
-    "Global commands can be cached by Discord clients. For immediate updates in the seller server, set DISCORD_GUILD_ID and run this script again.",
-  );
-}

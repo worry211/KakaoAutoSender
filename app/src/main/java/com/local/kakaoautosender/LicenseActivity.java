@@ -27,14 +27,17 @@ public class LicenseActivity extends Activity {
   private Button activate, retry;
   private boolean busy;
 
-  private static final int BG = Color.rgb(12, 13, 16);
-  private static final int CARD = Color.rgb(27, 30, 36);
-  private static final int FIELD = Color.rgb(35, 38, 45);
-  private static final int PRIMARY = Color.rgb(48, 88, 158);
-  private static final int MUTED = Color.rgb(151, 158, 171);
-  private static final int GREEN = Color.rgb(91, 224, 147);
-  private static final int AMBER = Color.rgb(240, 182, 77);
-  private static final int RED = Color.rgb(234, 108, 108);
+  private static final int BG = Color.rgb(9, 11, 16);
+  private static final int SURFACE = Color.rgb(18, 23, 34);
+  private static final int SURFACE_2 = Color.rgb(23, 29, 42);
+  private static final int FIELD = Color.rgb(15, 20, 30);
+  private static final int BORDER = Color.rgb(45, 55, 75);
+  private static final int PRIMARY = Color.rgb(86, 112, 255);
+  private static final int PRIMARY_SOFT = Color.rgb(30, 40, 72);
+  private static final int TEXT = Color.rgb(238, 242, 249);
+  private static final int GREEN = Color.rgb(94, 226, 157);
+  private static final int AMBER = Color.rgb(243, 190, 91);
+  private static final int RED = Color.rgb(243, 113, 121);
   private static final String KEY_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
   private static final Pattern ACTIVATION_KEY_PATTERN =
       Pattern.compile("KM-(?:[" + KEY_ALPHABET + "]{4}-){5}[" + KEY_ALPHABET + "]{4}");
@@ -42,6 +45,7 @@ public class LicenseActivity extends Activity {
   @Override
   protected void onCreate(Bundle b) {
     super.onCreate(b);
+    PremiumChrome.applyWindow(this);
     setContentView(buildUi());
     check();
   }
@@ -50,51 +54,74 @@ public class LicenseActivity extends Activity {
     ScrollView scroll = new ScrollView(this);
     scroll.setFillViewport(true);
     scroll.setBackgroundColor(BG);
+
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
-    root.setPadding(dp(20), dp(28), dp(20), dp(36));
+    root.setPadding(dp(20), dp(28), dp(20), dp(40));
     scroll.addView(root);
 
     LinearLayout header = new LinearLayout(this);
     header.setOrientation(LinearLayout.HORIZONTAL);
     header.setGravity(Gravity.CENTER_VERTICAL);
-    TextView brand = text("카톡매크로", 30, true, Color.WHITE);
-    header.addView(brand, weight());
-    TextView version = text("v" + appVersion(), 11, true, Color.rgb(215, 225, 246));
-    version.setGravity(Gravity.CENTER);
-    version.setPadding(dp(9), dp(5), dp(9), dp(5));
-    version.setBackground(round(Color.rgb(56, 61, 72), 14));
+
+    LinearLayout brandBox = new LinearLayout(this);
+    brandBox.setOrientation(LinearLayout.VERTICAL);
+    TextView brand = text("카톡매크로", 30, true, TEXT);
+    brand.setLetterSpacing(-0.015f);
+    brandBox.addView(brand);
+    TextView brandSub = text("KAKAO AUTOMATION SUITE", 10, true, Color.rgb(123, 138, 168));
+    brandSub.setLetterSpacing(0.12f);
+    brandBox.addView(brandSub, top(4));
+    header.addView(brandBox, weight());
+
+    TextView version = pill("v" + appVersion(), Color.rgb(28, 34, 49), Color.rgb(180, 194, 223));
     header.addView(version);
     root.addView(header);
 
-    TextView subtitle = text("라이선스 인증 후 바로 사용할 수 있습니다.", 13, false, MUTED);
-    root.addView(subtitle, top(5));
-
-    LinearLayout intro = card();
-    intro.addView(text("한 번만 인증하면 됩니다", 18, true, Color.WHITE));
-    intro.addView(
+    LinearLayout hero = premiumCard(PRIMARY_SOFT, Color.rgb(60, 76, 128));
+    TextView secure = pill("SECURE LICENSE", Color.rgb(42, 55, 94), Color.rgb(173, 190, 255));
+    secure.setLetterSpacing(0.07f);
+    hero.addView(secure, wrap());
+    TextView heroTitle = text("정품 인증부터 안전하게", 22, true, TEXT);
+    heroTitle.setLetterSpacing(-0.01f);
+    hero.addView(heroTitle, top(14));
+    hero.addView(
         text(
-            "판매자에게 받은 KM-... 키를 붙여넣으세요. 키가 포함된 안내문 전체를 붙여넣어도 자동으로 키만 찾아줍니다.",
+            "발급받은 1회용 키를 인증하면 이 설치에 자동으로 연결됩니다. 이후에는 별도의 기기 코드 교환 없이 바로 사용할 수 있습니다.",
             13,
             false,
-            Color.rgb(181, 187, 198)),
+            Color.rgb(183, 193, 212)),
         top(7));
-    root.addView(intro, top(20));
 
-    root.addView(section("라이선스 키"), top(22));
+    LinearLayout trustRow = new LinearLayout(this);
+    trustRow.setOrientation(LinearLayout.HORIZONTAL);
+    trustRow.addView(trustChip("1기기 연결"), weight());
+    LinearLayout.LayoutParams t2 = weight();
+    t2.leftMargin = dp(6);
+    trustRow.addView(trustChip("서버 실시간 확인"), t2);
+    LinearLayout.LayoutParams t3 = weight();
+    t3.leftMargin = dp(6);
+    trustRow.addView(trustChip("설정 자동 보존"), t3);
+    hero.addView(trustRow, top(15));
+    root.addView(hero, top(22));
+
+    root.addView(section("라이선스 키", "판매자에게 받은 KM 키를 입력하세요."), top(24));
+
     key = new EditText(this);
     key.setSingleLine(true);
-    key.setTextColor(Color.WHITE);
+    key.setTextColor(TEXT);
     key.setTextSize(15);
-    key.setHintTextColor(Color.rgb(112, 118, 129));
+    key.setTypeface(Typeface.MONOSPACE);
+    key.setLetterSpacing(0.025f);
+    key.setHintTextColor(Color.rgb(92, 103, 124));
     key.setHint("KM-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX");
-    key.setPadding(dp(13), dp(13), dp(13), dp(13));
-    key.setBackground(round(FIELD, 11));
+    key.setPadding(dp(15), dp(15), dp(15), dp(15));
+    key.setBackground(roundStroke(FIELD, BORDER, 12));
     key.setInputType(
         InputType.TYPE_CLASS_TEXT
             | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
             | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-    root.addView(key, top(8));
+    root.addView(key, top(10));
 
     LinearLayout keyButtons = new LinearLayout(this);
     keyButtons.setOrientation(LinearLayout.HORIZONTAL);
@@ -108,54 +135,61 @@ public class LicenseActivity extends Activity {
     keyButtons.addView(activate, activateLp);
     root.addView(keyButtons, top(9));
 
-    LinearLayout statusCard = card();
-    statusTitle = text("라이선스 확인 중", 17, true, Color.WHITE);
-    statusCard.addView(statusTitle);
-    statusDetail =
-        text(
-            "서버에서 사용 권한을 확인하고 있습니다.",
-            13,
-            false,
-            Color.rgb(179, 185, 197));
+    LinearLayout statusCard = premiumCard(SURFACE, BORDER);
+    LinearLayout statusTop = new LinearLayout(this);
+    statusTop.setOrientation(LinearLayout.HORIZONTAL);
+    statusTop.setGravity(Gravity.CENTER_VERTICAL);
+    TextView statusLabel = text("인증 상태", 11, true, Color.rgb(120, 133, 157));
+    statusLabel.setLetterSpacing(0.08f);
+    statusTop.addView(statusLabel, weight());
+    TextView protectedPill = pill("PROTECTED", Color.rgb(25, 49, 42), Color.rgb(122, 231, 176));
+    statusTop.addView(protectedPill);
+    statusCard.addView(statusTop);
+
+    statusTitle = text("라이선스 확인 중", 18, true, TEXT);
+    statusCard.addView(statusTitle, top(13));
+    statusDetail = text("서버에서 사용 권한을 확인하고 있습니다.", 13, false, Color.rgb(177, 187, 205));
     statusCard.addView(statusDetail, top(6));
-    retry = secondaryButton("다시 확인");
+    retry = secondaryButton("상태 다시 확인");
     retry.setOnClickListener(v -> check());
-    statusCard.addView(retry, top(11));
+    statusCard.addView(retry, top(13));
     root.addView(statusCard, top(18));
 
-    root.addView(section("처음 사용하는 경우"), top(24));
-    LinearLayout guide = card();
-    guide.addView(step("1", "라이선스 인증", "판매자에게 받은 KM 키를 한 번 입력합니다."));
-    guide.addView(
-        step("2", "알림 접근 허용", "카카오톡의 답장 세션을 확인하기 위해 필요합니다."), top(10));
-    guide.addView(
-        step("3", "방 연결 후 1회 테스트", "대상 방을 확인한 뒤 예약 전송을 시작합니다."), top(10));
-    root.addView(guide, top(8));
+    root.addView(section("처음 사용하는 경우", "3단계만 완료하면 준비가 끝납니다."), top(26));
+    LinearLayout guide = premiumCard(SURFACE, BORDER);
+    guide.addView(step("01", "라이선스 인증", "판매자에게 받은 KM 키를 한 번 입력합니다."));
+    guide.addView(divider(), top(12));
+    guide.addView(step("02", "알림 접근 허용", "카카오톡의 답장 세션을 확인하기 위해 필요합니다."), top(12));
+    guide.addView(divider(), top(12));
+    guide.addView(step("03", "방 연결 후 1회 테스트", "대상 방을 확인한 뒤 실제 예약 전송을 시작합니다."), top(12));
+    root.addView(guide, top(9));
 
-    root.addView(section("지원"), top(24));
-    LinearLayout supportCard = card();
-    support = text("지원 정보 준비 중…", 12, false, Color.rgb(166, 173, 186));
+    root.addView(section("지원", "문의할 때 아래 정보만 전달하면 됩니다."), top(26));
+    LinearLayout supportCard = premiumCard(SURFACE_2, BORDER);
+    support = text("지원 정보 준비 중…", 12, false, Color.rgb(177, 187, 205));
     support.setTextIsSelectable(true);
+    support.setTypeface(Typeface.MONOSPACE);
     supportCard.addView(support);
     Button copy = secondaryButton("지원 정보 복사");
     copy.setOnClickListener(v -> copySupport());
-    supportCard.addView(copy, top(10));
+    supportCard.addView(copy, top(12));
     TextView privacy =
         text(
-            "지원 정보에는 카카오 방 이름, 메시지 내용, 사진이 포함되지 않습니다.",
+            "개인정보 보호: 지원 정보에는 카카오 방 이름, 메시지 내용, 사진이 포함되지 않습니다.",
             11,
             false,
-            Color.rgb(119, 126, 139));
-    supportCard.addView(privacy, top(8));
-    root.addView(supportCard, top(8));
+            Color.rgb(112, 123, 145));
+    supportCard.addView(privacy, top(9));
+    root.addView(supportCard, top(9));
 
     TextView footer =
         text(
-            "라이선스가 만료·정지·취소되면 자동전송은 중단되며, 저장한 방과 메시지 설정은 그대로 보존됩니다.",
+            "라이선스가 만료·정지·취소되면 자동전송은 즉시 중단되며, 저장한 방·메시지·시간 설정은 그대로 보존됩니다.",
             11,
             false,
-            Color.rgb(113, 120, 132));
-    root.addView(footer, top(18));
+            Color.rgb(104, 115, 137));
+    footer.setGravity(Gravity.CENTER);
+    root.addView(footer, top(20));
     return scroll;
   }
 
@@ -181,8 +215,7 @@ public class LicenseActivity extends Activity {
     key.setText(entered);
     key.setSelection(key.length());
     if (entered.isEmpty()) {
-      showStatus(
-          "라이선스 키를 입력하세요", "판매자에게 받은 KM-... 키를 붙여넣어 주세요.", AMBER);
+      showStatus("라이선스 키를 입력하세요", "판매자에게 받은 KM 키를 붙여넣어 주세요.", AMBER);
       return;
     }
     if (!isActivationKeyFormat(entered)) {
@@ -193,10 +226,7 @@ public class LicenseActivity extends Activity {
       return;
     }
     setBusy(true);
-    showStatus(
-        "라이선스 인증 중",
-        "키를 확인하고 이 설치에 안전하게 연결하고 있습니다.",
-        Color.rgb(143, 190, 255));
+    showStatus("라이선스 인증 중", "키를 확인하고 이 설치에 안전하게 연결하고 있습니다.", Color.rgb(151, 174, 255));
     LicenseManager.activateAsync(this, entered, this::result);
   }
 
@@ -219,8 +249,7 @@ public class LicenseActivity extends Activity {
   private void check() {
     if (busy) return;
     setBusy(true);
-    showStatus(
-        "라이선스 확인 중", "기존 인증 정보를 확인하고 있습니다.", Color.rgb(143, 190, 255));
+    showStatus("라이선스 확인 중", "기존 인증 정보를 확인하고 있습니다.", Color.rgb(151, 174, 255));
     LicenseManager.checkAsync(this, this::result);
   }
 
@@ -264,55 +293,78 @@ public class LicenseActivity extends Activity {
   private void copySupport() {
     ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
     if (cm == null) return;
-    cm.setPrimaryClip(
-        ClipData.newPlainText("카톡매크로 지원 정보", LicenseManager.diagnostic(this)));
+    cm.setPrimaryClip(ClipData.newPlainText("카톡매크로 지원 정보", LicenseManager.diagnostic(this)));
     toast("지원 정보를 복사했습니다.");
   }
 
   private void showStatus(String title, String detail, int color) {
     if (statusTitle == null) return;
-    statusTitle.setText("● " + title);
+    statusTitle.setText("●  " + title);
     statusTitle.setTextColor(color);
-    statusDetail.setText(
-        detail == null || detail.trim().isEmpty() ? "상태를 확인해 주세요." : detail.trim());
+    statusDetail.setText(detail == null || detail.trim().isEmpty() ? "상태를 확인해 주세요." : detail.trim());
   }
 
   private void setBusy(boolean v) {
     busy = v;
     activate.setEnabled(!v);
     retry.setEnabled(!v);
-    activate.setText(v ? "확인 중…" : "라이선스 인증");
+    activate.setAlpha(v ? 0.68f : 1f);
+    retry.setAlpha(v ? 0.58f : 1f);
+    activate.setText(v ? "보안 확인 중…" : "라이선스 인증");
   }
 
   private LinearLayout step(String number, String title, String detail) {
     LinearLayout row = new LinearLayout(this);
     row.setOrientation(LinearLayout.HORIZONTAL);
     row.setGravity(Gravity.TOP);
-    TextView badge = text(number, 12, true, Color.WHITE);
+    TextView badge = text(number, 11, true, Color.rgb(190, 202, 255));
     badge.setGravity(Gravity.CENTER);
-    badge.setBackground(round(PRIMARY, 18));
-    LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(dp(30), dp(30));
+    badge.setLetterSpacing(0.06f);
+    badge.setBackground(roundStroke(Color.rgb(28, 37, 63), Color.rgb(67, 83, 133), 12));
+    LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(dp(38), dp(30));
     row.addView(badge, badgeLp);
     LinearLayout body = new LinearLayout(this);
     body.setOrientation(LinearLayout.VERTICAL);
-    body.addView(text(title, 14, true, Color.WHITE));
-    body.addView(text(detail, 12, false, Color.rgb(157, 164, 177)), top(2));
+    body.addView(text(title, 14, true, TEXT));
+    body.addView(text(detail, 12, false, Color.rgb(155, 166, 186)), top(3));
     LinearLayout.LayoutParams bodyLp = weight();
-    bodyLp.leftMargin = dp(10);
+    bodyLp.leftMargin = dp(12);
     row.addView(body, bodyLp);
     return row;
   }
 
-  private LinearLayout card() {
+  private TextView trustChip(String value) {
+    TextView t = text(value, 10, true, Color.rgb(173, 188, 221));
+    t.setGravity(Gravity.CENTER);
+    t.setPadding(dp(6), dp(8), dp(6), dp(8));
+    t.setBackground(roundStroke(Color.rgb(24, 31, 49), Color.rgb(54, 67, 97), 10));
+    return t;
+  }
+
+  private LinearLayout section(String title, String detail) {
+    LinearLayout box = new LinearLayout(this);
+    box.setOrientation(LinearLayout.VERTICAL);
+    TextView t = text(title, 17, true, Color.rgb(226, 232, 244));
+    TextView d = text(detail, 11, false, Color.rgb(118, 129, 149));
+    box.addView(t);
+    box.addView(d, top(3));
+    return box;
+  }
+
+  private LinearLayout premiumCard(int fill, int stroke) {
     LinearLayout l = new LinearLayout(this);
     l.setOrientation(LinearLayout.VERTICAL);
-    l.setPadding(dp(15), dp(15), dp(15), dp(15));
-    l.setBackground(round(CARD, 15));
+    l.setPadding(dp(17), dp(17), dp(17), dp(17));
+    l.setBackground(roundStroke(fill, stroke, 17));
+    l.setElevation(dp(2));
     return l;
   }
 
-  private TextView section(String value) {
-    return text(value, 17, true, Color.rgb(220, 228, 246));
+  private TextView divider() {
+    TextView d = new TextView(this);
+    d.setBackgroundColor(Color.rgb(39, 47, 63));
+    d.setHeight(dp(1));
+    return d;
   }
 
   private TextView text(String value, int size, boolean bold, int color) {
@@ -320,33 +372,46 @@ public class LicenseActivity extends Activity {
     t.setText(value);
     t.setTextColor(color);
     t.setTextSize(size);
+    t.setLineSpacing(0, 1.08f);
     if (bold) t.setTypeface(t.getTypeface(), Typeface.BOLD);
     return t;
   }
 
+  private TextView pill(String value, int bg, int fg) {
+    TextView t = text(value, 10, true, fg);
+    t.setGravity(Gravity.CENTER);
+    t.setPadding(dp(10), dp(6), dp(10), dp(6));
+    t.setBackground(roundStroke(bg, Color.rgb(67, 78, 101), 14));
+    return t;
+  }
+
   private Button primaryButton(String value) {
-    return button(value, PRIMARY);
-  }
-
-  private Button secondaryButton(String value) {
-    return button(value, Color.rgb(61, 65, 74));
-  }
-
-  private Button button(String value, int color) {
-    Button b = new Button(this);
-    b.setText(value);
-    b.setAllCaps(false);
-    b.setTextColor(Color.WHITE);
-    b.setTextSize(13);
-    b.setMinHeight(dp(48));
-    b.setBackground(round(color, 11));
+    Button b = button(value, PRIMARY, PRIMARY);
+    b.setElevation(dp(3));
     return b;
   }
 
-  private GradientDrawable round(int color, int radiusDp) {
+  private Button secondaryButton(String value) {
+    return button(value, Color.rgb(30, 36, 50), Color.rgb(58, 68, 88));
+  }
+
+  private Button button(String value, int color, int stroke) {
+    Button b = new Button(this);
+    b.setText(value);
+    b.setAllCaps(false);
+    b.setTextColor(TEXT);
+    b.setTextSize(13);
+    b.setTypeface(b.getTypeface(), Typeface.BOLD);
+    b.setMinHeight(dp(50));
+    b.setBackground(roundStroke(color, stroke, 12));
+    return b;
+  }
+
+  private GradientDrawable roundStroke(int color, int stroke, int radiusDp) {
     GradientDrawable d = new GradientDrawable();
     d.setColor(color);
     d.setCornerRadius(dp(radiusDp));
+    d.setStroke(dp(1), stroke);
     return d;
   }
 
@@ -360,6 +425,11 @@ public class LicenseActivity extends Activity {
 
   private LinearLayout.LayoutParams weight() {
     return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+  }
+
+  private LinearLayout.LayoutParams wrap() {
+    return new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
   }
 
   private String appVersion() {
