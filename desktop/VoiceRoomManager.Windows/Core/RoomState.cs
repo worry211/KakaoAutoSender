@@ -4,6 +4,7 @@ public sealed class RoomState
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Title { get; set; } = "";
+    public string OpenChatUrl { get; set; } = "";
     public bool Enabled { get; set; } = true;
     public bool LiveVerified { get; set; }
     public bool MicMuted { get; set; }
@@ -15,9 +16,11 @@ public sealed class RoomState
     public string LastDiagnostic { get; set; } = "";
     public int Failures { get; set; }
 
+    public string LinkDisplay => OpenChatLinkRegistry.IsSupported(OpenChatUrl) ? "등록됨" : "미등록";
+
     public string StatusDisplay => Status switch
     {
-        "NEW" => "등록 대기",
+        "NEW" => OpenChatLinkRegistry.IsSupported(OpenChatUrl) ? "등록 대기" : "링크 등록 필요",
         "PROBE_OK" => "안전 점검 완료",
         "ACTIVE" => Enabled ? "보룸 활성 · 관리 ON" : "보룸 활성 · 관리 OFF",
         "CHECK_DUE" => "점검 예정",
@@ -35,6 +38,7 @@ public sealed class RoomState
         {
             if (!string.IsNullOrWhiteSpace(LastError)) return LastError;
             if (!string.IsNullOrWhiteSpace(LastDiagnostic)) return LastDiagnostic;
+            if (!OpenChatLinkRegistry.IsSupported(OpenChatUrl)) return "오픈채팅 링크를 등록하면 링크로 먼저 진입해";
             return Status == "NEW" ? "안전 점검부터 진행해줘" : "정상";
         }
     }
