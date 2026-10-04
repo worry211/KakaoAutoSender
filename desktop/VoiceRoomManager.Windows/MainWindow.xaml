@@ -28,7 +28,7 @@
                     CornerRadius="10" Padding="12,7" VerticalAlignment="Top">
                 <StackPanel Orientation="Horizontal">
                     <Ellipse Width="8" Height="8" Fill="{StaticResource Good}" VerticalAlignment="Center"/>
-                    <TextBlock Text="Windows v0.1.x" Margin="7,0,0,0" Foreground="#C8D0DB" FontSize="12"/>
+                    <TextBlock x:Name="VersionBadge" Text="Windows" Margin="7,0,0,0" Foreground="#C8D0DB" FontSize="12"/>
                 </StackPanel>
             </Border>
         </Grid>
