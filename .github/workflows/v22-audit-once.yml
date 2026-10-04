@@ -1,0 +1,40 @@
+name: v2.2 product audit gate
+
+on:
+  push:
+    branches:
+      - feat/v2-2-final-commercial-polish
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feat/v2-2-final-commercial-polish
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Apply final product audit patch
+        run: |
+          python scripts/.tmp-v22-product-audit.py
+          rm -f scripts/.tmp-v22-product-audit.py
+      - name: Validate Android
+        run: ANDROID_HOME=/usr/local/lib/android/sdk ANDROID_SDK_ROOT=/usr/local/lib/android/sdk gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: Commit audited source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "polish: make v2.2 setup states actionable"
+          git push origin HEAD:feat/v2-2-final-commercial-polish
