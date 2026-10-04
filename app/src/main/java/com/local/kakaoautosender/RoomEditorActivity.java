@@ -5,6 +5,7 @@ import android.app.AlertDialog;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
@@ -31,6 +32,18 @@ import java.util.Locale;
 public class RoomEditorActivity extends Activity {
     static final String EXTRA_ROOM = "room";
     private static final int REQUEST_IMAGE = 4102;
+
+    private static final int BG = Color.rgb(9, 11, 16);
+    private static final int SURFACE = Color.rgb(18, 23, 34);
+    private static final int SURFACE_2 = Color.rgb(23, 29, 42);
+    private static final int FIELD = Color.rgb(15, 20, 30);
+    private static final int BORDER = Color.rgb(45, 55, 75);
+    private static final int TEXT = Color.rgb(238, 242, 249);
+    private static final int MUTED = Color.rgb(154, 166, 188);
+    private static final int ACCENT = Color.rgb(86, 112, 255);
+    private static final int GREEN = Color.rgb(94, 226, 157);
+    private static final int AMBER = Color.rgb(243, 190, 91);
+    private static final int RED = Color.rgb(243, 113, 121);
 
     private String routeAlias;
     private EditText messageInput;
@@ -71,74 +84,101 @@ public class RoomEditorActivity extends Activity {
 
     private View buildUi() {
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.rgb(12, 13, 16));
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(20), dp(16), dp(40));
+        root.setPadding(dp(18), dp(22), dp(18), dp(44));
         scroll.addView(root);
 
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
         String roomName = p == null ? "방 설정" : p.title();
-        root.addView(text(roomName, 26, true));
-        TextView subtitle = text("이 방의 메시지, 사진, 전송 시간을 설정해", 12, false);
-        subtitle.setTextColor(Color.rgb(143, 149, 160));
-        root.addView(subtitle, top(4));
 
-        LinearLayout connectionCard = card(Color.rgb(28, 31, 37));
-        connectionStatus = text("", 13, true);
-        connectionCard.addView(connectionStatus);
-        Button reconnect = compactButton("이 방 연결 다시 확인", Color.rgb(62, 66, 76));
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.TOP);
+        LinearLayout titleBox = new LinearLayout(this);
+        titleBox.setOrientation(LinearLayout.VERTICAL);
+        TextView roomTitle = text(roomName, 25, true, TEXT);
+        roomTitle.setMaxLines(2);
+        roomTitle.setLetterSpacing(-0.01f);
+        titleBox.addView(roomTitle);
+        TextView headerSub = text("ROOM AUTOMATION SETTINGS", 9, true, Color.rgb(121, 136, 166));
+        headerSub.setLetterSpacing(0.1f);
+        titleBox.addView(headerSub, topWrap(5));
+        header.addView(titleBox, weight());
+        header.addView(pill("ROOM", Color.rgb(29, 38, 65), Color.rgb(180, 195, 255)));
+        root.addView(header);
+
+        TextView subtitle = text("메시지, 이미지, 스케줄을 이 방에만 독립적으로 적용합니다.", 12, false, MUTED);
+        root.addView(subtitle, top(9));
+
+        LinearLayout connectionCard = card(SURFACE, BORDER, 18);
+        LinearLayout connectionTop = new LinearLayout(this);
+        connectionTop.setOrientation(LinearLayout.HORIZONTAL);
+        connectionTop.setGravity(Gravity.CENTER_VERTICAL);
+        TextView connectionLabel = text("연결 상태", 10, true, Color.rgb(124, 139, 168));
+        connectionLabel.setLetterSpacing(0.08f);
+        connectionTop.addView(connectionLabel, weight());
+        connectionTop.addView(pill("SAFE ROUTING", Color.rgb(25, 49, 42), Color.rgb(122, 231, 176)));
+        connectionCard.addView(connectionTop);
+        connectionStatus = text("", 14, true, TEXT);
+        connectionCard.addView(connectionStatus, top(12));
+        Button reconnect = secondaryButton("이 방 연결 다시 확인");
         reconnect.setOnClickListener(v -> reconnectRoom());
-        connectionCard.addView(reconnect, top(9));
-        root.addView(connectionCard, top(18));
+        connectionCard.addView(reconnect, top(11));
+        root.addView(connectionCard, top(22));
 
-        root.addView(section("보낼 메시지"), top(24));
+        root.addView(section("보낼 메시지", "실제 전송될 텍스트를 입력하세요."), top(26));
         messageInput = edit("자동으로 보낼 메시지", true);
-        root.addView(messageInput, top(8));
+        root.addView(messageInput, top(10));
 
-        root.addView(section("사진 첨부 · 선택"), top(22));
-        LinearLayout imageCard = card(Color.rgb(28, 31, 37));
+        root.addView(section("이미지 첨부", "선택 사항 · 지원되는 카카오 답장 액션에서만 전송됩니다."), top(26));
+        LinearLayout imageCard = card(SURFACE, BORDER, 18);
         imagePreview = new android.widget.ImageView(this);
         imagePreview.setAdjustViewBounds(true);
-        imagePreview.setMaxHeight(dp(160));
+        imagePreview.setMaxHeight(dp(190));
         imagePreview.setContentDescription("선택한 사진 미리보기");
         imageCard.addView(imagePreview);
-        imageStatus = text("사진 없음", 13, true);
-        imageCard.addView(imageStatus);
+        imageStatus = text("사진 없음", 13, true, Color.rgb(183, 193, 212));
+        imageCard.addView(imageStatus, top(8));
         LinearLayout imageButtons = new LinearLayout(this);
         imageButtons.setOrientation(LinearLayout.HORIZONTAL);
-        Button choose = compactButton("사진 선택", Color.rgb(48, 88, 158));
+        Button choose = primaryButton("사진 선택");
         choose.setOnClickListener(v -> chooseImage());
         imageButtons.addView(choose, weight());
-        Button remove = compactButton("사진 제거", Color.rgb(94, 58, 62));
+        Button remove = dangerSecondaryButton("사진 제거");
         remove.setOnClickListener(v -> {
             RoomMediaStore.Media old = RoomMediaStore.get(this, routeAlias);
             RoomMediaStore.clear(this, routeAlias);
             releasePersistedReadPermission(old.uri);
             refreshMedia();
-            toast("사진 첨부를 제거했어.");
+            toast("사진 첨부를 제거했습니다.");
         });
         LinearLayout.LayoutParams removeLp = weight();
-        removeLp.leftMargin = dp(7);
+        removeLp.leftMargin = dp(8);
         imageButtons.addView(remove, removeLp);
-        imageCard.addView(imageButtons, top(9));
-        TextView imageHelp = text("사진은 Android 알림 답장 액션이 이미지 첨부를 허용할 때만 자동 전송돼. 지원하지 않는 카카오 버전/방에서는 사진을 빼고 텍스트만 몰래 보내지 않고 전송을 실패 처리해.", 11, false);
-        imageHelp.setTextColor(Color.rgb(135, 141, 153));
-        imageCard.addView(imageHelp, top(8));
-        root.addView(imageCard, top(8));
+        imageCard.addView(imageButtons, top(11));
+        TextView imageHelp = text("이미지 첨부를 지원하지 않는 환경에서는 텍스트만 임의로 보내지 않고 전송을 실패 처리해 오동작을 막습니다.", 11, false, Color.rgb(119, 132, 156));
+        imageHelp.setLineSpacing(0, 1.14f);
+        imageCard.addView(imageHelp, top(9));
+        root.addView(imageCard, top(10));
 
-        root.addView(section("전송 시간"), top(22));
+        root.addView(section("전송 스케줄", "간격 반복 또는 매일 지정 시각 중 하나를 선택하세요."), top(26));
+        LinearLayout scheduleCard = card(SURFACE, BORDER, 18);
         RadioGroup modes = new RadioGroup(this);
         modes.setOrientation(RadioGroup.HORIZONTAL);
         intervalRadio = new RadioButton(this);
         intervalRadio.setText("간격 반복");
-        intervalRadio.setTextColor(Color.WHITE);
+        intervalRadio.setTextColor(TEXT);
+        intervalRadio.setTextSize(13);
         timesRadio = new RadioButton(this);
         timesRadio.setText("매일 지정 시각");
-        timesRadio.setTextColor(Color.WHITE);
+        timesRadio.setTextColor(TEXT);
+        timesRadio.setTextSize(13);
         modes.addView(intervalRadio, new RadioGroup.LayoutParams(0, RadioGroup.LayoutParams.WRAP_CONTENT, 1f));
         modes.addView(timesRadio, new RadioGroup.LayoutParams(0, RadioGroup.LayoutParams.WRAP_CONTENT, 1f));
-        root.addView(modes, top(7));
+        scheduleCard.addView(modes);
 
         intervalBox = new LinearLayout(this);
         intervalBox.setOrientation(LinearLayout.VERTICAL);
@@ -158,69 +198,80 @@ public class RoomEditorActivity extends Activity {
                 refreshNextPreview();
             });
             LinearLayout.LayoutParams lp = weight();
-            if (i > 0) { lp.leftMargin = dp(5); }
+            if (i > 0) lp.leftMargin = dp(5);
             presets.addView(b, lp);
         }
-        intervalBox.addView(presets, top(7));
-        TextView intervalHelp = text("간격 반복은 설정한 분 + 3~10초의 분산 시간을 더해 같은 시각 연속 전송을 줄여.", 11, false);
-        intervalHelp.setTextColor(Color.rgb(135, 141, 153));
-        intervalBox.addView(intervalHelp, top(6));
-        root.addView(intervalBox, top(8));
+        intervalBox.addView(presets, top(8));
+        TextView intervalHelp = text("설정한 간격에 3~10초의 안정화 분산을 더해 여러 방이 같은 순간에 몰리지 않도록 합니다.", 11, false, Color.rgb(119, 132, 156));
+        intervalBox.addView(intervalHelp, top(8));
+        scheduleCard.addView(intervalBox, top(12));
 
         timesBox = new LinearLayout(this);
         timesBox.setOrientation(LinearLayout.VERTICAL);
         timesInput = edit("예: 09:00, 13:30, 20:00", false);
         timesBox.addView(timesInput);
-        TextView timesHelp = text("쉼표나 공백으로 여러 시각을 넣을 수 있어. 같은 시각에 여러 방이 겹치면 방 사이를 2~5초씩 나눠서 보내.", 11, false);
-        timesHelp.setTextColor(Color.rgb(135, 141, 153));
-        timesBox.addView(timesHelp, top(6));
-        root.addView(timesBox, top(8));
+        TextView timesHelp = text("쉼표나 공백으로 여러 시각을 입력할 수 있습니다. 여러 방이 같은 시각에 겹치면 방 사이를 2~5초씩 나눠 전송합니다.", 11, false, Color.rgb(119, 132, 156));
+        timesBox.addView(timesHelp, top(8));
+        scheduleCard.addView(timesBox, top(12));
 
         modes.setOnCheckedChangeListener((group, checkedId) -> {
             updateScheduleVisibility();
             refreshNextPreview();
         });
 
-        nextPreview = text("", 12, true);
-        nextPreview.setTextColor(Color.rgb(143, 190, 255));
-        root.addView(nextPreview, top(10));
+        nextPreview = text("", 12, true, Color.rgb(164, 182, 255));
+        LinearLayout previewCard = card(Color.rgb(14, 18, 27), Color.rgb(35, 44, 61), 13);
+        previewCard.addView(nextPreview);
+        scheduleCard.addView(previewCard, top(12));
+        root.addView(scheduleCard, top(10));
 
-        root.addView(section("횟수"), top(22));
+        root.addView(section("사용 범위", "하루 전송 횟수와 이 방의 사용 여부를 관리합니다."), top(26));
+        LinearLayout usageCard = card(SURFACE, BORDER, 18);
         LinearLayout limitRow = new LinearLayout(this);
         limitRow.setOrientation(LinearLayout.HORIZONTAL);
+        limitRow.setGravity(Gravity.CENTER_VERTICAL);
         dailyLimitInput = edit("하루 최대 횟수", false);
         dailyLimitInput.setInputType(InputType.TYPE_CLASS_NUMBER);
         limitRow.addView(dailyLimitInput, weight());
         unlimitedCheck = new CheckBox(this);
         unlimitedCheck.setText("무제한");
-        unlimitedCheck.setTextColor(Color.WHITE);
+        unlimitedCheck.setTextColor(TEXT);
         unlimitedCheck.setOnCheckedChangeListener((b, checked) -> dailyLimitInput.setEnabled(!checked));
         LinearLayout.LayoutParams uLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        uLp.leftMargin = dp(10);
+        uLp.leftMargin = dp(12);
         limitRow.addView(unlimitedCheck, uLp);
-        root.addView(limitRow, top(8));
+        usageCard.addView(limitRow);
 
         enabledCheck = new CheckBox(this);
         enabledCheck.setText("이 방 자동전송 사용");
-        enabledCheck.setTextColor(Color.WHITE);
-        root.addView(enabledCheck, top(8));
+        enabledCheck.setTextColor(TEXT);
+        enabledCheck.setTextSize(13);
+        usageCard.addView(enabledCheck, top(12));
+        root.addView(usageCard, top(10));
 
-        Button save = actionButton("저장", Color.rgb(48, 88, 158));
+        LinearLayout actionCard = card(SURFACE_2, BORDER, 18);
+        TextView actionTitle = text("변경 사항", 11, true, Color.rgb(128, 142, 169));
+        actionTitle.setLetterSpacing(0.06f);
+        actionCard.addView(actionTitle);
+        Button save = primaryButton("설정 저장");
         save.setOnClickListener(v -> saveProfile(true));
-        root.addView(save, top(18));
-
-        Button test = actionButton("지금 1회 전송", Color.rgb(43, 116, 78));
+        actionCard.addView(save, top(11));
+        Button test = positiveSecondaryButton("지금 1회 테스트 전송");
         test.setOnClickListener(v -> testSend());
-        root.addView(test, top(8));
-
-        Button delete = actionButton("이 방 삭제", Color.rgb(126, 52, 58));
-        delete.setOnClickListener(v -> deleteProfile());
-        root.addView(delete, top(8));
-
-        Button back = compactButton("대시보드로 돌아가기", Color.rgb(61, 65, 74));
+        actionCard.addView(test, top(8));
+        Button back = secondaryButton("대시보드로 돌아가기");
         back.setOnClickListener(v -> finish());
-        root.addView(back, top(8));
+        actionCard.addView(back, top(8));
+        root.addView(actionCard, top(26));
+
+        Button delete = dangerSecondaryButton("이 방 삭제");
+        delete.setOnClickListener(v -> deleteProfile());
+        root.addView(delete, top(10));
+
+        TextView footer = text("설정 저장 전에는 기존 자동전송 설정이 변경되지 않습니다.", 11, false, Color.rgb(105, 118, 141));
+        footer.setGravity(Gravity.CENTER);
+        root.addView(footer, top(16));
         return scroll;
     }
 
@@ -256,7 +307,7 @@ public class RoomEditorActivity extends Activity {
         String name = displayName(uri);
         String mime = resolveConcreteImageMime(getContentResolver().getType(uri), name);
         if (mime == null) {
-            toast("사진 형식을 확인할 수 없어 저장하지 않았어. JPG, PNG, WEBP 같은 일반 이미지로 다시 선택해줘.");
+            toast("사진 형식을 확인할 수 없습니다. JPG, PNG, WEBP 같은 일반 이미지로 다시 선택해 주세요.");
             return;
         }
         try {
@@ -266,7 +317,7 @@ public class RoomEditorActivity extends Activity {
         RoomMediaStore.set(this, routeAlias, uri.toString(), mime, name);
         if (!old.uri.equals(uri.toString())) releasePersistedReadPermission(old.uri);
         refreshMedia();
-        toast("사진을 저장했어. 1회 전송으로 먼저 확인해줘.");
+        toast("사진을 저장했습니다. 판매 전에는 1회 테스트 전송으로 확인해 주세요.");
     }
 
     static String resolveConcreteImageMime(String resolverMime, String displayName) {
@@ -349,7 +400,7 @@ public class RoomEditorActivity extends Activity {
             }, "photo-preview").start();
             String name = media.name.trim().isEmpty() ? "선택한 사진" : media.name;
             imageStatus.setText("● 사진 첨부 · " + name);
-            imageStatus.setTextColor(Color.rgb(143, 190, 255));
+            imageStatus.setTextColor(Color.rgb(164, 182, 255));
         }
     }
 
@@ -371,7 +422,7 @@ public class RoomEditorActivity extends Activity {
         if (timesRadio.isChecked()) {
             String raw = timesInput.getText().toString().trim();
             if (!MultiRoomStore.hasValidTimes(raw)) {
-                if (notify) toast("시간을 HH:mm 형식으로 하나 이상 입력해줘.");
+                if (notify) toast("시간을 HH:mm 형식으로 하나 이상 입력해 주세요.");
                 return false;
             }
             p.scheduleMode = MultiRoomStore.MODE_TIMES;
@@ -396,9 +447,9 @@ public class RoomEditorActivity extends Activity {
         Prefs.setStatus(this, "방 설정 저장: " + p.title() + " · " + MultiRoomStore.scheduleSummary(p));
         refreshNextPreview();
         if (notify) {
-            toast("저장했어.");
+            toast("설정을 저장했습니다.");
             if (!p.fixedTimes() && p.intervalMinutes < 5 && p.unlimited()) {
-                Toast.makeText(this, "1~4분 무제한 반복은 카카오 정책에 따라 제한될 수 있어.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "1~4분 무제한 반복은 카카오 정책이나 환경에 따라 제한될 수 있습니다.", Toast.LENGTH_LONG).show();
             }
         }
         return true;
@@ -408,26 +459,26 @@ public class RoomEditorActivity extends Activity {
         if (!saveProfile(false)) return;
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
         if (!RoomMediaStore.hasPayload(this, p)) {
-            toast("보낼 메시지를 입력해줘.");
+            toast("보낼 메시지를 입력해 주세요.");
             return;
         }
         if (!KakaoNotificationListener.hasLiveSession(routeAlias)) {
-            toast("이 방 연결이 없어. 방에서 새 메시지를 받은 뒤 ‘연결 다시 확인’을 눌러줘.");
+            toast("이 방 연결이 없습니다. 방에서 새 메시지를 받은 뒤 ‘연결 다시 확인’을 눌러 주세요.");
             return;
         }
         RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
         String mediaLine = media.hasImage() ? "\n사진: " + (media.name.isEmpty() ? "첨부됨" : media.name) : "";
         new AlertDialog.Builder(this)
-                .setTitle(p.title())
-                .setMessage("지금 1회 전송할까?\n\n" + p.message + mediaLine)
+                .setTitle("1회 테스트 전송")
+                .setMessage(p.title() + "\n\n" + p.message + mediaLine)
                 .setPositiveButton("전송", (d, w) -> {
                     LicenseManager.runAuthorized(this, () -> {
-                    boolean ok = KakaoMessageSender.send(this, routeAlias, p.message, media);
-                    String error = KakaoMessageSender.lastError();
-                    Prefs.setStatus(this, ok ? "수동 전송 성공: " + p.title()
-                            : "수동 전송 실패: " + p.title() + " · " + error);
-                    toast(ok ? "전송 성공" : "전송 실패: " + error);
-                    refreshConnection();
+                        boolean ok = KakaoMessageSender.send(this, routeAlias, p.message, media);
+                        String error = KakaoMessageSender.lastError();
+                        Prefs.setStatus(this, ok ? "수동 전송 성공: " + p.title()
+                                : "수동 전송 실패: " + p.title() + " · " + error);
+                        toast(ok ? "테스트 전송에 성공했습니다." : "전송 실패: " + error);
+                        refreshConnection();
                     });
                 })
                 .setNegativeButton("취소", null)
@@ -444,19 +495,19 @@ public class RoomEditorActivity extends Activity {
             if (e.suggestedRoom != null && e.suggestedRoom.trim().equalsIgnoreCase(p.actualRoomName)) matches.add(e);
         }
         if (matches.isEmpty()) {
-            toast("이 방의 새 알림이 없어. 실제 방에서 메시지를 하나 받은 뒤 다시 눌러줘.");
+            toast("이 방의 새 알림이 없습니다. 실제 방에서 메시지를 하나 받은 뒤 다시 확인해 주세요.");
             return;
         }
         if (matches.size() > 1) {
             new AlertDialog.Builder(this)
-                    .setTitle("같은 이름의 방이 여러 개 감지됐어")
-                    .setMessage("잘못된 방 연결을 막기 위해 자동 선택하지 않았어. 대상 방에서 새 메시지를 받은 직후 다시 눌러줘.")
+                    .setTitle("같은 이름의 방이 여러 개 감지되었습니다")
+                    .setMessage("잘못된 방 연결을 막기 위해 자동 선택하지 않았습니다. 대상 방에서 새 메시지를 받은 직후 다시 시도해 주세요.")
                     .setPositiveButton("확인", null)
                     .show();
             return;
         }
         boolean ok = KakaoNotificationListener.bindRecentTokenToRoom(this, matches.get(0).token, routeAlias);
-        toast(ok ? "연결을 다시 확인했어." : "세션이 만료됐어.");
+        toast(ok ? "방 연결을 다시 확인했습니다." : "알림 세션이 만료되었습니다.");
         refreshConnection();
     }
 
@@ -465,7 +516,7 @@ public class RoomEditorActivity extends Activity {
         String title = p == null ? "이 방" : p.title();
         new AlertDialog.Builder(this)
                 .setTitle(title + " 삭제")
-                .setMessage("메시지, 사진, 시간 설정, 카카오 연결 정보가 모두 삭제돼.")
+                .setMessage("메시지, 사진, 시간 설정, 카카오 연결 정보가 모두 삭제됩니다. 이 작업은 되돌릴 수 없습니다.")
                 .setPositiveButton("삭제", (d, w) -> {
                     RoomMediaStore.Media old = RoomMediaStore.get(this, routeAlias);
                     MultiRoomStore.remove(this, routeAlias);
@@ -473,7 +524,7 @@ public class RoomEditorActivity extends Activity {
                     releasePersistedReadPermission(old.uri);
                     KakaoNotificationListener.unbindRoom(this, routeAlias);
                     if (Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false)) SendScheduler.scheduleNext(this);
-                    toast("삭제했어.");
+                    toast("방을 삭제했습니다.");
                     finish();
                 })
                 .setNegativeButton("취소", null)
@@ -484,11 +535,10 @@ public class RoomEditorActivity extends Activity {
         if (connectionStatus == null) return;
         boolean live = KakaoNotificationListener.hasLiveSession(routeAlias);
         boolean stored = KakaoNotificationListener.hasStoredBinding(this, routeAlias);
-        connectionStatus.setText(live ? "● 연결됨 · 지금 전송 가능"
-                : stored ? "● 새 알림 대기 · 오면 자동으로 복구"
-                : "● 연결 필요 · 이 방에서 새 메시지를 받아줘");
-        connectionStatus.setTextColor(live ? Color.rgb(86, 220, 144)
-                : stored ? Color.rgb(241, 183, 77) : Color.rgb(234, 108, 108));
+        connectionStatus.setText(live ? "●  연결됨 · 지금 전송 가능"
+                : stored ? "●  복구 대기 · 새 알림이 오면 자동 복구"
+                : "●  연결 필요 · 이 방에서 새 메시지를 받아 주세요");
+        connectionStatus.setTextColor(live ? GREEN : stored ? AMBER : RED);
     }
 
     private void refreshNextPreview() {
@@ -499,7 +549,7 @@ public class RoomEditorActivity extends Activity {
         if (timesRadio != null && timesRadio.isChecked()) {
             String raw = timesInput == null ? p.dailyTimes : timesInput.getText().toString();
             if (!MultiRoomStore.hasValidTimes(raw)) {
-                nextPreview.setText("다음 전송: 시간을 입력해줘");
+                nextPreview.setText("다음 전송 · 지정 시각을 입력해 주세요");
                 return;
             }
             temp.scheduleMode = MultiRoomStore.MODE_TIMES;
@@ -517,71 +567,126 @@ public class RoomEditorActivity extends Activity {
         try { return Integer.parseInt(s.trim()); } catch (Exception e) { return fallback; }
     }
 
-    private void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_LONG).show(); }
+    private void toast(String s) {
+        Toast.makeText(this, s, Toast.LENGTH_LONG).show();
+    }
 
-    private LinearLayout card(int color) {
+    private LinearLayout card(int fill, int stroke, int radiusDp) {
         LinearLayout l = new LinearLayout(this);
         l.setOrientation(LinearLayout.VERTICAL);
-        l.setPadding(dp(14), dp(14), dp(14), dp(14));
-        l.setBackground(round(color, 15));
+        l.setPadding(dp(16), dp(16), dp(16), dp(16));
+        l.setBackground(roundStroke(fill, stroke, radiusDp));
+        l.setElevation(dp(1));
         return l;
     }
 
-    private TextView section(String value) {
-        TextView v = text(value, 17, true);
-        v.setTextColor(Color.rgb(220, 228, 246));
+    private LinearLayout section(String title, String detail) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.addView(text(title, 18, true, Color.rgb(226, 232, 244)));
+        box.addView(text(detail, 11, false, Color.rgb(118, 129, 149)), topWrap(3));
+        return box;
+    }
+
+    private TextView pill(String value, int bg, int fg) {
+        TextView v = text(value, 10, true, fg);
+        v.setGravity(Gravity.CENTER);
+        v.setPadding(dp(9), dp(6), dp(9), dp(6));
+        v.setBackground(roundStroke(bg, Color.rgb(62, 73, 96), 14));
         return v;
     }
 
-    private TextView text(String value, int sp, boolean bold) {
+    private TextView text(String value, int sp, boolean bold, int color) {
         TextView v = new TextView(this);
-        v.setText(value); v.setTextColor(Color.WHITE); v.setTextSize(sp);
-        if (bold) v.setTypeface(v.getTypeface(), android.graphics.Typeface.BOLD);
+        v.setText(value);
+        v.setTextColor(color);
+        v.setTextSize(sp);
+        v.setIncludeFontPadding(false);
+        v.setLineSpacing(0, 1.08f);
+        if (bold) v.setTypeface(v.getTypeface(), Typeface.BOLD);
         return v;
     }
 
     private EditText edit(String hint, boolean multiline) {
         EditText e = new EditText(this);
-        e.setHint(hint); e.setHintTextColor(Color.GRAY); e.setTextColor(Color.WHITE);
-        e.setBackground(round(Color.rgb(35, 38, 45), 10));
-        e.setPadding(dp(12), dp(12), dp(12), dp(12));
+        e.setHint(hint);
+        e.setHintTextColor(Color.rgb(102, 114, 137));
+        e.setTextColor(TEXT);
+        e.setTextSize(14);
+        e.setBackground(roundStroke(FIELD, BORDER, 12));
+        e.setPadding(dp(14), dp(13), dp(14), dp(13));
         if (multiline) {
-            e.setMinLines(4); e.setGravity(Gravity.TOP);
+            e.setMinLines(5);
+            e.setGravity(Gravity.TOP);
             e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         }
         return e;
     }
 
-    private Button actionButton(String label, int color) {
-        Button b = new Button(this);
-        b.setText(label); b.setAllCaps(false); b.setTextColor(Color.WHITE);
-        b.setBackground(round(color, 11)); b.setMinHeight(dp(48));
+    private Button primaryButton(String label) {
+        Button b = button(label, ACCENT, ACCENT, TEXT);
+        b.setElevation(dp(3));
         return b;
     }
 
-    private Button compactButton(String label, int color) {
-        Button b = actionButton(label, color); b.setTextSize(12); b.setMinHeight(dp(42)); return b;
+    private Button secondaryButton(String label) {
+        return button(label, Color.rgb(30, 36, 50), Color.rgb(55, 65, 84), Color.rgb(214, 221, 235));
+    }
+
+    private Button positiveSecondaryButton(String label) {
+        return button(label, Color.rgb(25, 52, 43), Color.rgb(42, 91, 68), Color.rgb(156, 237, 192));
+    }
+
+    private Button dangerSecondaryButton(String label) {
+        return button(label, Color.rgb(60, 35, 42), Color.rgb(104, 51, 61), Color.rgb(249, 183, 188));
     }
 
     private Button miniButton(String label) {
-        Button b = compactButton(label, Color.rgb(57, 61, 70));
-        b.setTextSize(11);
+        Button b = button(label, Color.rgb(30, 36, 50), Color.rgb(55, 65, 84), Color.rgb(214, 221, 235));
+        b.setTextSize(10);
+        b.setMinHeight(dp(40));
         return b;
     }
 
-    private GradientDrawable round(int color, int radiusDp) {
-        GradientDrawable d = new GradientDrawable(); d.setColor(color); d.setCornerRadius(dp(radiusDp)); return d;
+    private Button button(String label, int fill, int stroke, int textColor) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        b.setTextColor(textColor);
+        b.setTextSize(13);
+        b.setTypeface(b.getTypeface(), Typeface.BOLD);
+        b.setBackground(roundStroke(fill, stroke, 12));
+        b.setMinHeight(dp(50));
+        return b;
+    }
+
+    private GradientDrawable roundStroke(int fill, int stroke, int radiusDp) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(fill);
+        d.setCornerRadius(dp(radiusDp));
+        d.setStroke(dp(1), stroke);
+        return d;
     }
 
     private LinearLayout.LayoutParams top(int v) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(v); return lp;
+        lp.topMargin = dp(v);
+        return lp;
+    }
+
+    private LinearLayout.LayoutParams topWrap(int v) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(v);
+        return lp;
     }
 
     private LinearLayout.LayoutParams weight() {
         return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
     }
 
-    private int dp(int v) { return (int)(v * getResources().getDisplayMetrics().density + .5f); }
+    private int dp(int v) {
+        return (int)(v * getResources().getDisplayMetrics().density + .5f);
+    }
 }
