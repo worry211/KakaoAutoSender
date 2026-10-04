@@ -35,6 +35,18 @@ class RoomConfig:
                 merged[key] = [str(x) for x in values if str(x).strip()]
         return merged
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "room_url": self.room_url,
+            "enabled": self.enabled,
+            "reopen_after_seconds": self.reopen_after_seconds,
+            "precheck_seconds": self.precheck_seconds,
+            "unknown_active_probe_seconds": self.unknown_active_probe_seconds,
+            "selectors": self.selectors,
+        }
+
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "RoomConfig":
         room_id = str(raw.get("id", "")).strip()
@@ -63,6 +75,25 @@ class AppConfig:
     mute_audio: bool = True
     keep_device_awake: bool = True
     rooms: list[RoomConfig] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "adb_path": self.adb_path,
+            "device_serial": self.device_serial,
+            "kakao_package": self.kakao_package,
+            "poll_seconds": self.poll_seconds,
+            "room_gap_seconds": self.room_gap_seconds,
+            "mute_audio": self.mute_audio,
+            "keep_device_awake": self.keep_device_awake,
+            "rooms": [room.to_dict() for room in self.rooms],
+        }
+
+    def save(self, path: str | Path) -> None:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        tmp.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(target)
 
     @classmethod
     def load(cls, path: str | Path) -> "AppConfig":
@@ -126,6 +157,9 @@ class StateStore:
         if room_id not in self._states:
             self._states[room_id] = RoomState(next_check_at=time.time())
         return self._states[room_id]
+
+    def remove(self, room_id: str) -> None:
+        self._states.pop(room_id, None)
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
