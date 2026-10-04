@@ -64,15 +64,13 @@ public class SaleReadinessTest {
   }
 
   @Test
-  public void imageMimeMustBeConcreteAndCanFallbackToFilename() {
+  public void imageMimeMustBeConcrete() {
     assertEquals(
         "image/png", RoomEditorActivity.resolveConcreteImageMime("image/png", "anything.bin"));
     assertEquals(
-        "image/png", RoomEditorActivity.resolveConcreteImageMime("image/*", "photo.PNG"));
-    assertEquals(
-        "image/jpeg",
-        RoomEditorActivity.resolveConcreteImageMime("application/octet-stream", "photo.jpg"));
+        "image/jpeg", RoomEditorActivity.resolveConcreteImageMime("IMAGE/JPEG", "anything.bin"));
     assertNull(RoomEditorActivity.resolveConcreteImageMime("image/*", "photo.unknownext"));
+    assertNull(RoomEditorActivity.resolveConcreteImageMime("application/octet-stream", "photo.unknownext"));
   }
 
   @Test
@@ -91,6 +89,19 @@ public class SaleReadinessTest {
         KakaoMessageSender.send(
             context, "room-a", "hello", new RoomMediaStore.Media("", "", "")));
     assertEquals("", KakaoMessageSender.lastError());
+  }
+
+  @Test
+  public void freeFormFilterExcludesDataOnlyInput() {
+    RemoteInput dataOnly =
+        new RemoteInput.Builder("data")
+            .setAllowFreeFormInput(false)
+            .setAllowDataType("image/png", true)
+            .build();
+    RemoteInput text = new RemoteInput.Builder("text").setAllowFreeFormInput(true).build();
+    RemoteInput[] filtered = KakaoMessageSender.freeFormInputs(new RemoteInput[] {dataOnly, text});
+    assertEquals(1, filtered.length);
+    assertEquals("text", filtered[0].getResultKey());
   }
 
   @SuppressWarnings("unchecked")
