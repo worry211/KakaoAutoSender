@@ -47,6 +47,7 @@ public class MainActivityV4 extends Activity {
 
     private LinearLayout roomList;
     private TextView masterStatus;
+    private TextView masterBadge;
     private TextView systemStatus;
     private TextView summaryRooms;
     private TextView summaryEnabled;
@@ -120,7 +121,8 @@ public class MainActivityV4 extends Activity {
         TextView statusCaption = text("AUTOMATION STATUS", 9, true, Color.rgb(123, 138, 168));
         statusCaption.setLetterSpacing(0.1f);
         statusHeader.addView(statusCaption, weight());
-        statusHeader.addView(pill("PROTECTED", Color.rgb(25, 49, 42), Color.rgb(122, 231, 176)));
+        masterBadge = pill("READY", Color.rgb(32, 43, 68), Color.rgb(172, 190, 255));
+        statusHeader.addView(masterBadge);
         masterCard.addView(statusHeader);
 
         masterStatus = text("", 22, true, TEXT);
@@ -132,9 +134,11 @@ public class MainActivityV4 extends Activity {
         LinearLayout masterButtons = new LinearLayout(this);
         masterButtons.setOrientation(LinearLayout.HORIZONTAL);
         startButton = primaryButton("자동전송 시작");
+        startButton.setContentDescription("전체 자동전송 시작 또는 설정 계속하기");
         startButton.setOnClickListener(v -> startAll());
         masterButtons.addView(startButton, new LinearLayout.LayoutParams(0, dp(54), 1.55f));
         stopButton = dangerSecondaryButton("전체 중단");
+        stopButton.setContentDescription("실행 중인 모든 자동전송 즉시 중단");
         stopButton.setOnClickListener(v -> stopAll());
         LinearLayout.LayoutParams stopLp = new LinearLayout.LayoutParams(0, dp(54), 1f);
         stopLp.leftMargin = dp(8);
@@ -246,22 +250,55 @@ public class MainActivityV4 extends Activity {
         boolean listener = KakaoNotificationListener.isListenerConnected();
         boolean exact = SendScheduler.canUseExact(this);
         ArrayList<MultiRoomStore.Profile> profiles = MultiRoomStore.list(this);
+        int enabled = MultiRoomStore.enabledCount(this);
+        int ready = MultiRoomStore.readyCount(this);
+        int usable = 0;
+        for (MultiRoomStore.Profile p : profiles) {
+            if (p.enabled && RoomMediaStore.hasPayload(this, p)) usable++;
+        }
 
-        masterStatus.setText(active ? "자동전송 실행 중" : "자동전송 대기");
-        masterStatus.setTextColor(active ? GREEN : TEXT);
+        if (active && enabled > 0 && ready < enabled) {
+            masterStatus.setText("자동전송 실행 중 · 연결 대기");
+            masterStatus.setTextColor(AMBER);
+            stylePill(masterBadge, "WAIT", Color.rgb(55, 45, 27), AMBER);
+        } else if (active) {
+            masterStatus.setText("자동전송 실행 중");
+            masterStatus.setTextColor(GREEN);
+            stylePill(masterBadge, "LIVE", Color.rgb(25, 49, 42), Color.rgb(122, 231, 176));
+        } else if (!access) {
+            masterStatus.setText("알림 접근 권한이 필요합니다");
+            masterStatus.setTextColor(AMBER);
+            stylePill(masterBadge, "SETUP", Color.rgb(55, 45, 27), AMBER);
+        } else if (usable == 0) {
+            masterStatus.setText("방 설정을 완료하세요");
+            masterStatus.setTextColor(TEXT);
+            stylePill(masterBadge, "SETUP", Color.rgb(45, 49, 59), Color.rgb(180, 190, 211));
+        } else {
+            masterStatus.setText("자동전송 준비됨");
+            masterStatus.setTextColor(TEXT);
+            stylePill(masterBadge, "READY", Color.rgb(32, 43, 68), Color.rgb(172, 190, 255));
+        }
+
         StringBuilder system = new StringBuilder();
         system.append("라이선스 ").append(LicenseManager.shortStatus(this));
         system.append("  ·  알림 접근 ").append(access ? "정상" : "권한 필요");
-        system.append("  ·  리스너 ").append(listener ? "정상" : "대기");
-        if (Build.VERSION.SDK_INT >= 31) system.append("\n정확 시각 ").append(exact ? "사용 가능" : "선택사항 · 근사 시각 사용");
+        system.append("\n카카오 연결 ").append(listener ? "정상" : "대기");
+        if (Build.VERSION.SDK_INT >= 31) {
+            system.append("  ·  예약 정확도 ").append(exact ? "정확 시각" : "근사 시각");
+        }
         system.append("  ·  연결 방 ").append(profiles.size()).append("개");
         String notice = LicenseManager.updateNotice(this);
         if (notice != null && !notice.trim().isEmpty()) system.append("\n").append(notice.trim());
         systemStatus.setText(system.toString());
+        systemStatus.setTextColor(!access ? AMBER : Color.rgb(181, 191, 210));
 
         startButton.setEnabled(!active);
         stopButton.setEnabled(active);
-        startButton.setAlpha(active ? 0.46f : 1f);
+        if (active) startButton.setText("자동전송 실행 중");
+        else if (!access) startButton.setText("알림 접근 필요");
+        else if (usable == 0) startButton.setText("방 설정을 완료하세요");
+        else startButton.setText("자동전송 시작");
+        startButton.setAlpha(startButton.isEnabled() ? 1f : 0.46f);
         stopButton.setAlpha(active ? 1f : 0.46f);
 
         roomList.removeAllViews();
@@ -285,8 +322,6 @@ public class MainActivityV4 extends Activity {
             for (MultiRoomStore.Profile p : profiles) roomList.addView(roomCard(p), top(8));
         }
 
-        int ready = MultiRoomStore.readyCount(this);
-        int enabled = MultiRoomStore.enabledCount(this);
         long next = MultiRoomStore.nextDueAt(this);
         summaryRooms.setText(String.valueOf(profiles.size()));
         summaryEnabled.setText(String.valueOf(enabled));
@@ -361,6 +396,15 @@ public class MainActivityV4 extends Activity {
         String failure = p.failureStreak > 0 ? "  ·  최근 실패 " + p.failureStreak + "회" : "";
         TextView meta = text(count + next + failure, 11, false, Color.rgb(133, 146, 169));
         card.addView(meta, top(8));
+
+        String recent = p.lastSuccessAt > 0
+                ? "최근 성공  ·  " + formatDateTime(p.lastSuccessAt)
+                : p.failureStreak > 0
+                    ? "최근 전송 확인 필요  ·  실패 " + p.failureStreak + "회"
+                    : "최근 전송 기록 없음";
+        TextView recentView = text(recent, 10, false,
+                p.failureStreak > 0 ? AMBER : Color.rgb(112, 126, 151));
+        card.addView(recentView, top(6));
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -479,21 +523,31 @@ public class MainActivityV4 extends Activity {
             LinearLayout row = card(SURFACE_2, BORDER, 14);
             row.setClickable(true);
             row.setFocusable(true);
-            boolean existing = !room.isEmpty() && !MultiRoomStore.findByActualName(this, room).isEmpty();
+            int existingCount = room.isEmpty() ? 0 : MultiRoomStore.findByActualName(this, room).size();
+            boolean existing = existingCount == 1;
+            boolean conflict = existingCount > 1;
             LinearLayout rowTop = new LinearLayout(this);
             rowTop.setOrientation(LinearLayout.HORIZONTAL);
             rowTop.setGravity(Gravity.CENTER_VERTICAL);
             TextView name = text(room.isEmpty() ? "방 이름 미확인" : room, 15, true, TEXT);
             name.setMaxLines(2);
             rowTop.addView(name, weight());
-            rowTop.addView(pill(manual ? "확인" : existing ? "복구" : "연결",
-                    existing ? Color.rgb(25, 49, 42) : Color.rgb(29, 38, 65),
-                    existing ? GREEN : Color.rgb(180, 195, 255)));
+            String badge = manual ? "확인" : conflict ? "중복 확인" : existing ? "복구" : "연결";
+            int badgeBg = conflict ? Color.rgb(58, 31, 36)
+                    : existing ? Color.rgb(25, 49, 42) : Color.rgb(29, 38, 65);
+            int badgeFg = conflict ? RED : existing ? GREEN : Color.rgb(180, 195, 255);
+            rowTop.addView(pill(badge, badgeBg, badgeFg));
             row.addView(rowTop);
             String meta = manual ? "알림에 표시된 방 이름을 확인한 뒤 연결합니다."
+                    : conflict ? "같은 이름으로 등록된 방이 여러 개 있어 자동 연결을 차단합니다."
                     : existing ? "기존 등록 방 · 현재 답장 연결만 복구합니다."
                     : "새 방 후보 · 선택하면 방별 설정 화면으로 이동합니다.";
-            row.addView(text(meta, 11, false, existing ? GREEN : Color.rgb(125, 139, 166)), top(6));
+            row.addView(text(meta, 11, false, conflict ? RED : existing ? GREEN : Color.rgb(125, 139, 166)), top(6));
+            if (entry.observedAt > 0L) {
+                String signal = ageLabel(entry.observedAt) + " · 신뢰도 " + confidenceLabel(entry.confidence);
+                row.addView(text(signal, 10, false, Color.rgb(105, 119, 145)), top(5));
+            }
+            row.setContentDescription((room.isEmpty() ? "방 이름 미확인" : room) + " · " + badge);
             final KakaoNotificationListener.SessionEntry selected = entry;
             row.setOnClickListener(v -> {
                 dialog.dismiss();
@@ -526,6 +580,14 @@ public class MainActivityV4 extends Activity {
 
     private void connectCandidate(KakaoNotificationListener.SessionEntry entry, String actualName) {
         ArrayList<MultiRoomStore.Profile> existing = MultiRoomStore.findByActualName(this, actualName);
+        if (existing.size() > 1) {
+            new AlertDialog.Builder(this)
+                    .setTitle("같은 이름의 등록 방이 여러 개 있습니다")
+                    .setMessage("오배송 방지를 위해 자동으로 연결하지 않았습니다. 기존 중복 방을 먼저 정리한 뒤 다시 시도해 주세요.")
+                    .setPositiveButton("확인", null)
+                    .show();
+            return;
+        }
         if (existing.size() == 1) {
             MultiRoomStore.Profile p = existing.get(0);
             boolean ok = KakaoNotificationListener.bindRecentTokenToRoom(this, entry.token, p.room);
@@ -574,15 +636,7 @@ public class MainActivityV4 extends Activity {
                 .setPositiveButton("연결", (d, w) -> {
                     String actualName = input.getText().toString().trim();
                     if (actualName.isEmpty()) { toast("방 이름을 입력해 주세요."); return; }
-                    String routeAlias = "route-" + UUID.randomUUID();
-                    if (!KakaoNotificationListener.bindRecentTokenToRoom(this, entry.token, routeAlias)) {
-                        toast("알림 세션이 만료되었습니다."); return;
-                    }
-                    MultiRoomStore.Profile p = new MultiRoomStore.Profile(routeAlias);
-                    p.actualRoomName = actualName;
-                    p.displayName = actualName;
-                    MultiRoomStore.upsert(this, p);
-                    openEditor(routeAlias);
+                    connectCandidate(entry, actualName);
                 })
                 .setNegativeButton("취소", null)
                 .show();
@@ -638,7 +692,13 @@ public class MainActivityV4 extends Activity {
 
     private void startAuthorized() {
         if (!isNotificationAccessEnabled()) {
-            toast("알림 접근 권한을 먼저 허용해 주세요.");
+            new AlertDialog.Builder(this)
+                    .setTitle("알림 접근 권한이 필요합니다")
+                    .setMessage("카카오톡의 답장 세션을 안전하게 확인하려면 알림 접근 권한이 필요합니다. 권한을 허용한 뒤 대상 방에서 새 메시지를 하나 받아 주세요.")
+                    .setPositiveButton("권한 설정 열기", (d, w) ->
+                            startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)))
+                    .setNegativeButton("나중에", null)
+                    .show();
             return;
         }
         ArrayList<MultiRoomStore.Profile> profiles = MultiRoomStore.list(this);
@@ -650,9 +710,29 @@ public class MainActivityV4 extends Activity {
             if (KakaoNotificationListener.hasLiveSession(p.room)) ready++;
         }
         if (usable == 0) {
-            toast("사용 중이며 메시지가 저장된 방이 없습니다.");
+            new AlertDialog.Builder(this)
+                    .setTitle("자동전송 방 설정이 필요합니다")
+                    .setMessage("사용 중인 방에 메시지 또는 사진과 전송 스케줄을 먼저 저장해 주세요.")
+                    .setPositiveButton("새 방 연결", (d, w) -> showAddCandidates())
+                    .setNegativeButton("닫기", null)
+                    .show();
             return;
         }
+        final int usableCount = usable;
+        final int readyCount = ready;
+        if (ready < usable) {
+            new AlertDialog.Builder(this)
+                    .setTitle("일부 방이 연결 대기 중입니다")
+                    .setMessage("사용할 방 " + usable + "개 중 현재 " + ready + "개가 즉시 전송 가능합니다.\n\n연결 대기 방은 해당 카카오 방에서 새 메시지를 받으면 복구됩니다.")
+                    .setPositiveButton("대기 방 포함 시작", (d, w) -> commitStart(usableCount, readyCount))
+                    .setNegativeButton("취소", null)
+                    .show();
+            return;
+        }
+        commitStart(usable, ready);
+    }
+
+    private void commitStart(int usable, int ready) {
         synchronized (DeliveryGate.LOCK) {
             if (!LicenseManager.isUsable(this)) { LicenseManager.route(this); return; }
             Prefs.p(this).edit().putBoolean(Prefs.KEY_ACTIVE, true).commit();
@@ -745,6 +825,22 @@ public class MainActivityV4 extends Activity {
         catch (Exception e) { return "?"; }
     }
 
+    private String ageLabel(long observedAt) {
+        long age = Math.max(0L, System.currentTimeMillis() - observedAt);
+        if (age < 60_000L) return "방금 감지";
+        long minutes = age / 60_000L;
+        if (minutes < 60L) return minutes + "분 전 감지";
+        long hours = minutes / 60L;
+        if (hours < 24L) return hours + "시간 전 감지";
+        return new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(observedAt)) + " 감지";
+    }
+
+    private String confidenceLabel(int confidence) {
+        if (confidence >= 3) return "높음";
+        if (confidence >= 2) return "중간";
+        return "낮음";
+    }
+
     private String formatTime(long ms) {
         return new SimpleDateFormat("HH:mm", Locale.KOREA).format(new Date(ms));
     }
@@ -793,6 +889,13 @@ public class MainActivityV4 extends Activity {
         v.setPadding(dp(9), dp(6), dp(9), dp(6));
         v.setBackground(roundStroke(bg, Color.rgb(62, 73, 96), 14));
         return v;
+    }
+
+    private void stylePill(TextView view, String value, int bg, int fg) {
+        if (view == null) return;
+        view.setText(value);
+        view.setTextColor(fg);
+        view.setBackground(roundStroke(bg, Color.rgb(62, 73, 96), 14));
     }
 
     private TextView text(String value, int sp, boolean bold, int color) {

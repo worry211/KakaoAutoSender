@@ -52,12 +52,14 @@ public class KakaoNotificationListener extends NotificationListenerService {
         final String description;
         final String suggestedRoom;
         final int confidence;
+        final long observedAt;
 
-        SessionEntry(String token, String description, String suggestedRoom, int confidence) {
+        SessionEntry(String token, String description, String suggestedRoom, int confidence, long observedAt) {
             this.token = token;
             this.description = description;
             this.suggestedRoom = suggestedRoom;
             this.confidence = confidence;
+            this.observedAt = observedAt;
         }
     }
 
@@ -593,7 +595,9 @@ public class KakaoNotificationListener extends NotificationListenerService {
         Collections.reverse(values);
         ArrayList<SessionEntry> result = new ArrayList<>();
         for (ReplyTarget target : values) {
-            result.add(new SessionEntry(target.token, describe(target), target.candidateRoom, target.candidateConfidence));
+            long observedAt = target.notificationPostTime > 0 ? target.notificationPostTime : target.capturedAt;
+            result.add(new SessionEntry(target.token, describe(target), target.candidateRoom,
+                    target.candidateConfidence, observedAt));
         }
         return result;
     }
