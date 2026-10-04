@@ -11,7 +11,19 @@ KakaoAutoSender is a local Android automation app that reuses KakaoTalk's Androi
 - Sends are **fail-closed**: if the app cannot confirm the exact saved reply session, it does not guess another room.
 - Newly added rooms use an internal routing alias that is separate from the visible Kakao room name. The internal alias is never shown in the normal UI.
 
-## v1.0.0
+## v1.1.0 final reliability pass
+- Keeps the v1.0 room-first dashboard and multi-room configuration model.
+- **One room per alarm dispatch** instead of firing a whole due batch in one receiver run.
+- When several rooms are due together, the next room is scheduled **2-5 seconds later**. This avoids back-to-back Kakao reply actions and also keeps Android `BroadcastReceiver` work short.
+- Interval schedules keep the configured minute value as the base and add a **stable 3-10 second per-cycle offset**. Example: a 15-minute room runs at roughly `15 minutes + 3-10 seconds` each cycle.
+- The interval offset is deterministic for that room/cycle, so repeated scheduler scans do not keep adding more delay.
+- Fixed daily times remain fixed; if several rooms share the same fixed time, cross-room 2-5 second spacing still applies.
+- Failed sends retry up to three times with a short randomized retry gap, then fail closed and move on without rerouting to another room.
+- Pressing global stop prevents the next room in a staggered batch from being scheduled.
+- Alarm scheduling clamps past timestamps to a safe near-future time and still uses exact-alarm support when Android grants it.
+- Timing policy has dedicated regression tests in addition to existing schedule/title tests, Android Lint and APK build gates.
+
+## Core features
 - Room-first dashboard: the normal UI and room chooser show the actual Kakao room name only.
 - Multiple rooms with independent messages and schedules.
 - Per-room pause/resume and one-shot test send.
@@ -25,7 +37,6 @@ KakaoAutoSender is a local Android automation app that reuses KakaoTalk's Androi
 - Automatic schedule restore after reboot/app update.
 - Android conversation-shortcut (`shortcutId`) based recovery when KakaoTalk exposes a stable conversation identity.
 - Legacy v0.8/v0.9 profiles are migrated without discarding message/schedule settings.
-- Unit tests + Android Lint + APK build run in CI.
 
 ## Normal setup
 1. Install and open the APK.
