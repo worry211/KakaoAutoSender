@@ -2,6 +2,17 @@
 
 Date: 2026-10-05 KST
 
+## Final decision
+
+- **SALE APPROVED**
+- Release: `KakaoMacro v2.2.0`
+- Android versionCode: `27`
+- Signed commercial APK is the approved customer distribution binary.
+- Automated code/build/signing/backend/server-health gates are complete and passing.
+- Physical Android/KakaoTalk field QA has not been independently observed by ChatGPT; the owner explicitly chose to proceed with sale with that residual platform-dependent risk accepted.
+- Production `min_version` remains `20` so existing customers are not force-blocked before broad field verification.
+- Production `latest_version` should be changed to `27` only after a stable HTTPS customer download URL is selected.
+
 ## Release identity
 
 - Product: KakaoMacro / 카톡매크로
@@ -63,7 +74,7 @@ Read-only production check against `/api/v1/client-config` returned HTTP 200 wit
 
 The server is live and v2.2.0/versionCode 27 is not blocked by the current minimum-version policy.
 
-`latest_version=20` is stale release metadata, not an entitlement/activation blocker. Do not raise `min_version` to 27 before real-device QA. Once a stable HTTPS customer download URL is chosen, update metadata with the Discord admin command `/system latest-version version:27 url:<https-url>`. Raise `/system min-version version:27` only after physical QA confirms upgrading customers are safe.
+`latest_version=20` is stale update metadata, not an entitlement or activation blocker. Once a stable HTTPS customer download URL is selected, update it with `/system latest-version version:27 url:<https-url>`. Do not raise `/system min-version version:27` until there is enough real-device evidence that existing customers can safely upgrade.
 
 ## Important v2.2.0 hardening
 
@@ -94,21 +105,19 @@ The server is live and v2.2.0/versionCode 27 is not blocked by the current minim
 - unsupported image reply capability fails closed
 - no silent text-only fallback when a photo was configured
 
-## Physical sale gate still required
+## Residual field risk after sale approval
 
-The automated release is sale-ready from code/build/signing/server-health perspectives, but these platform-dependent checks require one physical Android/KakaoTalk pass before calling the release fully field-verified:
+The following behaviors depend on Android/KakaoTalk runtime behavior and remain important post-sale smoke checks:
 
-1. Install/upgrade the signed `2.2.0` APK on the target phone.
-2. Activate using a fresh seller-issued key and confirm the main screen opens without a persistent server-connection error.
-3. Confirm app restart and network reconnect recover the same license without asking for the redeem key again.
-4. Create/connect two Kakao rooms that have the same visible title and verify they do not collapse into one route when Android provides distinct stable shortcut identities.
-5. Verify a renamed room with the same stable identity does not become a duplicate macro.
-6. Verify ambiguous sessions with no stable identity are blocked rather than guessed.
-7. Send text-only once to a verified room.
-8. Send photo-only and text+photo where Kakao exposes compatible RemoteInput data support.
-9. Delete/move a previously selected photo and verify the app reports a photo-read failure without sending text-only.
-10. Start automation, stop it, restart it, and verify the global stop fence prevents an already scheduled alarm from sending.
-11. Reboot the phone and verify the license is revalidated online before schedules resume.
-12. Confirm notification-listener reconnect and room session recovery behavior after reboot/app update.
+1. First activation on a fresh installation.
+2. License recovery after app restart and Wi-Fi/mobile-data changes.
+3. Two Kakao rooms with the same visible title when Android exposes distinct shortcut identities.
+4. Renamed room consolidation when the stable identity remains the same.
+5. Ambiguous same-title sessions staying blocked instead of guessed.
+6. Text-only, photo-only and text+photo delivery where Kakao exposes compatible RemoteInput support.
+7. Deleted/moved selected photo failing without silent text-only fallback.
+8. Global stop fence blocking already scheduled alarms.
+9. Reboot requiring online license revalidation before schedules resume.
+10. Notification-listener reconnect and room-session recovery after reboot/app update.
 
-Until that pass finishes, keep production `min_version` at 20. The signed APK itself is the correct v2.2.0 commercial release candidate.
+Any confirmed wrong-room delivery, duplicate automation for one physical room, persistent activation failure on a healthy network, or post-stop send is a release-blocking defect and should trigger immediate sale pause plus a hotfix.
