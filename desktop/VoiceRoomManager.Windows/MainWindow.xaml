@@ -18,7 +18,7 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="보이스룸 매니저 · Windows" FontSize="30" FontWeight="Bold" Foreground="White"/>
-                <TextBlock Text="오픈채팅 링크 우선 진입 · 자동 UI 진단 · 필요 시 자체 캘리브레이션 · 모바일 앱과 별도 프로그램"
+                <TextBlock Text="방+링크 등록 후 전체 시작 한 번 · 방 진입부터 보이스룸 생성/검증/48시간 관리까지 자동 진행"
                            Foreground="{StaticResource Muted}" FontSize="13" Margin="0,6,0,0"/>
             </StackPanel>
             <Border Grid.Column="1" Background="#151922" BorderBrush="{StaticResource Border}" BorderThickness="1"
@@ -41,7 +41,7 @@
                                Foreground="{StaticResource Warn}" Margin="0,8,0,0" FontSize="12"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="전체 시작" Click="StartAll_Click" Background="#2C895B"/>
+                    <Button Content="전체 시작" Click="StartAll_Click" Background="#2C895B" MinWidth="112"/>
                     <Button Content="전체 중단" Click="StopAll_Click" Background="#9A434C"/>
                     <Button Content="카카오톡 열기" Click="OpenKakao_Click" Background="#40506F"/>
                 </StackPanel>
@@ -52,7 +52,7 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="관리할 오픈채팅방" FontSize="21" FontWeight="Bold" Foreground="White"/>
-                <TextBlock Text="링크 → 카카오 소개 화면 → 실제 채팅을 하나의 세션으로 검증하고, 자동 인식 실패 단계만 캘리브레이션해."
+                <TextBlock Text="링크 등록만 되어 있으면 전체 시작이 자동 진입·생성·활성 검증까지 처리해. 수동 점검은 진단용이야."
                            Foreground="{StaticResource Muted}" FontSize="12" Margin="0,4,0,0"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -75,7 +75,7 @@
                     <DataGridTextColumn Header="방 이름" Binding="{Binding Title}" Width="1.35*"/>
                     <DataGridTextColumn Header="오픈채팅 링크" Binding="{Binding LinkDisplay}" Width="105"/>
                     <DataGridCheckBoxColumn Header="관리" Binding="{Binding Enabled}" Width="65"/>
-                    <DataGridTextColumn Header="상태" Binding="{Binding StatusDisplay}" Width="150"/>
+                    <DataGridTextColumn Header="상태" Binding="{Binding StatusDisplay}" Width="160"/>
                     <DataGridTextColumn Header="남은 시간" Binding="{Binding Remaining}" Width="135"/>
                     <DataGridCheckBoxColumn Header="실제 활성" Binding="{Binding LiveVerified}" Width="82"/>
                     <DataGridCheckBoxColumn Header="마이크" Binding="{Binding MicMuted}" Width="68"/>
@@ -90,12 +90,12 @@
             <WrapPanel>
                 <Button Content="관리 ON / OFF" Click="ToggleRoom_Click"/>
                 <Button Content="링크 설정" Click="SetLink_Click" Background="#485C78"/>
-                <Button Content="안전 점검" Click="SafeProbe_Click" Background="#53698F"/>
-                <Button Content="실제 점검" Click="LiveCheck_Click" Background="#4167AE"/>
-                <Button Content="UI 캘리브레이션" Click="Calibrate_Click" Background="#5C4A84"/>
+                <Button Content="안전 점검" Click="SafeProbe_Click" Background="#53698F" ToolTip="선택 사항 · 방 진입 진단만 수행"/>
+                <Button Content="실제 점검" Click="LiveCheck_Click" Background="#4167AE" ToolTip="선택 사항 · 현재 방을 즉시 생성/검증"/>
+                <Button Content="UI 캘리브레이션" Click="Calibrate_Click" Background="#5C4A84" ToolTip="자동 인식이 실패한 단계만 1회 등록"/>
                 <Button Content="방 삭제" Click="RemoveRoom_Click" Background="#70434B"/>
             </WrapPanel>
-            <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MaxWidth="480">
+            <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MaxWidth="520">
                 <TextBlock x:Name="RuntimeStats" HorizontalAlignment="Right" Foreground="#C5CCD6" FontSize="12" TextWrapping="Wrap"/>
                 <TextBlock x:Name="LastStatus" HorizontalAlignment="Right" Foreground="{StaticResource Muted}"
                            Margin="0,4,0,0" FontSize="12" TextWrapping="Wrap" TextAlignment="Right"/>
@@ -108,7 +108,7 @@
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <TextBlock Text="운영 흐름" Foreground="{StaticResource Warn}" FontWeight="SemiBold"/>
                 <TextBlock Grid.Column="1" Margin="12,0,0,0" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"
-                           Text="방+링크 등록 → 안전 점검 → 실제 점검 → 관리 ON → 전체 시작. 자동 인식 실패 단계만 ‘UI 캘리브레이션’으로 1회 저장하면 이후 상대좌표+시그니처 검증으로 재사용."/>
+                           Text="방 이름+오픈채팅 링크 등록 → 관리 ON → 전체 시작. 자동으로 카카오 실행 → 방 진입 → 보이스룸 생성/활성 검증 → 오디오 보호 → 48시간 재점검/재생성. 안전/실제 점검은 필수가 아니라 진단용."/>
             </Grid>
         </Border>
     </Grid>
