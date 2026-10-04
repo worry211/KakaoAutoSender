@@ -129,20 +129,22 @@ internal static class KakaoSurfaceLocator
 
     public static IReadOnlyList<Surface> PreviewCandidates()
     {
-        var snapshot = VisibleSurfaces(minWidth: 280, minHeight: 220);
+        var snapshot = VisibleSurfaces(minWidth: 240, minHeight: 220);
         var main = FindMainWindow();
         var mainRect = snapshot.FirstOrDefault(x => x.Hwnd == main)?.Rect;
 
-        // Prefer large surfaces other than the narrow titled chat-list window. The 2026 Kakao PC
-        // OpenChat cover can appear as a separate untitled surface immediately to the right.
+        // In KakaoTalk 26.x the OpenChat cover can be a separate untitled surface only ~300px
+        // wide, immediately to the right of the titled chat-list window. Do not assume the main
+        // titled HWND spans the whole visible client.
         return snapshot
             .Where(x => x.Hwnd != main)
-            .Where(x => x.Rect.Width >= 420 && x.Rect.Height >= 320)
+            .Where(x => x.Rect.Width >= 250 && x.Rect.Height >= 300)
             .OrderByDescending(x =>
             {
-                var score = x.Rect.Area;
+                long score = x.Rect.Area;
                 if (string.IsNullOrWhiteSpace(x.Title)) score += 5_000_000;
                 if (mainRect is { } m && x.Rect.Left >= m.Left + m.Width / 2) score += 3_000_000;
+                if (x.Rect.Height >= 500) score += 1_000_000;
                 return score;
             })
             .ToList();
@@ -159,9 +161,9 @@ internal static class KakaoSurfaceLocator
         catch { }
     }
 
-    public static string Diagnostic(int max = 10)
+    public static string Diagnostic(int max = 12)
     {
-        var rows = VisibleSurfaces(minWidth: 120, minHeight: 40).Take(max)
+        var rows = VisibleSurfaces(minWidth: 100, minHeight: 36).Take(max)
             .Select(x => $"{(x.IsTopLevel ? 'T' : 'C')}:{Clean(x.ClassName)}:'{Clean(x.Title)}'@{x.Rect.Left},{x.Rect.Top},{x.Rect.Width}x{x.Rect.Height}");
         return "surfaces=[" + string.Join(" | ", rows) + "]";
     }
