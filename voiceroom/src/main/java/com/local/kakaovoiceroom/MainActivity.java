@@ -47,6 +47,7 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(Color.rgb(12, 13, 16));
         getWindow().setNavigationBarColor(Color.rgb(12, 13, 16));
         setContentView(buildUi());
+        AudioGuard.recoverIfStale(this);
         recoverInterruptedDirectCheckOnForeground();
         recoverStalePendingOnForeground();
         refreshUi();
@@ -54,6 +55,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        AudioGuard.recoverIfStale(this);
         recoverInterruptedDirectCheckOnForeground();
         recoverStalePendingOnForeground();
         handler.removeCallbacks(ticker);
