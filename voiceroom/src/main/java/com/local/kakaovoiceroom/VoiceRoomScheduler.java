@@ -19,17 +19,15 @@ final class VoiceRoomScheduler {
         long now = System.currentTimeMillis();
         boolean managerActive = VoiceRoomStore.managerActive(context);
 
-        // An explicit live check always wins over unattended scheduled work. This keeps the
-        // room the user just selected deterministic even while the long-running manager is ON.
+        // A direct user check always wins. Keeping exactly one outstanding alarm prevents a
+        // stale AUTO or MANUAL PendingIntent from waking Kakao again after priorities changed.
         VoiceRoomStore.Room manualRoom = VoiceRoomStore.manualCheckDue(context, now);
         boolean manual = manualRoom != null;
         VoiceRoomStore.Room room = manual ? manualRoom
                 : (managerActive ? VoiceRoomStore.earliestDue(context, now) : null);
 
-        if (room == null) {
-            cancel(context);
-            return;
-        }
+        cancel(context);
+        if (room == null) return;
 
         long at = room.nextCheckAt <= 0L
                 ? now + 2_000L
@@ -57,9 +55,15 @@ final class VoiceRoomScheduler {
         AlarmManager alarm = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (alarm == null) return;
         PendingIntent automatic = pendingIntent(context, "", false, PendingIntent.FLAG_NO_CREATE);
-        if (automatic != null) alarm.cancel(automatic);
+        if (automatic != null) {
+            alarm.cancel(automatic);
+            automatic.cancel();
+        }
         PendingIntent manual = pendingIntent(context, "", true, PendingIntent.FLAG_NO_CREATE);
-        if (manual != null) alarm.cancel(manual);
+        if (manual != null) {
+            alarm.cancel(manual);
+            manual.cancel();
+        }
     }
 
     static boolean canExact(Context context) {
