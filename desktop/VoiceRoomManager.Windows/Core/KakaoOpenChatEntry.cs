@@ -15,6 +15,8 @@ internal static class KakaoOpenChatEntry
         return new(result.Attempted, result.Success, result.Diagnostic);
     }
 
-    public static bool HasVisibleChatComposer(IntPtr _)
-        => KakaoSurfaceLocator.TryFindChatComposer(out _);
+    public static bool HasVisibleChatComposer(IntPtr ignored)
+    {
+        return KakaoSurfaceLocator.TryFindChatComposer(out var composer) && composer is not null;
+    }
 }
