@@ -5,7 +5,7 @@
 - module: `:voiceroom`
 - application ID: `com.local.kakaovoiceroom`
 - app label: `보이스룸 매니저`
-- current version: `0.5.0` / versionCode `12`
+- current version: `0.5.1` / versionCode `13`
 - debug CI artifact: `KakaoVoiceRoomManager-debug-apk`
 - production workflow: `VoiceRoom signed release APK`
 
@@ -27,7 +27,7 @@ KakaoAutoSender의 launcher/UI/preferences/notification listener/application ID�
 6. 앱 카드에 `보룸 활성 · 47시간59분`, `안전 ✓`, `실제 활성 ✓`가 표시되고 새 48시간 기준이 저장됨
 7. v0.4.2 오디오 가드가 실제 PIP의 마이크와 스피커를 모두 음소거 상태로 만들고 앱에서 `마이크 ✓ · 스피커 ✓`를 확인함
 
-v0.4.0에서 실제 보룸 없이 `실제 ✓`가 찍힌 오탐은 v0.4.1에서 제거됐다. v0.4.2에서 실제 생성/오디오 보호까지 target phone에서 확인됐고, v0.5.0은 장시간 런타임 요청 보호와 운영 가시성을 추가한다.
+v0.4.0에서 실제 보룸 없이 `실제 ✓`가 찍힌 오탐은 v0.4.1에서 제거됐다. v0.4.2에서 실제 생성/오디오 보호까지 target phone에서 확인됐고, v0.5.0은 장시간 런타임 요청 보호와 운영 가시성을 추가했다. v0.5.1은 Samsung 화면 OFF/AOD 판정과 secure-lock 대기/재개 흐름을 보강한다.
 
 ## Audio protection
 
@@ -44,7 +44,7 @@ v0.4.0에서 실제 보룸 없이 `실제 ✓`가 찍힌 오탐은 v0.4.1에서 
 
 전역 휴대폰 미디어 볼륨은 자동화 트랜잭션 동안만 임시 0으로 만든다. 복구 시 현재 볼륨이 아직 0일 때만 이전 값을 복원하며, 사용자가 작업 도중 직접 다른 볼륨으로 바꿨다면 그 값을 덮어쓰지 않는다. 48시간 동안 휴대폰 전체를 강제 무음으로 두는 방식은 사용하지 않는다.
 
-## v0.5.0 speaker-request protection
+## Speaker-request protection
 
 카카오 VoiceRoom의 스피커 요청은 runtime event guard가 처리한다. 앱이 48시간 점검을 수행하지 않는 평상시에도 접근성 서비스가 Kakao 창/오버레이/관련 이벤트를 관찰한다.
 
@@ -59,6 +59,16 @@ v0.4.0에서 실제 보룸 없이 `실제 ✓`가 찍힌 오탐은 v0.4.1에서 
 - 여러 관리 보룸 중 어느 방 요청인지 확정되지 않으면 자동 클릭하지 않고 ambiguous 진단을 남긴다
 - request notification text만 감지되고 안전한 reject action이나 room identity가 없을 때도 자동 조작하지 않는다
 - 런타임 운영 지표로 요청거절 횟수, request-toggle 차단 횟수, passive audio re-protection 횟수를 표시한다
+
+## v0.5.1 screen-off / lock behavior
+
+- 화면 OFF 여부는 `PowerManager.isInteractive()` 하나만 사용하지 않고 실제 기본 디스플레이 상태(`OFF`, `DOZE`, `DOZE_SUSPEND`, `ON`)와 함께 판정한다.
+- Samsung AOD/DOZE 또는 wake transition을 실제 사용자 사용으로 오인해 5분 미루는 문제를 줄인다.
+- 자동 작업이 시작될 때 `interactive/display/locked/secure` 진단을 저장해 실기 오판을 추적할 수 있다.
+- 화면이 OFF라도 기기가 논리적으로 unlocked/trusted 상태라면 자동 점검을 계속할 수 있다.
+- 지문/패턴/PIN 인증이 실제로 필요한 secure-lock 상태는 우회하지 않는다. 해당 방은 `WAITING_UNLOCK`으로 두고 안전하게 대기한다.
+- 사용자가 정상적인 지문/패턴/PIN으로 잠금 해제하면 `ACTION_USER_PRESENT`를 받아 대기 중 방을 수초 내 재예약한다. 5분 주기를 끝까지 기다릴 필요가 없다.
+- lock-screen bypass, biometric/PIN injection, security-check bypass는 구현하지 않는다.
 
 ## Product/UX behavior
 
@@ -88,7 +98,8 @@ v0.4.0에서 실제 보룸 없이 `실제 ✓`가 찍힌 오탐은 v0.4.1에서 
 - ~47h55m precheck; actual Kakao UI remains source of truth
 - crash/stale-pending/app-update recovery
 - device reboot never trusts the old 47h55m timer: verified managed rooms are staggered into a real health check starting ~15 seconds after boot
-- AUTO work defers 5 minutes while the user is actively using the phone
+- AUTO work defers 5 minutes only when the default display is genuinely ON/interactive
+- secure-lock waits for normal unlock and resumes immediately after `USER_PRESENT`
 - scheduled jobs remain single-flight
 - BootReceiver accepts only the fixed system recovery action allowlist; WakeActivity remains non-exported
 
@@ -98,8 +109,8 @@ PR CI validates backend plus KakaoAutoSender and VoiceRoom Manager unit tests, l
 
 ## Remaining live-device gates
 
-1. v0.5.0 speaker-request runtime guard against a real request from another account/device
-2. 20-second screen-off unattended wake/check path on the target Samsung firmware
+1. v0.5.x speaker-request runtime guard against a real request from another account/device
+2. v0.5.1 20-second screen-off test on the target Samsung: OFF/DOZE false-busy fix + secure-lock WAITING_UNLOCK + normal-unlock resume
 3. full 47h55m -> 48h expiry -> recreation cycle
 4. one-account/device multi-VoiceRoom concurrency behavior
 
