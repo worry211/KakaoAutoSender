@@ -59,9 +59,7 @@ const registered = await put(
 
 const command = (name) => registered.find((c) => c.name === name);
 const subcommands = (name) =>
-  (command(name)?.options ?? [])
-    .filter((o) => o.type === 1)
-    .map((o) => o.name);
+  (command(name)?.options ?? []).filter((o) => o.type === 1).map((o) => o.name);
 const license = subcommands("license");
 const system = subcommands("system");
 
