@@ -31,7 +31,10 @@ android {
                 storeFile file(ksPath)
                 storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
                 keyAlias System.getenv('ANDROID_KEY_ALIAS')
-                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+                // The stable commercial keystore uses the same password for the
+                // keystore and its private key entry. Keep CI aligned with that
+                // fixed signing asset instead of maintaining a second password.
+                keyPassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
             }
         }
     }
@@ -54,7 +57,7 @@ android {
 tasks.register('validateReleaseConfiguration') {
     doLast {
         ['ANDROID_API_BASE_URL', 'ANDROID_KEYSTORE_PATH', 'ANDROID_KEYSTORE_PASSWORD',
-         'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD'].each { name ->
+         'ANDROID_KEY_ALIAS'].each { name ->
             if (!System.getenv(name)?.trim()) throw new GradleException('Missing release variable: ' + name)
         }
         if (System.getenv('ANDROID_API_BASE_URL').contains('.invalid')) throw new GradleException('Configure the production API origin')
