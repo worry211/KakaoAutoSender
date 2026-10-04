@@ -1,16 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
         <item name="android:statusBarColor">#0C0D10</item>
         <item name="android:navigationBarColor">#0C0D10</item>
         <item name="android:colorAccent">#6AA6FF</item>
-        <!-- targetSdk 35 enforces edge-to-edge by default. This screen is a classic
-             settings/dashboard UI, so opt out to keep the title and controls outside
-             Samsung/Android system bars. -->
-        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+        <!-- targetSdk 35 enforces edge-to-edge by default. This dashboard opts out on
+             API 35+ while older Android versions simply ignore the unavailable attr. -->
+        <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">true</item>
     </style>
 
     <style name="WakeTheme" parent="android:style/Theme.Material.NoActionBar">
