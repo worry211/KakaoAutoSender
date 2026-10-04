@@ -19,6 +19,7 @@ final class VoiceRoomStore {
     static final long PENDING_TIMEOUT_MS = 90L * 1000L;
     static final String MODE_AUTO = "AUTO";
     static final String MODE_PROBE = "PROBE";
+    static final String MODE_MANUAL = "MANUAL";
     static final String ENTRY_UNKNOWN = "UNKNOWN";
     static final String ENTRY_DEEPLINK = "DEEPLINK";
     static final String ENTRY_LAUNCHER = "LAUNCHER";
@@ -141,6 +142,16 @@ final class VoiceRoomStore {
         return best;
     }
 
+    static synchronized Room manualCheckDue(Context context, long now) {
+        Room best = null;
+        for (Room room : list(context)) {
+            if (!room.enabled || !"CHECK_DUE".equals(room.status)) continue;
+            long due = room.nextCheckAt <= 0 ? now : room.nextCheckAt;
+            if (best == null || due < (best.nextCheckAt <= 0 ? now : best.nextCheckAt)) best = room;
+        }
+        return best;
+    }
+
     static boolean managerActive(Context context) {
         return p(context).getBoolean(KEY_ACTIVE, false);
     }
@@ -161,7 +172,7 @@ final class VoiceRoomStore {
         p(context).edit()
                 .putString(KEY_PENDING_ROOM, roomId == null ? "" : roomId)
                 .putLong(KEY_PENDING_AT, System.currentTimeMillis())
-                .putString(KEY_PENDING_MODE, MODE_PROBE.equals(mode) ? MODE_PROBE : MODE_AUTO)
+                .putString(KEY_PENDING_MODE, normalizeMode(mode))
                 .putString(KEY_PENDING_ENTRY, normalizeEntry(entry))
                 .apply();
     }
@@ -182,7 +193,7 @@ final class VoiceRoomStore {
 
     static String pendingMode(Context context) {
         String value = p(context).getString(KEY_PENDING_MODE, MODE_AUTO);
-        return MODE_PROBE.equals(value) ? MODE_PROBE : MODE_AUTO;
+        return normalizeMode(value);
     }
 
     static String pendingEntry(Context context) {
@@ -196,6 +207,10 @@ final class VoiceRoomStore {
 
     static boolean isProbePending(Context context) {
         return MODE_PROBE.equals(pendingMode(context)) && !pendingRoomId(context).isEmpty();
+    }
+
+    static boolean isManualPending(Context context) {
+        return MODE_MANUAL.equals(pendingMode(context)) && !pendingRoomId(context).isEmpty();
     }
 
     static boolean hasFreshPending(Context context) {
@@ -262,6 +277,12 @@ final class VoiceRoomStore {
         r.stageStartedAt = Math.max(0L, o.optLong("stageStartedAt", 0L));
         r.lastDiagnostic = o.optString("lastDiagnostic", "");
         return r;
+    }
+
+    private static String normalizeMode(String mode) {
+        if (MODE_PROBE.equals(mode)) return MODE_PROBE;
+        if (MODE_MANUAL.equals(mode)) return MODE_MANUAL;
+        return MODE_AUTO;
     }
 
     private static String normalizeEntry(String entry) {
