@@ -5,6 +5,8 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 
+import java.util.List;
+
 public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -24,13 +26,32 @@ public class BootReceiver extends BroadcastReceiver {
         }
 
         if (boot) {
-            VoiceRoomStore.setLastStatus(context, "재부팅 후 보이스룸 자동관리 예약 복구");
+            // A device reboot tears down the local Kakao audio/session process. Do not trust a
+            // previously stored 47h55m alarm after reboot: force a real Kakao UI health check soon.
+            forcePostBootRecheck(context);
+            VoiceRoomStore.setLastStatus(context,
+                    "재부팅 후 보이스룸 실제 상태 재확인 예약 복구");
         } else if (updated) {
-            VoiceRoomStore.setLastStatus(context, "앱 업데이트 후 보이스룸 자동관리 예약 복구");
+            VoiceRoomStore.setLastStatus(context, "앱 업데이트 후 보이스룸 자동관리/요청 보호 복구");
         } else {
             VoiceRoomStore.setLastStatus(context, "정확 알람 권한 변경 확인 · 예약 다시 설정");
         }
         VoiceRoomScheduler.scheduleNext(context);
+    }
+
+    private void forcePostBootRecheck(Context context) {
+        long now = System.currentTimeMillis();
+        List<VoiceRoomStore.Room> rooms = VoiceRoomStore.list(context);
+        int offset = 0;
+        for (VoiceRoomStore.Room room : rooms) {
+            if (!room.enabled || !room.liveCheckPassed) continue;
+            room.status = "CHECK_DUE";
+            room.stageStartedAt = 0L;
+            room.lastError = "재부팅 후 실제 보이스룸 상태 재확인 예정";
+            room.nextCheckAt = now + 15_000L + (offset * 5_000L);
+            VoiceRoomStore.update(context, room);
+            offset += 1;
+        }
     }
 
     private void recoverInterruptedPending(Context context, String reason) {
