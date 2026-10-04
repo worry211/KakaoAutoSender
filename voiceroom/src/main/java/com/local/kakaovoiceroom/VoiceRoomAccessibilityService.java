@@ -1,9 +1,12 @@
 package com.local.kakaovoiceroom;
 
 import android.accessibilityservice.AccessibilityService;
+import android.app.KeyguardManager;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Rect;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -469,6 +472,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                 || "CREATING_CONFIRMING".equals(room.status);
         if (createdByUs) room.startedAt = now;
         if (manual) {
+            room.safeProbePassed = true;
             room.liveCheckPassed = true;
             room.verifiedAt = now;
         }
@@ -502,12 +506,46 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     }
 
     private void finishPending() {
+        boolean direct = VoiceRoomStore.isProbePending(this) || VoiceRoomStore.isManualPending(this);
         handler.removeCallbacks(timeoutRunnable);
         handler.removeCallbacks(followUpRunnable);
         followUpScheduled = false;
         watchedRoomId = "";
         VoiceRoomStore.clearPending(this);
         VoiceRoomScheduler.scheduleNext(this);
+
+        if (direct) {
+            handler.postDelayed(this::openManager, 350L);
+        } else {
+            // AUTO jobs only run when the phone was not being actively used. Leave Kakao cleanly
+            // so the user does not wake to a random chat screen. On unsecured devices we can also
+            // turn the display back off using the standard accessibility lock-screen action.
+            handler.postDelayed(() -> {
+                performGlobalAction(GLOBAL_ACTION_HOME);
+                if (Build.VERSION.SDK_INT >= 28 && !isDeviceSecure()) {
+                    handler.postDelayed(() -> performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN), 250L);
+                }
+            }, 250L);
+        }
+    }
+
+    private void openManager() {
+        try {
+            Intent intent = new Intent(this, MainActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                    | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            startActivity(intent);
+        } catch (Exception ignored) {}
+    }
+
+    private boolean isDeviceSecure() {
+        try {
+            KeyguardManager keyguard = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+            return keyguard != null && keyguard.isDeviceSecure();
+        } catch (Exception ignored) {
+            return true;
+        }
     }
 
     private void scheduleWatchdog(String roomId) {
