@@ -13,6 +13,8 @@ public class KakaoUiPolicyTest {
         assertTrue(KakaoUiPolicy.isOpenChatUrl("https://open.kakao.com/o/AbC_123"));
         assertFalse(KakaoUiPolicy.isOpenChatUrl("http://open.kakao.com/o/abc123"));
         assertFalse(KakaoUiPolicy.isOpenChatUrl("https://example.com/o/abc123"));
+        assertFalse(KakaoUiPolicy.isOpenChatUrl("https://open.kakao.com.evil.example/o/abc123"));
+        assertFalse(KakaoUiPolicy.isOpenChatUrl("https://open.kakao.com"));
         assertFalse(KakaoUiPolicy.isOpenChatUrl("javascript:alert(1)"));
     }
 
