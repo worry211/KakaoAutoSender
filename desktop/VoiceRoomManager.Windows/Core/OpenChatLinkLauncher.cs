@@ -59,6 +59,7 @@ internal static class OpenChatLinkLauncher
         if (exact != IntPtr.Zero)
         {
             Activate(exact);
+            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
             return new(true, true, "이미 열린 대상 채팅창 제목 완전일치 확인");
         }
 
@@ -72,16 +73,22 @@ internal static class OpenChatLinkLauncher
             return new(true, false, "오픈채팅 링크 실행 실패 · " + ex.GetType().Name);
         }
 
-        // First allow environments with a registered protocol hand-off to open KakaoTalk directly.
+        // Some Windows setups hand the web link directly to KakaoTalk.
         if (WaitForExactChat(room.Title, TimeSpan.FromSeconds(2), out exact))
         {
             Activate(exact);
+            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
             return new(true, true, "오픈채팅 링크 → 카카오 채팅창 제목 완전일치 검증 성공");
         }
 
+        // A direct handoff can also land on Kakao's OpenChat cover instead of the room itself.
+        // Treat that cover as a normal intermediate state, just like mobile.
+        var kakaoEntry = KakaoOpenChatEntry.TryEnter(room);
+        if (kakaoEntry.Success)
+            return new(true, true, "링크 → " + kakaoEntry.Diagnostic);
+
         // Current Windows browsers can show the open.kakao.com landing page instead of handing off
-        // automatically. Use semantic accessibility only: never coordinate-click the page and never
-        // invoke generic buttons. The exact Kakao landing action must be uniquely identifiable.
+        // automatically. Invoke only the exact OpenChat landing action; never generic browser buttons.
         var join = FindUniqueBrowserAction(JoinNames, requireOpenChatWindow: true, out var joinDiag);
         if (join is not null)
         {
@@ -89,38 +96,57 @@ internal static class OpenChatLinkLauncher
             if (!Invoke(join.Element))
                 return new(true, false, "브라우저 오픈채팅 참여 버튼 호출 실패 · " + joinDiag);
 
-            // Chromium-family browsers may ask for confirmation before opening an external app.
-            // Wait briefly for direct handoff, then accept only a Kakao-named confirmation action.
             if (WaitForExactChat(room.Title, TimeSpan.FromSeconds(2.5), out exact))
             {
                 Activate(exact);
+                OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
                 return new(true, true, "링크 → 브라우저 참여 버튼 → 카카오 채팅창 제목 완전일치 검증 성공");
             }
 
+            kakaoEntry = KakaoOpenChatEntry.TryEnter(room);
+            if (kakaoEntry.Success)
+                return new(true, true, "링크 → 브라우저 참여 버튼 → " + kakaoEntry.Diagnostic);
+
+            // Chromium-family browsers may ask for confirmation before opening an external app.
             var confirm = FindUniqueBrowserAction(KakaoOpenNames, requireOpenChatWindow: false, out var confirmDiag);
             if (confirm is not null)
             {
                 Activate(confirm.Hwnd);
-                if (Invoke(confirm.Element) && WaitForExactChat(room.Title, TimeSpan.FromSeconds(5), out exact))
+                if (!Invoke(confirm.Element))
+                    return new(true, false, "브라우저 카카오톡 열기 확인 버튼 호출 실패 · " + confirmDiag);
+
+                if (WaitForExactChat(room.Title, TimeSpan.FromSeconds(4), out exact))
                 {
                     Activate(exact);
+                    OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
                     return new(true, true, "링크 → 참여 버튼 → 카카오톡 열기 확인 → 채팅창 제목 완전일치 검증 성공");
                 }
-                return new(true, false, "브라우저 카카오톡 열기 확인 후 정확한 채팅창이 열리지 않음 · " + confirmDiag);
+
+                kakaoEntry = KakaoOpenChatEntry.TryEnter(room);
+                if (kakaoEntry.Success)
+                    return new(true, true, "링크 → 참여 버튼 → 카카오톡 열기 확인 → " + kakaoEntry.Diagnostic);
+
+                return new(true, false, "브라우저 카카오톡 열기 확인 후 실제 채팅방 진입 실패 · " +
+                    kakaoEntry.Diagnostic + " · " + confirmDiag);
             }
 
-            if (WaitForExactChat(room.Title, TimeSpan.FromSeconds(3), out exact))
+            if (WaitForExactChat(room.Title, TimeSpan.FromSeconds(2), out exact))
             {
                 Activate(exact);
+                OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
                 return new(true, true, "링크 → 브라우저 참여 버튼 → 카카오 채팅창 제목 완전일치 검증 성공");
             }
 
-            return new(true, false, "오픈채팅 참여 버튼은 눌렀지만 정확한 카카오 채팅창이 열리지 않음 · " +
-                BrowserDiagnostic() + " · confirm=" + confirmDiag);
+            kakaoEntry = KakaoOpenChatEntry.TryEnter(room);
+            if (kakaoEntry.Success)
+                return new(true, true, "링크 → 브라우저 참여 버튼 → " + kakaoEntry.Diagnostic);
+
+            return new(true, false, "오픈채팅 참여 후 카카오 내부 실제 방 진입까지 완료하지 못함 · " +
+                kakaoEntry.Diagnostic + " · " + BrowserDiagnostic() + " · confirm=" + confirmDiag);
         }
 
         return new(true, false, "링크 랜딩은 열렸지만 오픈채팅 참여 버튼을 접근성 트리에서 찾지 못함 · " +
-            joinDiag + " · " + BrowserDiagnostic());
+            joinDiag + " · kakao=" + kakaoEntry.Diagnostic + " · " + BrowserDiagnostic());
     }
 
     private static BrowserButton? FindUniqueBrowserAction(
