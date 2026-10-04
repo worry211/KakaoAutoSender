@@ -12,6 +12,7 @@ import android.provider.OpenableColumns;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.webkit.MimeTypeMap;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -111,7 +112,9 @@ public class RoomEditorActivity extends Activity {
         imageButtons.addView(choose, weight());
         Button remove = compactButton("사진 제거", Color.rgb(94, 58, 62));
         remove.setOnClickListener(v -> {
+            RoomMediaStore.Media old = RoomMediaStore.get(this, routeAlias);
             RoomMediaStore.clear(this, routeAlias);
+            releasePersistedReadPermission(old.uri);
             refreshMedia();
             toast("사진 첨부를 제거했어.");
         });
@@ -250,14 +253,47 @@ public class RoomEditorActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQUEST_IMAGE || resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
+        String name = displayName(uri);
+        String mime = resolveConcreteImageMime(getContentResolver().getType(uri), name);
+        if (mime == null) {
+            toast("사진 형식을 확인할 수 없어 저장하지 않았어. JPG, PNG, WEBP 같은 일반 이미지로 다시 선택해줘.");
+            return;
+        }
         try {
             getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } catch (Throwable ignored) {}
-        String mime = getContentResolver().getType(uri);
-        if (mime == null || !mime.toLowerCase(Locale.ROOT).startsWith("image/")) mime = "image/*";
-        RoomMediaStore.set(this, routeAlias, uri.toString(), mime, displayName(uri));
+        RoomMediaStore.Media old = RoomMediaStore.get(this, routeAlias);
+        RoomMediaStore.set(this, routeAlias, uri.toString(), mime, name);
+        if (!old.uri.equals(uri.toString())) releasePersistedReadPermission(old.uri);
         refreshMedia();
         toast("사진을 저장했어. 1회 전송으로 먼저 확인해줘.");
+    }
+
+    static String resolveConcreteImageMime(String resolverMime, String displayName) {
+        String direct = normalizeConcreteImageMime(resolverMime);
+        if (direct != null) return direct;
+        String name = displayName == null ? "" : displayName.trim();
+        int dot = name.lastIndexOf('.');
+        if (dot < 0 || dot == name.length() - 1) return null;
+        String extension = name.substring(dot + 1).toLowerCase(Locale.ROOT);
+        return normalizeConcreteImageMime(MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension));
+    }
+
+    private static String normalizeConcreteImageMime(String mime) {
+        if (mime == null) return null;
+        String value = mime.trim().toLowerCase(Locale.ROOT);
+        if (!value.startsWith("image/") || value.contains("*") || value.length() <= "image/".length()) return null;
+        return value;
+    }
+
+    private void releasePersistedReadPermission(String rawUri) {
+        if (rawUri == null || rawUri.trim().isEmpty()) return;
+        try {
+            Uri uri = Uri.parse(rawUri);
+            if ("content".equals(uri.getScheme())) {
+                getContentResolver().releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
+        } catch (Throwable ignored) {}
     }
 
     private String displayName(Uri uri) {
@@ -431,8 +467,10 @@ public class RoomEditorActivity extends Activity {
                 .setTitle(title + " 삭제")
                 .setMessage("메시지, 사진, 시간 설정, 카카오 연결 정보가 모두 삭제돼.")
                 .setPositiveButton("삭제", (d, w) -> {
+                    RoomMediaStore.Media old = RoomMediaStore.get(this, routeAlias);
                     MultiRoomStore.remove(this, routeAlias);
                     RoomMediaStore.clear(this, routeAlias);
+                    releasePersistedReadPermission(old.uri);
                     KakaoNotificationListener.unbindRoom(this, routeAlias);
                     if (Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false)) SendScheduler.scheduleNext(this);
                     toast("삭제했어.");
