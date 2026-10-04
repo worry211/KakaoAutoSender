@@ -5,10 +5,10 @@ import java.util.Locale;
 /**
  * Pure text policy for host-side speaker-request protection.
  *
- * The policy intentionally fails closed: generic words such as "요청", "취소", or a person's
- * name never authorize a click. Only explicit speaker-request context plus an explicit reject
- * action is actionable. Likewise, a global request toggle is changed only when its label clearly
- * describes the action that disables incoming requests.
+ * Fail closed: generic words, state labels, a person's name, or a plain "취소" never authorize
+ * a click. Only an explicit speaker-request context plus an explicit reject action is actionable.
+ * A global request control is changed only when its accessibility label describes an action the
+ * user could take (for example, "스피커 요청 끄기"), never merely a state such as "요청 차단".
  */
 final class VoiceRoomSpeakerRequestPolicy {
     enum ToggleState { ACCEPTING, BLOCKED, UNKNOWN }
@@ -42,10 +42,9 @@ final class VoiceRoomSpeakerRequestPolicy {
     }
 
     /**
-     * Interprets action-oriented accessibility labels.
-     * ACCEPTING means incoming requests are currently allowed and the control explicitly offers
-     * an action to disable/block them. BLOCKED means the control explicitly offers an action to
-     * re-enable/receive requests, which proves requests are currently blocked.
+     * Accessibility labels are interpreted as action labels, not as current-state prose.
+     * ACCEPTING means the control explicitly offers an action that would disable incoming requests.
+     * BLOCKED means the control explicitly offers an action that would re-enable incoming requests.
      */
     static ToggleState requestToggleState(String raw) {
         String s = normalize(raw);
@@ -54,13 +53,13 @@ final class VoiceRoomSpeakerRequestPolicy {
         }
 
         if (containsAny(s,
-                "요청 끄기", "요청 받지 않기", "요청 차단", "요청 비활성화",
-                "신청 끄기", "신청 받지 않기", "신청 차단", "신청 비활성화")) {
+                "요청 끄기", "요청 받지 않기", "요청 차단하기", "요청 비활성화하기",
+                "신청 끄기", "신청 받지 않기", "신청 차단하기", "신청 비활성화하기")) {
             return ToggleState.ACCEPTING;
         }
         if (containsAny(s,
-                "요청 켜기", "요청 받기", "요청 허용", "요청 활성화",
-                "신청 켜기", "신청 받기", "신청 허용", "신청 활성화")) {
+                "요청 켜기", "요청 받기", "요청 허용하기", "요청 활성화하기",
+                "신청 켜기", "신청 받기", "신청 허용하기", "신청 활성화하기")) {
             return ToggleState.BLOCKED;
         }
         return ToggleState.UNKNOWN;
