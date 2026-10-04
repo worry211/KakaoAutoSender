@@ -16,13 +16,18 @@ public sealed class VoiceRoomCoordinator : IDisposable
         _store = store;
         _kakao = kakao;
         _state = _store.Load();
+        OpenChatLinkRegistry.Rebuild(_state.Rooms);
         PowerPolicy.SetKeepSystemAwake(_state.ManagerActive);
         _timer = new Timer(async _ => await TickAsync(), null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(5));
     }
 
     public DesktopState Snapshot => _state;
 
-    public void Save() => _store.Save(_state);
+    public void Save()
+    {
+        OpenChatLinkRegistry.Rebuild(_state.Rooms);
+        _store.Save(_state);
+    }
 
     public async Task<KakaoPcAutomation.Result> SafeProbeAsync(RoomState room) =>
         await RunExclusiveAsync(() =>
@@ -56,7 +61,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
         if (unverified.Count > 0) throw new InvalidOperationException("실제 점검이 먼저 필요해: " + string.Join(", ", unverified));
         _state.ManagerActive = true;
         PowerPolicy.SetKeepSystemAwake(true);
-        _state.LastStatus = "Windows 보이스룸 자동관리 시작 · 링크 우선 진입 · PC 절전만 방지, 모니터 OFF 허용";
+        _state.LastStatus = "Windows 보이스룸 자동관리 시작 · 링크/소개화면 우선 진입 · PC 절전만 방지, 모니터 OFF 허용";
         var now = DateTimeOffset.Now;
         foreach (var room in enabled)
             room.NextCheckAt ??= now.AddSeconds(3);
@@ -149,20 +154,43 @@ public sealed class VoiceRoomCoordinator : IDisposable
 
         var launch = _kakao.EnsureKakaoRunning();
         if (!launch.Success) return launch;
-        Thread.Sleep(450);
+        Thread.Sleep(500);
 
+        // Reuse a room context only while the actual Kakao chat surface is still visible.
+        if (OpenChatLinkRegistry.IsRecentlyVerifiedEntry(room.Title, TimeSpan.FromSeconds(20)) &&
+            (KakaoSurfaceLocator.FindExactChat(room.Title) != IntPtr.Zero || KakaoSurfaceLocator.TryFindChatComposer(out _)))
+            return new(true, "최근 링크 진입 + 실제 채팅 surface 검증 재사용");
+
+        // 1) Link/browser handoff. Some environments jump directly into the actual chat.
         var link = OpenChatLinkLauncher.TryOpen(room);
         if (link.Success)
+        {
+            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
             return new(true, link.Diagnostic);
+        }
 
-        // Some Windows/browser configurations open the web landing page but do not hand off
-        // to KakaoTalk. In that case use the verified Win32 HWND search path, never the old
-        // empty-UIA room navigator.
+        // 2) Kakao PC often stops on the OpenChat cover/profile surface. Treat that as a normal
+        // intermediate state and enter the already-joined room exactly like the mobile flow.
+        var preview = KakaoOpenChatPreviewBridge.TryEnter(room.Title);
+        if (preview.Success)
+        {
+            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
+            return new(true, link.Diagnostic + " → " + preview.Diagnostic);
+        }
+
+        // 3) Last resort: verified Win32 search. Never trust the search action without exact title proof.
         var navigation = _win32.OpenRoom(room.Title);
-        if (!navigation.Success)
-            return new(false, "방 진입 실패 · " + link.Diagnostic + " → Win32 fallback 실패 · " + navigation.Diagnostic);
+        if (navigation.Success)
+        {
+            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
+            return new(true, link.Diagnostic + " → preview=" + preview.Diagnostic + " → Win32 검색 fallback 성공 · " + navigation.Diagnostic);
+        }
 
-        return new(true, link.Diagnostic + " → Win32 검색 fallback 성공 · " + navigation.Diagnostic);
+        return new(false,
+            "방 진입 실패 · link=" + link.Diagnostic +
+            " → preview=" + preview.Diagnostic +
+            " → Win32=" + navigation.Diagnostic +
+            " → " + KakaoSurfaceLocator.Diagnostic());
     }
 
     private void ApplyResult(RoomState room, KakaoPcAutomation.Result result, bool manual)
