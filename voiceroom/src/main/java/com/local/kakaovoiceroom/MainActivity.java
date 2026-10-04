@@ -47,13 +47,14 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(Color.rgb(12, 13, 16));
         getWindow().setNavigationBarColor(Color.rgb(12, 13, 16));
         setContentView(buildUi());
+        recoverInterruptedDirectCheckOnForeground();
         recoverStalePendingOnForeground();
         refreshUi();
     }
 
     @Override protected void onResume() {
         super.onResume();
-        cancelDirectCheckIfReturnedToManager();
+        recoverInterruptedDirectCheckOnForeground();
         recoverStalePendingOnForeground();
         handler.removeCallbacks(ticker);
         handler.post(ticker);
@@ -73,8 +74,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         root.addView(text("보이스룸 매니저", 28, true));
-        TextView subtitle = text("v" + BuildConfig.VERSION_NAME
-                + " · 카톡매크로와 완전히 분리된 별도 앱 · 현재 휴대폰의 카카오톡 계정을 사용", 12, false);
+        TextView subtitle = text("v" + BuildConfig.VERSION_NAME + " · 카톡매크로와 완전히 분리된 별도 앱 · 현재 휴대폰의 카카오톡 계정을 사용", 12, false);
         subtitle.setTextColor(Color.rgb(145, 151, 164));
         root.addView(subtitle, top(5));
 
@@ -145,7 +145,7 @@ public class MainActivity extends Activity {
         tools2.addView(kakao, kakaoLp);
         root.addView(tools2, top(7));
 
-        TextView note = text("처음에는 방별 ‘안전 점검’부터 실행해. 안전 점검은 생성하지 않고 인식만 확인하고, ‘실제 점검’은 선택한 방만 즉시 실제 생성까지 검증할 수 있어. 화면 OFF 자동화는 보안 잠금을 우회하지 않아.", 11, false);
+        TextView note = text("설정 후에는 방별 ‘안전 점검’ 1회 → ‘실제 점검’ 1회만 통과시키면 돼. 이후 전체 시작은 검증된 방만 자동관리해. 수동 점검은 버튼을 누르는 즉시 실행되고 예약 알람을 기다리지 않아.", 11, false);
         note.setTextColor(Color.rgb(132, 138, 150));
         root.addView(note, top(14));
 
@@ -247,7 +247,9 @@ public class MainActivity extends Activity {
         probeLp.leftMargin = dp(6);
         actions.addView(probe, probeLp);
 
-        Button check = compactButton("실제 점검", Color.rgb(58, 91, 151));
+        String liveLabel = "MANUAL_RUNNING".equals(room.status) ? "점검 중…" : "실제 점검";
+        Button check = compactButton(liveLabel, Color.rgb(58, 91, 151));
+        check.setEnabled(!VoiceRoomStore.hasFreshPending(this));
         check.setOnClickListener(v -> confirmImmediateCheck(room));
         LinearLayout.LayoutParams checkLp = weight();
         checkLp.leftMargin = dp(6);
@@ -353,9 +355,9 @@ public class MainActivity extends Activity {
 
         new AlertDialog.Builder(this)
                 .setTitle("실제 보이스룸 점검")
-                .setMessage("선택한 ‘" + room.title + "’ 방만 즉시 확인해. 보이스룸이 없으면 방 이름을 보이스룸 이름으로 자동 입력하고 실제로 새 보이스룸을 만들 수 있어. 전체 자동관리 ON/OFF 상태는 바꾸지 않아. 계속할까?")
+                .setMessage("선택한 ‘" + room.title + "’ 방을 지금 즉시 확인해. 보이스룸이 없으면 방 이름을 보이스룸 이름으로 자동 입력하고 실제로 새 보이스룸을 만들어. 전체 자동관리 ON/OFF 상태는 바꾸지 않아. 계속할까?")
                 .setNegativeButton("취소", null)
-                .setPositiveButton("실행", (d, w) -> startManualLiveCheck(room))
+                .setPositiveButton("지금 실행", (d, w) -> startManualLiveCheck(room))
                 .show();
     }
 
@@ -363,17 +365,34 @@ public class MainActivity extends Activity {
         VoiceRoomStore.Room current = VoiceRoomStore.get(this, room.id);
         if (current == null) return;
         if (!validRoomLinkOrMarkError(current, false)) return;
+        if (VoiceRoomStore.hasFreshPending(this)) {
+            toast("이미 다른 점검을 처리 중이야.");
+            return;
+        }
 
-        current.nextCheckAt = System.currentTimeMillis() + 2_000L;
-        current.status = "CHECK_DUE";
-        current.stageStartedAt = 0L;
+        long now = System.currentTimeMillis();
+        current.status = "MANUAL_RUNNING";
+        current.stageStartedAt = now;
         current.lastError = "";
         current.lastDiagnostic = "";
         VoiceRoomStore.update(this, current);
-        VoiceRoomStore.setLastStatus(this, current.title + " · 수동 실제 점검 대기");
-        VoiceRoomScheduler.scheduleNext(this);
-        toast("선택한 방 실제 점검을 시작해.");
-        refreshUi();
+        VoiceRoomStore.setLastStatus(this, current.title + " · 수동 실제 점검 즉시 실행");
+
+        Intent wake = new Intent(this, WakeActivity.class);
+        wake.putExtra(VoiceRoomScheduler.EXTRA_ROOM_ID, current.id);
+        wake.putExtra(VoiceRoomScheduler.EXTRA_MANUAL, true);
+        wake.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+        try {
+            startActivity(wake);
+            toast("실제 점검을 지금 시작해.");
+        } catch (Exception e) {
+            current.status = "MANUAL_ERROR";
+            current.stageStartedAt = 0L;
+            current.lastError = "실제 점검 실행 실패 · " + shortError(e);
+            VoiceRoomStore.update(this, current);
+            VoiceRoomStore.setLastStatus(this, current.title + " · " + current.lastError);
+            refreshUi();
+        }
     }
 
     private boolean validRoomLinkOrMarkError(VoiceRoomStore.Room room, boolean probe) {
@@ -510,25 +529,26 @@ public class MainActivity extends Activity {
         refreshUi();
     }
 
-    private void cancelDirectCheckIfReturnedToManager() {
+    private void recoverInterruptedDirectCheckOnForeground() {
         String pendingId = VoiceRoomStore.pendingRoomId(this);
         if (pendingId.isEmpty()) return;
         boolean probe = VoiceRoomStore.isProbePending(this);
         boolean manual = VoiceRoomStore.isManualPending(this);
         if (!probe && !manual) return;
+        long age = System.currentTimeMillis() - VoiceRoomStore.pendingAt(this);
+        if (age < 2_000L) return;
 
         VoiceRoomStore.Room room = VoiceRoomStore.get(this, pendingId);
         VoiceRoomStore.clearPending(this);
-        VoiceRoomScheduler.scheduleNext(this);
         if (room == null) return;
-
         room.stageStartedAt = 0L;
         room.status = probe ? "PROBE_ERROR" : "MANUAL_ERROR";
         room.lastError = probe
-                ? "안전 점검 중 보룸 매니저로 돌아와 점검을 중단함"
-                : "실제 점검 중 보룸 매니저로 돌아와 점검을 중단함";
+                ? "안전 점검이 사용자 화면 복귀로 중단됨"
+                : "실제 점검이 사용자 화면 복귀로 중단됨";
         VoiceRoomStore.update(this, room);
-        VoiceRoomStore.setLastStatus(this, room.title + " · 사용자가 점검 중단");
+        VoiceRoomStore.setLastStatus(this, room.title + " · 점검 중단 정리 완료");
+        VoiceRoomScheduler.scheduleNext(this);
     }
 
     private void recoverStalePendingOnForeground() {
@@ -604,6 +624,7 @@ public class MainActivity extends Activity {
             case "CREATING": return "재개설 준비 중";
             case "CREATING_NAMED": return "이름 입력 완료 · 생성 중";
             case "CREATING_CONFIRMING": return "생성 확인 중";
+            case "MANUAL_RUNNING": return "실제 점검 시작 중";
             case "OPENING_KAKAO": return "카카오톡 여는 중";
             case "OPENING_ROOM": return "방 진입 중";
             case "ROOM_VERIFIED": return "대상 방 확인됨";
