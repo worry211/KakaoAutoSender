@@ -20,10 +20,9 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".RoomEditorActivity" android:exported="false" />
-        <activity android:name=".MainActivityV3" android:exported="false" />
-        <activity android:name=".MainActivityV2" android:exported="false" />
-        <activity android:name=".MainActivity" android:exported="false" />
+        <activity
+            android:name=".RoomEditorActivity"
+            android:exported="false" />
 
         <service
             android:name=".KakaoNotificationListener"
@@ -35,7 +34,9 @@
             </intent-filter>
         </service>
 
-        <receiver android:name=".SendAlarmReceiver" android:exported="false" />
+        <receiver
+            android:name=".SendAlarmReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"
