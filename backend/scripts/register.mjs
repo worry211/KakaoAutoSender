@@ -42,7 +42,9 @@ async function put(path, body) {
   });
   const raw = await response.text();
   if (!response.ok)
-    throw new Error(`Discord registration failed: HTTP ${response.status} ${raw}`);
+    throw new Error(
+      `Discord registration failed: HTTP ${response.status} ${raw}`,
+    );
   try {
     return JSON.parse(raw);
   } catch {
@@ -57,7 +59,9 @@ const registered = await put(
 
 const command = (name) => registered.find((c) => c.name === name);
 const subcommands = (name) =>
-  (command(name)?.options ?? []).filter((o) => o.type === 1).map((o) => o.name);
+  (command(name)?.options ?? [])
+    .filter((o) => o.type === 1)
+    .map((o) => o.name);
 const license = subcommands("license");
 const system = subcommands("system");
 
@@ -68,7 +72,10 @@ if (!license.includes("help") || !system.includes("help")) {
 }
 
 // Remove any stale global copies so seller commands are not advertised outside the admin guild.
-const global = await put(`/applications/${DISCORD_APPLICATION_ID}/commands`, []);
+const global = await put(
+  `/applications/${DISCORD_APPLICATION_ID}/commands`,
+  [],
+);
 if (!Array.isArray(global) || global.length !== 0)
   throw new Error("Failed to clear stale global commands.");
 
