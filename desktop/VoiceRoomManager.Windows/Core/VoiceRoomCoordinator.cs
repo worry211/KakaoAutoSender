@@ -77,6 +77,15 @@ public sealed class VoiceRoomCoordinator : IDisposable
                 .FirstOrDefault();
             if (due is not null)
             {
+                if (DesktopSession.IdleFor() < TimeSpan.FromSeconds(30))
+                {
+                    due.NextCheckAt = DateTimeOffset.Now.AddMinutes(1);
+                    _state.LastStatus = due.Title + " · PC 사용 중이라 자동 점검을 1분 미룸";
+                    Save();
+                    StateChanged?.Invoke();
+                    return;
+                }
+
                 var result = _kakao.EnsureVoiceRoom(due);
                 ApplyResult(due, result, manual: false);
                 Save();
@@ -125,7 +134,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
             room.LastError = "";
             room.Failures = 0;
             room.StartedAt ??= now;
-            room.NextCheckAt = room.StartedAt.Value.AddHours(48).AddMinutes(-5);
+            room.NextCheckAt = NextActiveCheck(room.StartedAt.Value, now);
             room.MicMuted = result.MicMuted;
             room.SpeakerMuted = result.SpeakerMuted;
             _state.LastStatus = room.Title + " · 보이스룸 활성 확인";
@@ -144,6 +153,15 @@ public sealed class VoiceRoomCoordinator : IDisposable
         room.LastError = result.Status;
         room.NextCheckAt = now.Add(RetryDelay(room.Failures));
         _state.LastStatus = room.Title + " · " + result.Status;
+    }
+
+    private static DateTimeOffset NextActiveCheck(DateTimeOffset startedAt, DateTimeOffset now)
+    {
+        var expiry = startedAt.AddHours(48);
+        var precheck = expiry.AddMinutes(-5);
+        if (now < precheck) return precheck;
+        if (now < expiry) return now.AddMinutes(1) < expiry ? now.AddMinutes(1) : expiry;
+        return now.AddMinutes(1);
     }
 
     private async Task<T> RunExclusiveAsync<T>(Func<T> action)
