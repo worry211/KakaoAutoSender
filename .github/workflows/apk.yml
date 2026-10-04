@@ -36,6 +36,10 @@ jobs:
           gradle-version: '8.9'
       - name: Test, lint and build
         run: ANDROID_HOME=/usr/local/lib/android/sdk ANDROID_SDK_ROOT=/usr/local/lib/android/sdk gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: Dump Android test diagnostics
+        if: failure()
+        run: |
+          find app/build/test-results/testDebugUnitTest -type f -name '*.xml' -print -exec cat {} \; || true
       - name: Validate minified release using ephemeral CI fixture
         env:
           ANDROID_API_BASE_URL: https://license.example.com
