@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService;
 import android.content.ComponentName;
 import android.content.Context;
 import android.graphics.Rect;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
@@ -35,6 +36,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
             "보이스룸 만들기", "보이스룸 시작", "보이스룸 열기", "보이스룸 개설",
             "보이스 룸 만들기", "보이스 룸 시작");
     private static final List<String> CREATE_WEAK_TERMS = Arrays.asList("시작하기");
+    private static final List<String> CREATE_SUBMIT_TERMS = Arrays.asList("만들기");
     private static final List<String> CONFIRM_TERMS = Arrays.asList("시작", "만들기", "확인");
     private static final List<String> STRONG_ACTIVE_TERMS = Arrays.asList(
             "보이스룸 종료", "보이스룸 나가기", "보이스 룸 종료", "보이스 룸 나가기");
@@ -218,6 +220,16 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                     return;
                 }
 
+                if (hasCreateForm(root)) {
+                    if (probe) {
+                        finishProbe(room, "보이스룸 생성 입력 화면까지 안전하게 인식 성공");
+                        return;
+                    }
+                    transition(room, "CREATING", room.title + " · 보이스룸 이름 입력 준비");
+                    scheduleFollowUp();
+                    return;
+                }
+
                 boolean strongCreate = containsAny(root, CREATE_STRONG_TERMS);
                 boolean weakCreate = containsAny(root, CREATE_WEAK_TERMS) && containsAny(root, VOICE_TERMS);
                 if (strongCreate || weakCreate) {
@@ -241,6 +253,28 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                     markActive(room, now);
                     return;
                 }
+
+                AccessibilityNodeInfo nameInput = findCreateNameInput(root);
+                if (nameInput != null) {
+                    String desired = KakaoUiPolicy.voiceRoomName(room.title);
+                    String current = value(nameInput.getText());
+                    if (!desired.equals(current)) {
+                        if (setText(nameInput, desired)) {
+                            VoiceRoomStore.setLastStatus(this,
+                                    room.title + " · 보이스룸 이름 입력 완료 · 생성 버튼 활성 대기");
+                        }
+                        scheduleFollowUp();
+                        return;
+                    }
+
+                    if (clickAnyExact(root, CREATE_SUBMIT_TERMS)) {
+                        transition(room, "CREATING_CONFIRMING",
+                                room.title + " · 만들기 실행 후 활성 확인 중");
+                    }
+                    scheduleFollowUp();
+                    return;
+                }
+
                 if (clickAnyExact(root, CONFIRM_TERMS)) {
                     transition(room, "CREATING_CONFIRMING", room.title + " · 생성 확인 후 활성 대기");
                 }
@@ -292,7 +326,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         else if (s.contains("OPENING_ROOM")) base = "방 선택 후 채팅 화면 진입을 확인하지 못함";
         else if (s.contains("ROOM_VERIFIED") || s.contains("ROOM_MENU")) base = "하단 + 메뉴에서 보이스룸 항목을 찾지 못함";
         else if (s.contains("VOICE_MENU")) base = "보이스룸 화면에서 활성/생성 상태를 확인하지 못함";
-        else if (s.contains("CREATING")) base = "보이스룸 생성 후 활성 상태를 확인하지 못함";
+        else if (s.contains("CREATING")) base = "보이스룸 생성 폼 처리 또는 활성 확인에 실패함";
         else base = "카카오톡 화면 인식 제한시간 초과";
         return base + " · " + detail;
     }
@@ -302,6 +336,48 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         return containsAny(root, VOICE_TERMS)
                 && containsAny(root, SPEAKER_TERMS)
                 && containsAny(root, LISTENER_TERMS);
+    }
+
+    private boolean hasCreateForm(AccessibilityNodeInfo root) {
+        return findCreateNameInput(root) != null
+                && containsAny(root, CREATE_STRONG_TERMS)
+                && bestClickableMatching(root, CREATE_SUBMIT_TERMS, true) != null;
+    }
+
+    private AccessibilityNodeInfo findCreateNameInput(AccessibilityNodeInfo root) {
+        Rect rootBounds = new Rect();
+        root.getBoundsInScreen(rootBounds);
+        int width = Math.max(1, rootBounds.width());
+        int height = Math.max(1, rootBounds.height());
+        AccessibilityNodeInfo best = null;
+        long bestScore = Long.MIN_VALUE;
+
+        for (AccessibilityNodeInfo node : findAllNodes(root)) {
+            CharSequence className = node.getClassName();
+            if (className == null || !className.toString().contains("EditText")) continue;
+            if (!node.isVisibleToUser() || !node.isEditable()) continue;
+            Rect b = new Rect();
+            node.getBoundsInScreen(b);
+            if (b.isEmpty()) continue;
+            int cy = b.centerY() - rootBounds.top;
+            if (cy < (int) (height * 0.25) || cy > (int) (height * 0.75)) continue;
+            if (b.width() < (int) (width * 0.45)) continue;
+            long score = (long) b.width() * 10L - Math.abs(cy - (long) (height * 0.45));
+            if (score > bestScore) {
+                bestScore = score;
+                best = node;
+            }
+        }
+        return best;
+    }
+
+    private boolean setText(AccessibilityNodeInfo node, String text) {
+        if (node == null || !node.isEditable()) return false;
+        Bundle args = new Bundle();
+        args.putCharSequence(
+                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                text == null ? "" : text);
+        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
     }
 
     private void finishProbe(VoiceRoomStore.Room room, String message) {
@@ -395,9 +471,6 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         }
         if (best != null || !allowGeometryFallback) return best;
 
-        // Some Kakao builds expose the round composer '+' as a clickable node with no text or
-        // content description. Once the target chat room itself is already verified, selecting
-        // the left-most lower control by geometry is safer than failing or clicking the top menu.
         for (AccessibilityNodeInfo node : findAllNodes(root)) {
             if (!node.isClickable() || !node.isVisibleToUser()) continue;
             long score = composerScore(rootBounds, node, width, height);
@@ -524,6 +597,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                 + " · add=" + hasComposerAction(root)
                 + " · voice=" + containsAny(root, VOICE_TERMS)
                 + " · create=" + (containsAny(root, CREATE_STRONG_TERMS) || containsAny(root, CREATE_WEAK_TERMS))
+                + " · form=" + hasCreateForm(root)
                 + " · active=" + isActiveVoiceRoom(root)
                 + " · entry=" + VoiceRoomStore.pendingEntry(this);
     }
