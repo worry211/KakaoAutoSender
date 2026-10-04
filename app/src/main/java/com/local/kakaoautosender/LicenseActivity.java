@@ -34,7 +34,6 @@ public class LicenseActivity extends Activity {
   private static final int BORDER = Color.rgb(45, 55, 75);
   private static final int PRIMARY = Color.rgb(86, 112, 255);
   private static final int PRIMARY_SOFT = Color.rgb(30, 40, 72);
-  private static final int MUTED = Color.rgb(151, 160, 177);
   private static final int TEXT = Color.rgb(238, 242, 249);
   private static final int GREEN = Color.rgb(94, 226, 157);
   private static final int AMBER = Color.rgb(243, 190, 91);
@@ -342,16 +341,14 @@ public class LicenseActivity extends Activity {
     return t;
   }
 
-  private TextView section(String title, String detail) {
+  private LinearLayout section(String title, String detail) {
     LinearLayout box = new LinearLayout(this);
     box.setOrientation(LinearLayout.VERTICAL);
     TextView t = text(title, 17, true, Color.rgb(226, 232, 244));
     TextView d = text(detail, 11, false, Color.rgb(118, 129, 149));
     box.addView(t);
     box.addView(d, top(3));
-    TextView carrier = new TextView(this);
-    carrier.setTag(box);
-    return carrier;
+    return box;
   }
 
   private LinearLayout premiumCard(int fill, int stroke) {
