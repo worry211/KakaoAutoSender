@@ -3,6 +3,8 @@ package com.local.kakaovoiceroom;
 import java.util.Locale;
 
 final class KakaoUiPolicy {
+    private static final int VOICE_ROOM_NAME_MAX_CODEPOINTS = 30;
+
     private KakaoUiPolicy() {}
 
     static String normalize(String value) {
@@ -30,6 +32,20 @@ final class KakaoUiPolicy {
             if (!Character.isDigit(suffix.charAt(i))) return false;
         }
         return true;
+    }
+
+    /**
+     * Kakao's current create sheet accepts 1..30 characters. Use the configured Open Chat
+     * title as the default VoiceRoom name so unattended recreation never stalls on an empty
+     * required field. Count/truncate by Unicode code point to avoid splitting emoji/surrogates.
+     */
+    static String voiceRoomName(String roomTitle) {
+        String value = normalize(roomTitle);
+        if (value.isEmpty()) value = "보이스룸";
+        int count = value.codePointCount(0, value.length());
+        if (count <= VOICE_ROOM_NAME_MAX_CODEPOINTS) return value;
+        int end = value.offsetByCodePoints(0, VOICE_ROOM_NAME_MAX_CODEPOINTS);
+        return value.substring(0, end).trim();
     }
 
     static boolean isOpenChatUrl(String value) {
