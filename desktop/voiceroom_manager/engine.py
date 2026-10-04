@@ -8,7 +8,6 @@ import time
 
 from .adb import Adb, AdbError
 from .model import AppConfig, RoomConfig, StateStore, next_check_for_active, retry_delay_seconds
-from .power import keep_windows_awake
 from .ui import UiTree, center, valid_bounds
 
 
@@ -16,6 +15,28 @@ from .ui import UiTree, center, valid_bounds
 class ProbeResult:
     status: str
     detail: str = ""
+
+
+@dataclass
+class PreflightResult:
+    ok: bool
+    device_serial: str = ""
+    model: str = ""
+    kakao_installed: bool = False
+    ui_dump_ok: bool = False
+    foreground_package: str = ""
+    detail: str = ""
+
+
+@dataclass
+class InspectionResult:
+    status: str
+    detail: str
+    room_visible: bool = False
+    voice_menu_visible: bool = False
+    active_visible: bool = False
+    snapshot_xml: str = ""
+    snapshot_png: str = ""
 
 
 class VoiceRoomEngine:
@@ -28,10 +49,29 @@ class VoiceRoomEngine:
 
     def prepare(self) -> None:
         model = self.adb.ensure_device()
+        if not self.adb.package_installed(self.config.kakao_package):
+            raise AdbError(f"카카오톡 패키지를 찾지 못함: {self.config.kakao_package}")
         self.adb.wake_and_keep_awake(self.config.keep_device_awake)
         if self.config.mute_audio:
             self.adb.mute_audio()
-        self.log("READY", detail=f"ADB device: {model}")
+        self.log("READY", detail=f"ADB device: {model} ({self.adb.serial})")
+
+    def preflight(self) -> PreflightResult:
+        try:
+            model = self.adb.ensure_device()
+            kakao_installed = self.adb.package_installed(self.config.kakao_package)
+            if not kakao_installed:
+                return PreflightResult(ok=False, device_serial=self.adb.serial, model=model, kakao_installed=False, detail=f"카카오톡 패키지를 찾지 못함: {self.config.kakao_package}")
+            if self.config.mute_audio:
+                self.adb.mute_audio()
+            self.adb.wake_and_keep_awake(self.config.keep_device_awake)
+            xml = self.adb.dump_ui()
+            ui_dump_ok = bool(xml.strip())
+            foreground = self.adb.foreground_package()
+            detail = "기기·카카오톡·UI 접근 정상" if ui_dump_ok else "UI 계층이 비어 있음"
+            return PreflightResult(ok=ui_dump_ok, device_serial=self.adb.serial, model=model, kakao_installed=True, ui_dump_ok=ui_dump_ok, foreground_package=foreground, detail=detail)
+        except Exception as exc:
+            return PreflightResult(ok=False, detail=f"{type(exc).__name__}: {exc}")
 
     def due_rooms(self, now: float | None = None) -> list[RoomConfig]:
         now = time.time() if now is None else now
@@ -44,6 +84,49 @@ class VoiceRoomEngine:
                 due.append(room)
         due.sort(key=lambda room: self.state.get(room.id).next_check_at)
         return due
+
+    def inspect_room(self, room: RoomConfig) -> InspectionResult:
+        """Safe selector check. Opens the room/menu but never creates a VoiceRoom."""
+        try:
+            self.prepare()
+            self.log("INSPECT_START", room=room)
+            self._open_room(room)
+            selectors = room.merged_selectors()
+            tree = self._tree()
+            if self._is_active(room, tree):
+                xml_path, png_path = self.adb.snapshot(self.snapshot_dir, f"{room.id}-inspect-active")
+                self.adb.back()
+                self.log("INSPECT_ACTIVE", room=room)
+                return InspectionResult(status="ACTIVE", detail="방 인식 정상 · 현재 보이스룸 활성 상태도 확인됨", room_visible=True, voice_menu_visible=True, active_visible=True, snapshot_xml=str(xml_path), snapshot_png=str(png_path))
+
+            room_visible = self._looks_like_room(room, tree, selectors)
+            if not room_visible:
+                raise RuntimeError("방 진입 후 제목/채팅 UI를 확인하지 못함")
+
+            if not self._click_any(tree, selectors["more"]):
+                xml_path, png_path = self.adb.snapshot(self.snapshot_dir, f"{room.id}-inspect-no-more")
+                raise RuntimeError(f"더보기/+ 버튼 인식 실패 · 진단 저장: {xml_path.name}, {png_path.name}")
+            time.sleep(0.9)
+            menu_tree = self._tree()
+            voice_visible = menu_tree.has_any(selectors["voice_room"], exact=False)
+            xml_path, png_path = self.adb.snapshot(self.snapshot_dir, f"{room.id}-inspect-menu")
+            self.adb.back()
+
+            if not voice_visible:
+                detail = f"방 인식은 됐지만 보이스룸 메뉴 문구를 찾지 못함. 진단 저장: {xml_path.name}, {png_path.name}"
+                self.log("INSPECT_SELECTOR_MISSING", room=room, detail=detail)
+                return InspectionResult(status="SELECTOR_MISSING", detail=detail, room_visible=True, voice_menu_visible=False, snapshot_xml=str(xml_path), snapshot_png=str(png_path))
+            detail = "방 인식 정상 · 보이스룸 메뉴 인식 정상 · 생성 버튼은 누르지 않음"
+            self.log("INSPECT_READY", room=room)
+            return InspectionResult(status="READY", detail=detail, room_visible=True, voice_menu_visible=True, snapshot_xml=str(xml_path), snapshot_png=str(png_path))
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {exc}"
+            self.log("INSPECT_ERROR", room=room, detail=detail)
+            try:
+                xml_path, png_path = self.adb.snapshot(self.snapshot_dir, f"{room.id}-inspect-error")
+                return InspectionResult(status="ERROR", detail=detail, snapshot_xml=str(xml_path), snapshot_png=str(png_path))
+            except Exception:
+                return InspectionResult(status="ERROR", detail=detail)
 
     def process_room(self, room: RoomConfig) -> ProbeResult:
         state = self.state.get(room.id)
@@ -101,18 +184,14 @@ class VoiceRoomEngine:
         return processed
 
     def run_forever(self, stop_event: threading.Event | None = None) -> None:
-        keep_windows_awake(True)
-        try:
-            self.prepare()
-            self.log("DAEMON_START")
-            while stop_event is None or not stop_event.is_set():
-                count = self.run_once(stop_event)
-                if count == 0:
-                    if not self._wait(self.config.poll_seconds, stop_event):
-                        break
-            self.log("DAEMON_STOP")
-        finally:
-            keep_windows_awake(False)
+        self.prepare()
+        self.log("DAEMON_START")
+        while stop_event is None or not stop_event.is_set():
+            count = self.run_once(stop_event)
+            if count == 0:
+                if not self._wait(self.config.poll_seconds, stop_event):
+                    break
+        self.log("DAEMON_STOP")
 
     def snapshot(self, prefix: str = "manual") -> tuple[Path, Path]:
         self.prepare()
@@ -122,12 +201,7 @@ class VoiceRoomEngine:
         rows = []
         for room in self.config.rooms:
             state = self.state.get(room.id)
-            rows.append({
-                "id": room.id, "title": room.title, "enabled": room.enabled,
-                "status": state.status, "started_at": state.started_at,
-                "last_verified_at": state.last_verified_at, "next_check_at": state.next_check_at,
-                "failures": state.failures, "last_error": state.last_error,
-            })
+            rows.append({"id": room.id, "title": room.title, "enabled": room.enabled, "status": state.status, "started_at": state.started_at, "last_verified_at": state.last_verified_at, "next_check_at": state.next_check_at, "failures": state.failures, "last_error": state.last_error})
         return rows
 
     def _wait(self, seconds: float, stop_event: threading.Event | None) -> bool:

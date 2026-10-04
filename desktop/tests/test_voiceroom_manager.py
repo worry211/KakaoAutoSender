@@ -2,7 +2,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
+from voiceroom_manager.adb import Adb, AdbError
 from voiceroom_manager.model import AppConfig, RoomConfig, RoomState, StateStore, next_check_for_active, retry_delay_seconds
 from voiceroom_manager.ui import UiTree, center, parse_bounds
 
@@ -21,6 +24,33 @@ class UiTreeTest(unittest.TestCase):
         self.assertEqual((1, 2, 30, 40), parse_bounds("[1,2][30,40]"))
 
 
+class AdbDiscoveryTest(unittest.TestCase):
+    @patch("voiceroom_manager.adb.subprocess.run")
+    def test_list_devices_parses_emulator(self, run):
+        run.return_value = SimpleNamespace(returncode=0, stdout="List of devices attached\nemulator-5554 device product:sdk_gphone model:sdk_gphone64_x86_64 device:emu transport_id:1\n", stderr="")
+        devices = Adb.list_devices("adb")
+        self.assertEqual(1, len(devices))
+        self.assertEqual("emulator-5554", devices[0].serial)
+        self.assertTrue(devices[0].ready)
+        self.assertEqual("sdk_gphone64_x86_64", devices[0].model)
+
+    @patch.object(Adb, "list_devices")
+    def test_auto_select_single_ready_device(self, list_devices):
+        from voiceroom_manager.adb import DeviceInfo
+        list_devices.return_value = [DeviceInfo("emulator-5554", "device", "Pixel_8")]
+        adb = Adb("adb", "")
+        info = adb.auto_select_device()
+        self.assertEqual("emulator-5554", adb.serial)
+        self.assertEqual("Pixel_8", info.model)
+
+    @patch.object(Adb, "list_devices")
+    def test_auto_select_rejects_multiple_ready_devices(self, list_devices):
+        from voiceroom_manager.adb import DeviceInfo
+        list_devices.return_value = [DeviceInfo("emulator-5554", "device"), DeviceInfo("emulator-5556", "device")]
+        with self.assertRaises(AdbError):
+            Adb("adb", "").auto_select_device()
+
+
 class ModelTest(unittest.TestCase):
     def test_config_load(self):
         with tempfile.TemporaryDirectory() as td:
@@ -33,11 +63,7 @@ class ModelTest(unittest.TestCase):
     def test_config_save_round_trip(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "config.json"
-            original = AppConfig(
-                adb_path="C:/platform-tools/adb.exe",
-                device_serial="emulator-5554",
-                rooms=[RoomConfig(id="a", title="방 A", room_url="https://open.kakao.com/o/example")],
-            )
+            original = AppConfig(adb_path="C:/platform-tools/adb.exe", device_serial="emulator-5554", rooms=[RoomConfig(id="a", title="방 A", room_url="https://open.kakao.com/o/example")])
             original.save(path)
             loaded = AppConfig.load(path)
             self.assertEqual("C:/platform-tools/adb.exe", loaded.adb_path)
