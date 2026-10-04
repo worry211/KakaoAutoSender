@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.IO;
+using System.Text;
 using System.Windows.Automation;
 
 namespace VoiceRoomManager.Windows.Core;
@@ -284,8 +286,7 @@ public sealed class KakaoPcAutomation
             try
             {
                 if (current.Current.IsEnabled && (current.TryGetCurrentPattern(InvokePattern.Pattern, out _)
-                    || current.TryGetCurrentPattern(SelectionItemPattern.Pattern, out _)
-                    || current.TryGetCurrentPattern(LegacyIAccessiblePattern.Pattern, out _))) return current;
+                    || current.TryGetCurrentPattern(SelectionItemPattern.Pattern, out _))) return current;
                 current = TreeWalker.ControlViewWalker.GetParent(current);
             }
             catch { return null; }
@@ -305,11 +306,6 @@ public sealed class KakaoPcAutomation
             if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var select))
             {
                 ((SelectionItemPattern)select).Select();
-                return true;
-            }
-            if (element.TryGetCurrentPattern(LegacyIAccessiblePattern.Pattern, out var legacy))
-            {
-                ((LegacyIAccessiblePattern)legacy).DoDefaultAction();
                 return true;
             }
         }
