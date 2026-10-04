@@ -30,7 +30,7 @@ public class SendAlarmReceiver extends BroadcastReceiver {
 
                 NotificationListenerService.requestRebind(
                         new ComponentName(app, KakaoNotificationListener.class));
-                KakaoNotificationListener.requestRefresh();
+                waitForListenerAndRefresh();
 
                 long now = System.currentTimeMillis();
                 ArrayList<MultiRoomStore.Profile> due = MultiRoomStore.due(app, now);
@@ -59,14 +59,17 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                     attempted++;
                     boolean sent = false;
                     String failureReason = "확인된 답장 세션 없음";
-                    for (int i = 0; i < 2 && !sent; i++) {
+                    for (int i = 0; i < 3 && !sent; i++) {
                         sent = KakaoNotificationListener.sendToRoom(app, profile.room, profile.message);
                         if (!sent) {
                             failureReason = KakaoNotificationListener.lastSendError();
                             if (failureReason == null || failureReason.trim().isEmpty()) {
                                 failureReason = "확인된 답장 세션 없음";
                             }
-                            sleep(450L);
+                            if (i < 2) {
+                                KakaoNotificationListener.requestRefresh();
+                                sleep(400L);
+                            }
                         }
                     }
 
@@ -83,7 +86,8 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                                 "자동전송 실패: " + visibleName + " · " + failureReason + " · " + recovery);
                     }
 
-                    sleep(700L);
+                    // Same-time rooms are serialized to avoid reply PendingIntent collisions.
+                    sleep(650L);
                 }
 
                 Prefs.setStatus(app, "예약 실행 · 시도 " + attempted + " · 성공 " + success
@@ -97,6 +101,14 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 result.finish();
             }
         });
+    }
+
+    private static void waitForListenerAndRefresh() {
+        for (int i = 0; i < 8; i++) {
+            if (KakaoNotificationListener.isListenerConnected()) break;
+            sleep(250L);
+        }
+        KakaoNotificationListener.requestRefresh();
     }
 
     private static void sleep(long ms) {
