@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { commands, parseCommand } from "../src/commands";
 import { friendlyError, renderDiscord } from "../src/discord";
 
-function interaction(group: string, action: string, params: Record<string, any> = {}) {
+function interaction(
+  group: string,
+  action: string,
+  params: Record<string, any> = {},
+) {
   const definition: any = commands.find((c) => c.name === group);
   const sub: any = definition.options.find((s: any) => s.name === action);
   return {
@@ -23,19 +27,25 @@ function interaction(group: string, action: string, params: Record<string, any> 
 describe("seller command quality", () => {
   it("supports help and expiring/history support commands", () => {
     expect(parseCommand(interaction("license", "help")).action).toBe("help");
-    expect(parseCommand(interaction("license", "expiring")).action).toBe("expiring");
+    expect(parseCommand(interaction("license", "expiring")).action).toBe(
+      "expiring",
+    );
     expect(
-      parseCommand(interaction("license", "history", { "key-or-id": "LIC-test" })).action,
+      parseCommand(
+        interaction("license", "history", { "key-or-id": "LIC-test" }),
+      ).action,
     ).toBe("history");
     expect(parseCommand(interaction("system", "help")).action).toBe("help");
   });
 
   it("allows maintenance and kill-switch to be disabled without filler text", () => {
     expect(
-      parseCommand(interaction("system", "maintenance", { enabled: false })).params.enabled,
+      parseCommand(interaction("system", "maintenance", { enabled: false }))
+        .params.enabled,
     ).toBe(false);
     expect(
-      parseCommand(interaction("system", "kill-switch", { enabled: false })).params.enabled,
+      parseCommand(interaction("system", "kill-switch", { enabled: false }))
+        .params.enabled,
     ).toBe(false);
   });
 
@@ -73,7 +83,9 @@ describe("seller command quality", () => {
     expect(status).toContain("서비스 운영 현황");
     expect(status).toContain("최신 versionCode: **21**");
     expect(status).not.toContain('"kill_switch"');
-    expect(renderDiscord({ kind: "license_help" })).toContain("/license create");
+    expect(renderDiscord({ kind: "license_help" })).toContain(
+      "/license create",
+    );
   });
 
   it("translates common operator errors into Korean guidance", () => {
