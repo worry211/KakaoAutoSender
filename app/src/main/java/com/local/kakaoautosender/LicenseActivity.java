@@ -17,6 +17,9 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class LicenseActivity extends Activity {
   private EditText key;
@@ -32,6 +35,9 @@ public class LicenseActivity extends Activity {
   private static final int GREEN = Color.rgb(91, 224, 147);
   private static final int AMBER = Color.rgb(240, 182, 77);
   private static final int RED = Color.rgb(234, 108, 108);
+  private static final String KEY_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+  private static final Pattern ACTIVATION_KEY_PATTERN =
+      Pattern.compile("KM-(?:[" + KEY_ALPHABET + "]{4}-){5}[" + KEY_ALPHABET + "]{4}");
 
   @Override
   protected void onCreate(Bundle b) {
@@ -66,7 +72,13 @@ public class LicenseActivity extends Activity {
 
     LinearLayout intro = card();
     intro.addView(text("한 번만 인증하면 됩니다", 18, true, Color.WHITE));
-    intro.addView(text("판매자에게 받은 KM-... 키를 붙여넣으세요. 별도의 기기코드 전달은 필요하지 않습니다.", 13, false, Color.rgb(181, 187, 198)), top(7));
+    intro.addView(
+        text(
+            "판매자에게 받은 KM-... 키를 붙여넣으세요. 키가 포함된 안내문 전체를 붙여넣어도 자동으로 키만 찾아줍니다.",
+            13,
+            false,
+            Color.rgb(181, 187, 198)),
+        top(7));
     root.addView(intro, top(20));
 
     root.addView(section("라이선스 키"), top(22));
@@ -99,7 +111,12 @@ public class LicenseActivity extends Activity {
     LinearLayout statusCard = card();
     statusTitle = text("라이선스 확인 중", 17, true, Color.WHITE);
     statusCard.addView(statusTitle);
-    statusDetail = text("서버에서 사용 권한을 확인하고 있습니다.", 13, false, Color.rgb(179, 185, 197));
+    statusDetail =
+        text(
+            "서버에서 사용 권한을 확인하고 있습니다.",
+            13,
+            false,
+            Color.rgb(179, 185, 197));
     statusCard.addView(statusDetail, top(6));
     retry = secondaryButton("다시 확인");
     retry.setOnClickListener(v -> check());
@@ -109,8 +126,10 @@ public class LicenseActivity extends Activity {
     root.addView(section("처음 사용하는 경우"), top(24));
     LinearLayout guide = card();
     guide.addView(step("1", "라이선스 인증", "판매자에게 받은 KM 키를 한 번 입력합니다."));
-    guide.addView(step("2", "알림 접근 허용", "카카오톡의 답장 세션을 확인하기 위해 필요합니다."), top(10));
-    guide.addView(step("3", "방 연결 후 1회 테스트", "대상 방을 확인한 뒤 예약 전송을 시작합니다."), top(10));
+    guide.addView(
+        step("2", "알림 접근 허용", "카카오톡의 답장 세션을 확인하기 위해 필요합니다."), top(10));
+    guide.addView(
+        step("3", "방 연결 후 1회 테스트", "대상 방을 확인한 뒤 예약 전송을 시작합니다."), top(10));
     root.addView(guide, top(8));
 
     root.addView(section("지원"), top(24));
@@ -121,24 +140,63 @@ public class LicenseActivity extends Activity {
     Button copy = secondaryButton("지원 정보 복사");
     copy.setOnClickListener(v -> copySupport());
     supportCard.addView(copy, top(10));
-    TextView privacy = text("지원 정보에는 카카오 방 이름, 메시지 내용, 사진이 포함되지 않습니다.", 11, false, Color.rgb(119, 126, 139));
+    TextView privacy =
+        text(
+            "지원 정보에는 카카오 방 이름, 메시지 내용, 사진이 포함되지 않습니다.",
+            11,
+            false,
+            Color.rgb(119, 126, 139));
     supportCard.addView(privacy, top(8));
     root.addView(supportCard, top(8));
 
-    TextView footer = text("라이선스가 만료·정지·취소되면 자동전송은 중단되며, 저장한 방과 메시지 설정은 그대로 보존됩니다.", 11, false, Color.rgb(113, 120, 132));
+    TextView footer =
+        text(
+            "라이선스가 만료·정지·취소되면 자동전송은 중단되며, 저장한 방과 메시지 설정은 그대로 보존됩니다.",
+            11,
+            false,
+            Color.rgb(113, 120, 132));
     root.addView(footer, top(18));
     return scroll;
   }
 
+  static String normalizeActivationKeyInput(String raw) {
+    if (raw == null) return "";
+    String upper = raw.toUpperCase(Locale.ROOT);
+    Matcher direct = ACTIVATION_KEY_PATTERN.matcher(upper);
+    if (direct.find()) return direct.group();
+
+    String compact = upper.replaceAll("\\s+", "");
+    Matcher compactMatch = ACTIVATION_KEY_PATTERN.matcher(compact);
+    if (compactMatch.find()) return compactMatch.group();
+    return compact;
+  }
+
+  static boolean isActivationKeyFormat(String value) {
+    return value != null && ACTIVATION_KEY_PATTERN.matcher(value).matches();
+  }
+
   private void activate() {
     if (busy) return;
-    String entered = key.getText().toString().trim();
+    String entered = normalizeActivationKeyInput(key.getText().toString());
+    key.setText(entered);
+    key.setSelection(key.length());
     if (entered.isEmpty()) {
-      showStatus("라이선스 키를 입력하세요", "판매자에게 받은 KM-... 키를 붙여넣어 주세요.", AMBER);
+      showStatus(
+          "라이선스 키를 입력하세요", "판매자에게 받은 KM-... 키를 붙여넣어 주세요.", AMBER);
+      return;
+    }
+    if (!isActivationKeyFormat(entered)) {
+      showStatus(
+          "라이선스 키 형식을 확인하세요",
+          "KM-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX 형식의 발급 키가 필요합니다. 안내문 전체를 붙여넣어도 됩니다.",
+          AMBER);
       return;
     }
     setBusy(true);
-    showStatus("라이선스 인증 중", "키를 확인하고 이 설치에 안전하게 연결하고 있습니다.", Color.rgb(143, 190, 255));
+    showStatus(
+        "라이선스 인증 중",
+        "키를 확인하고 이 설치에 안전하게 연결하고 있습니다.",
+        Color.rgb(143, 190, 255));
     LicenseManager.activateAsync(this, entered, this::result);
   }
 
@@ -150,14 +208,19 @@ public class LicenseActivity extends Activity {
     }
     CharSequence value = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
     if (value == null) return;
-    key.setText(value.toString().trim());
+    String normalized = normalizeActivationKeyInput(value.toString());
+    key.setText(normalized);
     key.setSelection(key.length());
+    if (isActivationKeyFormat(normalized)) {
+      showStatus("라이선스 키 준비 완료", "키 형식을 확인했습니다. ‘라이선스 인증’을 눌러 주세요.", GREEN);
+    }
   }
 
   private void check() {
     if (busy) return;
     setBusy(true);
-    showStatus("라이선스 확인 중", "기존 인증 정보를 확인하고 있습니다.", Color.rgb(143, 190, 255));
+    showStatus(
+        "라이선스 확인 중", "기존 인증 정보를 확인하고 있습니다.", Color.rgb(143, 190, 255));
     LicenseManager.checkAsync(this, this::result);
   }
 
@@ -190,13 +253,19 @@ public class LicenseActivity extends Activity {
 
   private String supportSummary(LicenseManager.Verification v) {
     String id = v.licenseId == null || v.licenseId.isEmpty() ? "미등록" : v.licenseId;
-    return "지원 코드  " + id + "\n상태  " + (v.state == null ? "INVALID" : v.state) + "\n앱 버전  " + appVersion();
+    return "지원 코드  "
+        + id
+        + "\n상태  "
+        + (v.state == null ? "INVALID" : v.state)
+        + "\n앱 버전  "
+        + appVersion();
   }
 
   private void copySupport() {
     ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
     if (cm == null) return;
-    cm.setPrimaryClip(ClipData.newPlainText("카톡매크로 지원 정보", LicenseManager.diagnostic(this)));
+    cm.setPrimaryClip(
+        ClipData.newPlainText("카톡매크로 지원 정보", LicenseManager.diagnostic(this)));
     toast("지원 정보를 복사했습니다.");
   }
 
@@ -204,7 +273,8 @@ public class LicenseActivity extends Activity {
     if (statusTitle == null) return;
     statusTitle.setText("● " + title);
     statusTitle.setTextColor(color);
-    statusDetail.setText(detail == null || detail.trim().isEmpty() ? "상태를 확인해 주세요." : detail.trim());
+    statusDetail.setText(
+        detail == null || detail.trim().isEmpty() ? "상태를 확인해 주세요." : detail.trim());
   }
 
   private void setBusy(boolean v) {
@@ -281,8 +351,9 @@ public class LicenseActivity extends Activity {
   }
 
   private LinearLayout.LayoutParams top(int v) {
-    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+    LinearLayout.LayoutParams lp =
+        new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
     lp.topMargin = dp(v);
     return lp;
   }
