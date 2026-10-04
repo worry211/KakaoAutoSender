@@ -69,9 +69,14 @@ export async function admin(
       if (typeof p.enabled !== "boolean") throw new ApiError("INVALID");
       const isMaintenance = action === "maintenance";
       next[isMaintenance ? "maintenance" : "kill_switch"] = p.enabled ? 1 : 0;
-      const supplied = String(p.message ?? p.reason ?? "").trim().slice(0, 300);
+      const supplied = String(p.message ?? p.reason ?? "")
+        .trim()
+        .slice(0, 300);
       next.message = p.enabled
-        ? supplied || (isMaintenance ? "서비스 점검 중입니다." : "안전 점검으로 자동전송이 일시 중지되었습니다.")
+        ? supplied ||
+          (isMaintenance
+            ? "서비스 점검 중입니다."
+            : "안전 점검으로 자동전송이 일시 중지되었습니다.")
         : "";
     } else if (action === "min-version" || action === "latest-version") {
       if (!/^\d{1,8}$/.test(String(p.version)) || Number(p.version) < 20)
@@ -236,7 +241,7 @@ export async function admin(
       .all<Row>();
     return {
       kind: action === "expiring" ? "expiring" : "license_list",
-      days: action === "expiring" ? p.days ?? 7 : undefined,
+      days: action === "expiring" ? (p.days ?? 7) : undefined,
       page,
       has_more: rs.results.length > 5,
       licenses: rs.results.slice(0, 5).map(support),

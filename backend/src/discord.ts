@@ -40,9 +40,13 @@ const response = (content: string, components: any[] = []) => ({
   allowed_mentions: { parse: [] },
 });
 const date = (t: any) =>
-  t == null || !Number.isFinite(Number(t)) ? "—" : `<t:${Number(t)}:f> · <t:${Number(t)}:R>`;
+  t == null || !Number.isFinite(Number(t))
+    ? "—"
+    : `<t:${Number(t)}:f> · <t:${Number(t)}:R>`;
 const oneLine = (v: any, max = 90) => {
-  const s = String(v ?? "").replaceAll(/\s+/g, " ").trim();
+  const s = String(v ?? "")
+    .replaceAll(/\s+/g, " ")
+    .trim();
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 };
 const stateLabel = (state: any) => {
@@ -58,19 +62,25 @@ const stateLabel = (state: any) => {
 };
 export function friendlyError(state: string) {
   const messages: Record<string, string> = {
-    NOT_FOUND: "라이선스를 찾지 못했습니다. LIC ID 또는 KM 키를 다시 확인하세요.",
+    NOT_FOUND:
+      "라이선스를 찾지 못했습니다. LIC ID 또는 KM 키를 다시 확인하세요.",
     FORBIDDEN: "판매자 권한이 없습니다.",
-    INVALID_COMMAND: "명령어 입력값이 올바르지 않습니다. /license help 또는 /system help를 확인하세요.",
+    INVALID_COMMAND:
+      "명령어 입력값이 올바르지 않습니다. /license help 또는 /system help를 확인하세요.",
     INVALID_DURATION: "지원하지 않는 기간입니다.",
     INVALID_QUANTITY: "발급 수량은 1~10개만 가능합니다.",
     INVALID_PAGE: "페이지 번호가 올바르지 않습니다.",
     INVALID_STATUS: "지원하지 않는 라이선스 상태입니다.",
     INVALID_VERSION: "versionCode 값이 올바르지 않습니다.",
     INVALID_URL: "다운로드 주소는 유효한 HTTPS URL이어야 합니다.",
-    INVALID_POLICY: "확인 주기는 30~300초, 오프라인 유예는 0~600초로 설정하세요.",
-    ILLEGAL_STATE: "현재 라이선스 상태에서는 이 작업을 실행할 수 없습니다. /license info로 먼저 상태를 확인하세요.",
-    CONFLICT: "동시에 다른 변경이 적용되었습니다. 상태를 다시 확인한 뒤 재시도하세요.",
-    CONFIRMATION_EXPIRED: "확인 요청이 만료되었거나 이미 처리되었습니다. 명령어를 다시 실행하세요.",
+    INVALID_POLICY:
+      "확인 주기는 30~300초, 오프라인 유예는 0~600초로 설정하세요.",
+    ILLEGAL_STATE:
+      "현재 라이선스 상태에서는 이 작업을 실행할 수 없습니다. /license info로 먼저 상태를 확인하세요.",
+    CONFLICT:
+      "동시에 다른 변경이 적용되었습니다. 상태를 다시 확인한 뒤 재시도하세요.",
+    CONFIRMATION_EXPIRED:
+      "확인 요청이 만료되었거나 이미 처리되었습니다. 명령어를 다시 실행하세요.",
     RATE_LIMITED: "요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
     INVALID_CONFIRMATION: "유효하지 않은 확인 요청입니다.",
   };
@@ -111,17 +121,18 @@ export function renderDiscord(result: any) {
       `최신 versionCode: **${result.latest_version}**`,
       `라이선스 확인 주기: **${result.heartbeat_seconds}초**`,
       `오프라인 유예: **${result.grace_seconds}초**`,
-      result.download_url ? `업데이트: ${result.download_url}` : "업데이트 URL: —",
-      result.message ? `고객 안내: ${oneLine(result.message, 180)}` : "고객 안내: —",
+      result.download_url
+        ? `업데이트: ${result.download_url}`
+        : "업데이트 URL: —",
+      result.message
+        ? `고객 안내: ${oneLine(result.message, 180)}`
+        : "고객 안내: —",
     ].join("\n");
   if (Array.isArray(result))
     return (
       "## ✅ 라이선스 발급 완료\n" +
       result
-        .map(
-          (l) =>
-            `**${l.license_id}**\n새 키: \`${l.key}\``,
-        )
+        .map((l) => `**${l.license_id}**\n새 키: \`${l.key}\``)
         .join("\n\n") +
       "\n\n⚠️ **KM 키는 지금 한 번만 표시됩니다.** 구매자에게 키를 전달하고 LIC ID를 고객 기록에 남겨두세요."
     );
@@ -135,9 +146,10 @@ export function renderDiscord(result: any) {
     return `## 🧾 변경 이력\n**${result.license_id}** · 페이지 ${result.page}${result.has_more ? " · 다음 페이지 있음" : ""}\n\n${body || "기록이 없습니다."}`;
   }
   if (result?.licenses) {
-    const title = result.kind === "expiring"
-      ? `## ⏳ ${result.days}일 이내 만료 예정`
-      : "## 📋 라이선스 목록";
+    const title =
+      result.kind === "expiring"
+        ? `## ⏳ ${result.days}일 이내 만료 예정`
+        : "## 📋 라이선스 목록";
     const body = result.licenses
       .map(
         (l: Row) =>
@@ -158,7 +170,9 @@ export function renderDiscord(result: any) {
       `고객 메모: ${oneLine(result.customer_memo, 180) || "—"}`,
       `관리 메모: ${oneLine(result.admin_memo, 180) || "—"}`,
       result.key ? `\n🔑 **새 키 (이번에만 표시)**\n\`${result.key}\`` : "",
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
   if (result && Object.prototype.hasOwnProperty.call(result, "total")) {
     return [
@@ -180,7 +194,10 @@ export async function executeDiscord(
   let command: { group: string; action: string; params: Row };
   if (interaction.type === 3) {
     const custom = interaction.data?.custom_id;
-    const m = typeof custom === "string" ? custom.match(/^(confirm|cancel):(CFM-[a-f0-9-]{36})$/) : null;
+    const m =
+      typeof custom === "string"
+        ? custom.match(/^(confirm|cancel):(CFM-[a-f0-9-]{36})$/)
+        : null;
     if (!m) throw new ApiError("INVALID_CONFIRMATION");
     const r = await env.DB.prepare(
       "UPDATE confirmations SET consumed=1 WHERE id=? AND admin_id=? AND consumed=0 AND expires_at>? RETURNING payload",
@@ -215,7 +232,12 @@ export async function executeDiscord(
         .bind(confirmation, actor, JSON.stringify(command), now() + 120)
         .run();
       const target = command.params["key-or-id"] ?? "전체 설치";
-      const mode = command.params.enabled === true ? "켜기" : command.params.enabled === false ? "끄기" : "실행";
+      const mode =
+        command.params.enabled === true
+          ? "켜기"
+          : command.params.enabled === false
+            ? "끄기"
+            : "실행";
       return response(
         `## ⚠️ 최종 확인\n**${command.action}** ${mode}\n대상: **${target}**${command.params.reason ? `\n사유: ${oneLine(command.params.reason, 180)}` : ""}\n\n2분 안에 확인해야 하며, 취소하면 아무 변경도 적용되지 않습니다.`,
         [
@@ -327,5 +349,7 @@ export async function discord(
       ),
     ),
   );
-  return i.type === 3 ? json({ type: 6 }) : json({ type: 5, data: { flags: 64 } });
+  return i.type === 3
+    ? json({ type: 6 })
+    : json({ type: 5, data: { flags: 64 } });
 }
