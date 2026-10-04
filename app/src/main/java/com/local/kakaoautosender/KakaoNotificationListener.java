@@ -655,6 +655,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
 
     static boolean sendToRoom(Context context, String room, String message) {
         lastSendError = "";
+        if (!LicenseManager.isUsable(context)) { lastSendError = LicenseManager.verifyStored(context).message; return false; }
         String requested = room == null ? "" : room.trim();
         if (requested.isEmpty()) {
             lastSendError = "대상 방이 비어 있음";
@@ -695,7 +696,10 @@ public class KakaoNotificationListener extends NotificationListenerService {
             }
             Intent fillIn = new Intent();
             RemoteInput.addResultsToIntent(target.remoteInputs, fillIn, results);
-            target.pendingIntent.send(context, 0, fillIn);
+            synchronized (DeliveryGate.LOCK) {
+                if (!DeliveryGate.allowed(context)) { lastSendError = "전송 중단 · 라이선스 또는 자동전송 상태를 확인하세요."; return false; }
+                target.pendingIntent.send(context, 0, fillIn);
+            }
             lastSendError = "";
             return true;
         } catch (PendingIntent.CanceledException e) {
@@ -747,7 +751,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         Prefs.setStatus(context, "카카오 방 연결 정보 초기화 완료");
     }
 
-    private static ReplyTarget findTarget(String room) {
+    static ReplyTarget findTarget(String room) {
         String key = normalize(room);
         if (key.isEmpty()) return null;
         return sessions.get(key);

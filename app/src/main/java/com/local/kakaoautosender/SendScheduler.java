@@ -42,6 +42,11 @@ final class SendScheduler {
     }
 
     static void scheduleAt(Context c, long when) {
+        synchronized (DeliveryGate.LOCK) {
+        if (!Prefs.p(c).getBoolean(Prefs.KEY_ACTIVE, false) || !LicenseManager.isUsable(c)) {
+            cancel(c);
+            return;
+        }
         AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
         long safeWhen = Math.max(System.currentTimeMillis() + 250L, when);
@@ -55,6 +60,7 @@ final class SendScheduler {
             am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, safeWhen, pending(c));
         }
         Prefs.p(c).edit().putLong(Prefs.KEY_NEXT_AT, safeWhen).apply();
+        }
     }
 
     static boolean canUseExact(Context c) {

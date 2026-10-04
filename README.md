@@ -1,11 +1,11 @@
-# KakaoAutoSender
+# 카톡매크로 (KakaoAutoSender) 2.0
 
 KakaoAutoSender is a local Android automation app that reuses KakaoTalk's Android notification reply action (`RemoteInput`) to send configured messages to confirmed conversations.
 
 ## Privacy and routing policy
-- No remote-control server.
-- No `INTERNET` permission.
-- Runs locally on the phone.
+- HTTPS licensing uses Cloudflare Worker + D1, with a private Discord seller panel.
+- Kakao sending and all room/message/photo configuration run locally on the phone.
+- The licensing API receives only installation identity, app version and authentication.
 - Requires Android notification-listener access.
 - KakaoTalk notifications must remain enabled so reply sessions can be captured. Sound, vibration and pop-ups may be disabled separately.
 - Sends are **fail-closed**: if the app cannot confirm the exact saved reply session, it does not guess another room.
@@ -40,7 +40,7 @@ KakaoAutoSender is a local Android automation app that reuses KakaoTalk's Androi
 
 ## Normal setup
 1. Install and open the APK.
-2. Grant notification access.
+2. Paste the seller's one-time KM activation key, activate, then grant notification access.
 3. Receive a new message in the Open Chat room you want to add.
 4. Tap **새 방 추가** and select the Kakao room name.
 5. Set the message and either an interval or daily send times.
@@ -59,3 +59,25 @@ Very frequent automated posting can also be limited by KakaoTalk or an Open Chat
 GitHub Actions runs unit tests, Android Lint, and creates a debug APK on pushes/PRs.
 
 Artifact: `KakaoAutoSender-debug-apk`
+
+The commercial workflow builds `app-release.apk` using the seller's stable private
+signing key. Debug and ephemeral smoke builds are development fixtures.
+
+## Commercial licensing
+
+Seller: `/license create duration:30d memo:customer-name` → receive a KM key once
+and a permanent LIC ID → send the key to the buyer. Buyer: paste KM key → activate.
+There is no manual device-code exchange, tier system or buyer issuance function.
+One key can bind one installation, even when devices race. Android Keystore P-256
+proof prevents authenticating a copied session token on a different phone.
+
+Server expiry/suspension/revocation/delete/min-version lock automation and cancel
+schedules while preserving room/message/photo settings. Every background dispatch
+validates before touching Kakao. Temporary outages have bounded monotonic offline
+grace (default at most 10 minutes); authoritative invalid responses never get grace.
+Legacy offline KAS1 licenses are removed from v2 and require seller migration.
+
+* [Exact deployment and signing instructions](docs/COMMERCIAL_DEPLOYMENT.md)
+* [Architecture, API, states, recovery and limitations](docs/COMMERCIAL_ARCHITECTURE.md)
+* [Pre-change baseline audit](docs/BASELINE_AUDIT.md)
+* [Security, UX, reliability, privacy and regression review](docs/COMMERCIAL_REVIEW.md)
