@@ -30,7 +30,7 @@ public class SendAlarmReceiver extends BroadcastReceiver {
 
                 NotificationListenerService.requestRebind(
                         new ComponentName(app, KakaoNotificationListener.class));
-                KakaoNotificationListener.requestRefresh();
+                waitForListenerAndRefresh();
 
                 long now = System.currentTimeMillis();
                 ArrayList<MultiRoomStore.Profile> due = MultiRoomStore.due(app, now);
@@ -46,9 +46,10 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                     if (!Prefs.p(app).getBoolean(Prefs.KEY_ACTIVE, false)) break;
                     if (!profile.enabled || profile.room.trim().isEmpty() || profile.message.trim().isEmpty()) continue;
 
+                    String visibleName = profile.title();
                     if (!profile.unlimited() && profile.todayCount >= profile.dailyLimit) {
                         long next = MultiRoomStore.nextAfterDailyLimit(profile, System.currentTimeMillis());
-                        String status = "오늘 방별 한도 도달: " + profile.title() + " ("
+                        String status = "오늘 방별 한도 도달: " + visibleName + " ("
                                 + profile.todayCount + "/" + profile.dailyLimit + ")";
                         MultiRoomStore.markSkippedForLimit(app, profile.room, next, status);
                         skipped++;
@@ -58,31 +59,34 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                     attempted++;
                     boolean sent = false;
                     String failureReason = "확인된 답장 세션 없음";
-                    for (int i = 0; i < 2 && !sent; i++) {
+                    for (int i = 0; i < 3 && !sent; i++) {
                         sent = KakaoNotificationListener.sendToRoom(app, profile.room, profile.message);
                         if (!sent) {
                             failureReason = KakaoNotificationListener.lastSendError();
                             if (failureReason == null || failureReason.trim().isEmpty()) {
                                 failureReason = "확인된 답장 세션 없음";
                             }
-                            sleep(400L);
+                            if (i < 2) {
+                                KakaoNotificationListener.requestRefresh();
+                                sleep(400L);
+                            }
                         }
                     }
 
                     long next = MultiRoomStore.computeNextAt(profile, System.currentTimeMillis());
                     if (sent) {
                         MultiRoomStore.markSuccess(app, profile.room, next,
-                                "자동전송 성공: " + profile.title());
+                                "자동전송 성공: " + visibleName);
                         success++;
                     } else {
                         String recovery = KakaoNotificationListener.hasStoredBinding(app, profile.room)
-                                ? "자동복구키 있음 · 같은 방 새 알림 대기"
+                                ? "자동복구 정보 있음 · 같은 방 새 알림 대기"
                                 : "새 알림에서 이 방을 다시 연결 필요";
                         MultiRoomStore.markFailure(app, profile.room, next,
-                                "자동전송 실패: " + failureReason + " · " + recovery);
+                                "자동전송 실패: " + visibleName + " · " + failureReason + " · " + recovery);
                     }
 
-                    // 여러 방이 동시에 예정돼도 카카오 답장 PendingIntent를 연속으로 몰아치지 않는다.
+                    // Same-time rooms are serialized to avoid reply PendingIntent collisions.
                     sleep(650L);
                 }
 
@@ -91,12 +95,20 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 SendScheduler.scheduleNext(app);
             } catch (Throwable t) {
                 Prefs.recordFailure(app);
-                Prefs.setStatus(app, "다중방 자동전송 내부 오류: " + t.getClass().getSimpleName());
+                Prefs.setStatus(app, "자동전송 내부 오류: " + t.getClass().getSimpleName());
                 SendScheduler.scheduleNext(app);
             } finally {
                 result.finish();
             }
         });
+    }
+
+    private static void waitForListenerAndRefresh() {
+        for (int i = 0; i < 8; i++) {
+            if (KakaoNotificationListener.isListenerConnected()) break;
+            sleep(250L);
+        }
+        KakaoNotificationListener.requestRefresh();
     }
 
     private static void sleep(long ms) {

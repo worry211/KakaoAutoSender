@@ -26,13 +26,14 @@ final class MultiRoomStore {
     static final String MODE_TIMES = "times";
 
     static final class Profile {
-        String room;          // real Kakao conversation name / routing alias
-        String displayName;   // user's private label shown in this app
+        String room;           // internal routing alias used by KakaoNotificationListener
+        String actualRoomName; // visible Kakao conversation name
+        String displayName;    // legacy/private label; kept for backwards compatibility
         String message;
         String scheduleMode;
         int intervalMinutes;
-        String dailyTimes;    // canonical comma-separated HH:mm list
-        int dailyLimit;       // 0 = unlimited
+        String dailyTimes;
+        int dailyLimit;        // 0 = unlimited
         boolean enabled;
         long nextAt;
         String countDate;
@@ -43,6 +44,7 @@ final class MultiRoomStore {
 
         Profile(String room) {
             this.room = safe(room).trim();
+            this.actualRoomName = this.room;
             this.displayName = this.room;
             this.message = "";
             this.scheduleMode = MODE_INTERVAL;
@@ -60,6 +62,7 @@ final class MultiRoomStore {
 
         Profile copy() {
             Profile p = new Profile(room);
+            p.actualRoomName = actualRoomName;
             p.displayName = displayName;
             p.message = message;
             p.scheduleMode = scheduleMode;
@@ -76,17 +79,14 @@ final class MultiRoomStore {
             return p;
         }
 
-        boolean unlimited() {
-            return dailyLimit <= 0;
-        }
-
-        boolean fixedTimes() {
-            return MODE_TIMES.equals(scheduleMode);
-        }
+        boolean unlimited() { return dailyLimit <= 0; }
+        boolean fixedTimes() { return MODE_TIMES.equals(scheduleMode); }
 
         String title() {
-            String n = safe(displayName).trim();
-            return n.isEmpty() ? room : n;
+            String actual = safe(actualRoomName).trim();
+            if (!actual.isEmpty()) return actual;
+            String legacy = safe(displayName).trim();
+            return legacy.isEmpty() ? room : legacy;
         }
     }
 
@@ -101,6 +101,7 @@ final class MultiRoomStore {
             String legacyRoom = prefs.getString(Prefs.KEY_ROOM, "");
             if (legacyRoom != null && !legacyRoom.trim().isEmpty()) {
                 Profile p = new Profile(legacyRoom.trim());
+                p.actualRoomName = legacyRoom.trim();
                 p.message = safe(prefs.getString(Prefs.KEY_MESSAGE, ""));
                 p.intervalMinutes = Math.max(SendScheduler.MIN_INTERVAL_MINUTES,
                         prefs.getInt(Prefs.KEY_INTERVAL_MIN, 60));
@@ -111,10 +112,10 @@ final class MultiRoomStore {
                 p.countDate = LocalDate.now().toString();
                 p.failureStreak = prefs.getInt(Prefs.KEY_FAILURE_STREAK, 0);
                 p.lastSuccessAt = prefs.getLong(Prefs.KEY_LAST_SUCCESS_AT, 0L);
-                p.lastStatus = safe(prefs.getString(Prefs.KEY_LAST_STATUS, "v0.7 설정에서 가져옴"));
+                p.lastStatus = safe(prefs.getString(Prefs.KEY_LAST_STATUS, "기존 설정에서 가져옴"));
                 profiles.add(p);
                 writeRaw(context, profiles);
-                Prefs.appendLog(context, "다중방 마이그레이션: 기존 단일 방 설정 보존 · " + p.room);
+                Prefs.appendLog(context, "다중방 마이그레이션: 기존 단일 방 설정 보존 · " + p.title());
             }
         }
         prefs.edit().putBoolean(KEY_MIGRATED, true).apply();
@@ -125,7 +126,9 @@ final class MultiRoomStore {
         ArrayList<Profile> profiles = readRaw(context);
         boolean changed = false;
         for (Profile p : profiles) changed |= normalizeDailyCount(p);
-        profiles.sort(Comparator.comparing(a -> a.title().toLowerCase(Locale.ROOT)));
+        profiles.sort(Comparator
+                .comparing((Profile p) -> !p.enabled)
+                .thenComparing(p -> p.title().toLowerCase(Locale.ROOT)));
         if (changed) writeRaw(context, profiles);
         ArrayList<Profile> result = new ArrayList<>();
         for (Profile p : profiles) result.add(p.copy());
@@ -139,6 +142,16 @@ final class MultiRoomStore {
             if (normalize(p.room).equals(wanted)) return p;
         }
         return null;
+    }
+
+    static synchronized ArrayList<Profile> findByActualName(Context context, String actualRoomName) {
+        ArrayList<Profile> result = new ArrayList<>();
+        String wanted = normalize(actualRoomName);
+        if (wanted.isEmpty()) return result;
+        for (Profile p : list(context)) {
+            if (normalize(p.actualRoomName).equals(wanted)) result.add(p);
+        }
+        return result;
     }
 
     static synchronized void upsert(Context context, Profile profile) {
@@ -224,8 +237,8 @@ final class MultiRoomStore {
                 LocalDateTime candidate = LocalDateTime.of(from.toLocalDate(), time);
                 if (candidate.isAfter(from)) return candidate.atZone(zone).toInstant().toEpochMilli();
             }
-            LocalDateTime tomorrow = LocalDateTime.of(from.toLocalDate().plusDays(1), times.get(0));
-            return tomorrow.atZone(zone).toInstant().toEpochMilli();
+            return LocalDateTime.of(from.toLocalDate().plusDays(1), times.get(0))
+                    .atZone(zone).toInstant().toEpochMilli();
         }
         return fromMillis + Math.max(SendScheduler.MIN_INTERVAL_MINUTES, p.intervalMinutes) * 60_000L;
     }
@@ -246,7 +259,9 @@ final class MultiRoomStore {
     static String scheduleSummary(Profile p) {
         if (p == null) return "-";
         if (p.fixedTimes()) return "매일 " + canonicalTimes(p.dailyTimes);
-        return "매 " + Math.max(SendScheduler.MIN_INTERVAL_MINUTES, p.intervalMinutes) + "분";
+        int minutes = Math.max(SendScheduler.MIN_INTERVAL_MINUTES, p.intervalMinutes);
+        if (minutes % 60 == 0) return (minutes / 60) + "시간마다";
+        return minutes + "분마다";
     }
 
     static String canonicalTimes(String raw) {
@@ -259,9 +274,7 @@ final class MultiRoomStore {
         return sb.toString();
     }
 
-    static boolean hasValidTimes(String raw) {
-        return !parseTimes(raw).isEmpty();
-    }
+    static boolean hasValidTimes(String raw) { return !parseTimes(raw).isEmpty(); }
 
     static synchronized void markSuccess(Context context, String room, long nextAt, String status) {
         mutate(context, room, p -> {
@@ -326,8 +339,10 @@ final class MultiRoomStore {
 
     private static Profile sanitize(Profile p) {
         p.room = safe(p.room).trim();
+        p.actualRoomName = safe(p.actualRoomName).trim();
+        if (p.actualRoomName.isEmpty()) p.actualRoomName = p.room;
         p.displayName = safe(p.displayName).trim();
-        if (p.displayName.isEmpty()) p.displayName = p.room;
+        if (p.displayName.isEmpty()) p.displayName = p.actualRoomName;
         p.message = safe(p.message);
         p.scheduleMode = MODE_TIMES.equals(p.scheduleMode) ? MODE_TIMES : MODE_INTERVAL;
         p.intervalMinutes = Math.max(SendScheduler.MIN_INTERVAL_MINUTES, p.intervalMinutes <= 0 ? 60 : p.intervalMinutes);
@@ -364,8 +379,7 @@ final class MultiRoomStore {
                     int m = Integer.parseInt(hm[1]);
                     if (h < 0 || h > 23 || m < 0 || m > 59) continue;
                     unique.add(LocalTime.of(h, m));
-                } catch (Exception ignored) {
-                }
+                } catch (Exception ignored) {}
             }
         }
         ArrayList<LocalTime> result = new ArrayList<>(unique);
@@ -384,7 +398,8 @@ final class MultiRoomStore {
                 String room = o.optString("room", "").trim();
                 if (room.isEmpty()) continue;
                 Profile p = new Profile(room);
-                p.displayName = o.optString("displayName", room);
+                p.actualRoomName = o.optString("actualRoomName", room);
+                p.displayName = o.optString("displayName", p.actualRoomName);
                 p.message = o.optString("message", "");
                 p.scheduleMode = o.optString("scheduleMode", MODE_INTERVAL);
                 p.intervalMinutes = o.optInt("intervalMinutes", 60);
@@ -413,6 +428,7 @@ final class MultiRoomStore {
                 if (p.room.isEmpty()) continue;
                 JSONObject o = new JSONObject();
                 o.put("room", p.room);
+                o.put("actualRoomName", p.actualRoomName);
                 o.put("displayName", p.displayName);
                 o.put("message", p.message);
                 o.put("scheduleMode", p.scheduleMode);
@@ -434,11 +450,6 @@ final class MultiRoomStore {
         }
     }
 
-    private static String normalize(String s) {
-        return safe(s).trim().toLowerCase(Locale.ROOT);
-    }
-
-    private static String safe(String s) {
-        return s == null ? "" : s;
-    }
+    private static String normalize(String s) { return safe(s).trim().toLowerCase(Locale.ROOT); }
+    private static String safe(String s) { return s == null ? "" : s; }
 }
