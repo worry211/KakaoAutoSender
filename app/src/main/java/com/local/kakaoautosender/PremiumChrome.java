@@ -34,25 +34,33 @@ final class PremiumChrome {
   static void applyWindow(Activity activity) {
     if (activity == null) return;
     Window w = activity.getWindow();
+    if (w == null) return;
     w.setStatusBarColor(BG);
     w.setNavigationBarColor(NAV);
     if (Build.VERSION.SDK_INT >= 29) {
       w.setStatusBarContrastEnforced(false);
       w.setNavigationBarContrastEnforced(false);
     }
+
+    // ActivityLifecycleCallbacks.onActivityCreated can run before PhoneWindow has created mDecor.
+    // Accessing Window#getInsetsController at that moment crashes on current Android framework code.
+    View decor = w.peekDecorView();
+    if (decor == null) return;
+
     if (Build.VERSION.SDK_INT >= 30) {
       WindowInsetsController c = w.getInsetsController();
       if (c != null)
         c.setSystemBarsAppearance(0, WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
     } else {
-      w.getDecorView().setSystemUiVisibility(0);
+      decor.setSystemUiVisibility(0);
     }
   }
 
   static void polish(Activity activity) {
     if (activity == null || activity.getWindow() == null) return;
-    applyWindow(activity);
+    // getDecorView() here is intentional: polish runs after the Activity is resumed and the decor exists.
     View root = activity.getWindow().getDecorView();
+    applyWindow(activity);
     if (root != null) polishTree(root, activity.getResources().getDisplayMetrics().density);
   }
 
