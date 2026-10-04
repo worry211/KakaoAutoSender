@@ -27,7 +27,7 @@ final class SendScheduler {
             return;
         }
         MultiRoomStore.ensureMigrated(c);
-        long when = MultiRoomStore.nextDueAt(c);
+        long when = ReliabilityTiming.nextEffectiveDueAt(c);
         if (when <= 0L) {
             cancel(c);
             return;
@@ -44,16 +44,17 @@ final class SendScheduler {
     static void scheduleAt(Context c, long when) {
         AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
+        long safeWhen = Math.max(System.currentTimeMillis() + 250L, when);
         try {
             if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) {
-                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pending(c));
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, safeWhen, pending(c));
             } else {
-                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pending(c));
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, safeWhen, pending(c));
             }
         } catch (SecurityException e) {
-            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pending(c));
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, safeWhen, pending(c));
         }
-        Prefs.p(c).edit().putLong(Prefs.KEY_NEXT_AT, when).apply();
+        Prefs.p(c).edit().putLong(Prefs.KEY_NEXT_AT, safeWhen).apply();
     }
 
     static boolean canUseExact(Context c) {
