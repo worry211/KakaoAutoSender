@@ -2,6 +2,8 @@
 
 Native Windows companion for KakaoTalk Open Chat VoiceRoom management.
 
+Current calibration build: **v0.1.2**.
+
 ## Why native Windows
 
 KakaoTalk for Windows supports creating VoiceRooms in Open Chat. This manager controls the official Windows KakaoTalk client through Windows UI Automation instead of running an Android emulator or using coordinate-only macros.
@@ -17,6 +19,20 @@ KakaoTalk for Windows supports creating VoiceRooms in Open Chat. This manager co
 - If KakaoTalk is closed when a scheduled check is due, the manager attempts to reopen the official client.
 - Room state is stored under `%LOCALAPPDATA%\VoiceRoomManagerWindows\state.json`.
 - Optional per-user startup uses `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+
+## Room navigation model
+
+v0.1.1's first target-PC calibration showed that the installed KakaoTalk build does not expose the room title reliably in the raw room-list tree. v0.1.2 therefore uses a staged, fail-closed navigator for **safe probe, live check and unattended scheduled work alike**:
+
+1. prove that the target room is already open when possible
+2. use an unambiguous visible room item only for safe non-trivial names
+3. enter Kakao's semantic Chat/search UI when exposed
+4. populate the search edit through `ValuePattern`
+5. rank exact room-title results and reject ambiguous ties (especially one-character/numeric names such as `1`)
+6. click only one proven best result
+7. require current-room header/window-title evidence plus a message composer before continuing into VoiceRoom controls
+
+No coordinate fallback is used. Navigation failures report privacy-safe counts such as Kakao window count, button/edit/search-control counts and exact-title candidate count instead of only saying `방 제목 UI를 찾지 못함`.
 
 ## Automation model
 
@@ -43,16 +59,17 @@ KakaoTalk for Windows supports creating VoiceRooms in Open Chat. This manager co
 
 - Dark standalone WPF dashboard.
 - Room add/remove, per-room management ON/OFF, safe probe, live check, start/stop all.
+- Human-readable states (`등록 대기`, `안전 점검 완료`, `보룸 활성`, etc.) instead of internal enum codes.
 - Status table for active verification, remaining time, mic/speaker protection and diagnostics.
 - Windows-login auto-start option.
 - Runtime protection counters and latest operational status.
 
 ## Current live gates
 
-The project builds as a self-contained x64 EXE. The Windows client automation still requires one target-PC KakaoTalk calibration pass before a production-release claim because Kakao's exposed UI Automation labels can differ by client build/layout.
+The project builds as a self-contained x64 EXE. v0.1.2 resolves the first target-PC gate (`방 제목 UI를 찾지 못함`) structurally by adding the verified search-navigation stage, but the exact search labels/results still require one target-PC execution to confirm what the installed KakaoTalk build exposes.
 
 Pending runtime gates:
-1. room-list selector on the user's installed KakaoTalk Windows build
+1. v0.1.2 search-navigation result on the user's installed KakaoTalk Windows build
 2. VoiceRoom create dialog selector and strong active proof on that build
 3. mic/speaker accessibility action labels
 4. real speaker-request deny UI from another account/device
