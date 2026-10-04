@@ -31,7 +31,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Restore stable debug keystore
+      # Test convenience only. PR caches may be read-only on a cold key, so production/update
+      # signing must use a separate protected release key and must never rely on this cache.
+      - name: Restore test debug keystore cache
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
