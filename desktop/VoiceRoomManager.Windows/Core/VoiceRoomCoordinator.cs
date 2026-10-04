@@ -93,21 +93,22 @@ public sealed class VoiceRoomCoordinator : IDisposable
                 return;
             }
 
-            // Runtime guard is intentionally lightweight and fail-closed.
             foreach (var room in _state.Rooms.Where(r => r.Enabled && r.LiveVerified))
             {
                 var result = _kakao.RuntimeGuard(room);
                 if (!result.Success) continue;
-                if (result.Status.Contains("스피커 요청 자동 거절", StringComparison.Ordinal))
-                    _state.SpeakerRequestsRejected++;
-                if (result.MicMuted || result.SpeakerMuted)
-                    _state.AudioRepairs++;
+                if (result.RejectedRequest) _state.SpeakerRequestsRejected++;
+                if (result.RequestToggleDisabled) _state.SpeakerRequestTogglesDisabled++;
+                if (result.AudioRepaired) _state.AudioRepairs++;
                 room.MicMuted |= result.MicMuted;
                 room.SpeakerMuted |= result.SpeakerMuted;
-                _state.LastStatus = room.Title + " · " + result.Status;
-                Save();
-                StateChanged?.Invoke();
-                break;
+                if (result.RejectedRequest || result.RequestToggleDisabled || result.AudioRepaired)
+                {
+                    _state.LastStatus = room.Title + " · " + result.Status;
+                    Save();
+                    StateChanged?.Invoke();
+                    break;
+                }
             }
         }
         catch (Exception ex)
@@ -133,11 +134,12 @@ public sealed class VoiceRoomCoordinator : IDisposable
             room.Status = "ACTIVE";
             room.LastError = "";
             room.Failures = 0;
-            room.StartedAt ??= now;
+            if (result.Created || room.StartedAt is null) room.StartedAt = now;
             room.NextCheckAt = NextActiveCheck(room.StartedAt.Value, now);
             room.MicMuted = result.MicMuted;
             room.SpeakerMuted = result.SpeakerMuted;
-            _state.LastStatus = room.Title + " · 보이스룸 활성 확인";
+            if (result.AudioRepaired) _state.AudioRepairs++;
+            _state.LastStatus = room.Title + (result.Created ? " · 새 보이스룸 생성/활성 확인" : " · 보이스룸 활성 확인");
             return;
         }
 
