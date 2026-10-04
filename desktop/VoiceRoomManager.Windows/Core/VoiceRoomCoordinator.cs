@@ -104,10 +104,18 @@ public sealed class VoiceRoomCoordinator : IDisposable
                     }
                     if (result.Success)
                     {
+                        var changed = room.MicMuted != result.MicMuted || room.SpeakerMuted != result.SpeakerMuted
+                            || result.RejectedRequest || result.RequestToggleDisabled || result.AudioRepaired;
                         room.MicMuted = result.MicMuted; room.SpeakerMuted = result.SpeakerMuted;
                         if (result.RejectedRequest) _state.SpeakerRequestsRejected++;
                         if (result.RequestToggleDisabled) _state.SpeakerRequestTogglesDisabled++;
                         if (result.AudioRepaired) _state.AudioRepairs++;
+                        if (changed)
+                        {
+                            _state.LastStatus = room.Title + " · " + result.Status;
+                            OperationLog.Write(room, "RUNTIME_GUARD", result.Status);
+                            Save();
+                        }
                     }
                 }
             }
