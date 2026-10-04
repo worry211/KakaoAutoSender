@@ -2,12 +2,20 @@
 <resources>
     <style name="PremiumDialogTheme" parent="android:style/Theme.Material.Dialog.Alert">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#6E83FF</item>
-        <item name="android:textColorPrimary">#EEF2F9</item>
+        <item name="android:colorAccent">#7A8FFF</item>
+        <item name="android:colorControlNormal">#AAB6CE</item>
+        <item name="android:colorControlActivated">#7A8FFF</item>
+        <item name="android:textColorPrimary">#F0F4FB</item>
         <item name="android:textColorSecondary">#AAB4C8</item>
-        <item name="android:windowBackground">#171D2A</item>
+        <item name="android:textColorAlertDialogListItem">#EAF0FA</item>
+        <item name="android:windowBackground">@drawable/dialog_panel</item>
         <item name="android:navigationBarColor">#080A0E</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowBackgroundDimEnabled">true</item>
+        <item name="android:backgroundDimAmount">0.72</item>
+        <item name="android:windowElevation">18dp</item>
+        <item name="android:windowMinWidthMajor">92%</item>
+        <item name="android:windowMinWidthMinor">92%</item>
     </style>
 
     <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
@@ -17,6 +25,8 @@
         <item name="android:navigationBarColor">#080A0E</item>
         <item name="android:statusBarColor">#090B10</item>
         <item name="android:colorAccent">#6E83FF</item>
+        <item name="android:colorControlNormal">#A5B1CA</item>
+        <item name="android:colorControlActivated">#7A8FFF</item>
         <item name="android:alertDialogTheme">@style/PremiumDialogTheme</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowNoTitle">true</item>
