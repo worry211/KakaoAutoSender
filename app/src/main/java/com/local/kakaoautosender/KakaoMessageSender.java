@@ -7,6 +7,8 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 
+import java.io.FileNotFoundException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
@@ -77,6 +79,23 @@ final class KakaoMessageSender {
         RemoteInput[] textInputs = freeFormInputs(target.remoteInputs);
         if (!message.trim().isEmpty() && textInputs.length == 0) {
             lastError = "현재 카카오톡 알림 답장 방식에서는 이 방에 텍스트 자동전송을 지원하지 않습니다.";
+            return false;
+        }
+
+        // Only after target capabilities are validated, prove the configured SAF URI is still
+        // readable. A saved URI may point to a deleted/moved file or have lost its grant after a
+        // provider change. Never report success or silently fall back to text-only in that case.
+        try (InputStream in = context.getContentResolver().openInputStream(uri)) {
+            if (in == null) throw new FileNotFoundException("photo unavailable");
+            in.read(); // Touch the provider so stale grants/missing documents fail before Kakao send.
+        } catch (SecurityException e) {
+            lastError = "사진 읽기 권한이 만료되었습니다. 사진을 다시 선택해 주세요.";
+            return false;
+        } catch (FileNotFoundException e) {
+            lastError = "선택한 사진을 찾을 수 없습니다. 삭제·이동 여부를 확인하고 다시 선택해 주세요.";
+            return false;
+        } catch (Throwable t) {
+            lastError = "선택한 사진을 읽을 수 없습니다. 사진을 다시 선택해 주세요.";
             return false;
         }
 
