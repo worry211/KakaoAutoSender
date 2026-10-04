@@ -33,33 +33,37 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 waitForListenerAndRefresh();
 
                 long now = System.currentTimeMillis();
-                ArrayList<MultiRoomStore.Profile> due = MultiRoomStore.due(app, now);
+                ArrayList<MultiRoomStore.Profile> due = ReliabilityTiming.due(app, now);
                 if (due.isEmpty()) {
                     SendScheduler.scheduleNext(app);
                     return;
                 }
 
-                int attempted = 0;
-                int success = 0;
-                int skipped = 0;
-                for (MultiRoomStore.Profile profile : due) {
-                    if (!Prefs.p(app).getBoolean(Prefs.KEY_ACTIVE, false)) break;
-                    if (!profile.enabled || profile.room.trim().isEmpty() || profile.message.trim().isEmpty()) continue;
+                // Process exactly one room per alarm invocation. This keeps the receiver
+                // short-lived and prevents multiple Kakao reply PendingIntents from being
+                // fired back-to-back when several rooms become due together.
+                MultiRoomStore.Profile profile = due.get(0);
+                if (!profile.enabled || profile.room.trim().isEmpty() || profile.message.trim().isEmpty()) {
+                    SendScheduler.scheduleNext(app);
+                    return;
+                }
 
-                    String visibleName = profile.title();
-                    if (!profile.unlimited() && profile.todayCount >= profile.dailyLimit) {
-                        long next = MultiRoomStore.nextAfterDailyLimit(profile, System.currentTimeMillis());
-                        String status = "오늘 방별 한도 도달: " + visibleName + " ("
-                                + profile.todayCount + "/" + profile.dailyLimit + ")";
-                        MultiRoomStore.markSkippedForLimit(app, profile.room, next, status);
-                        skipped++;
-                        continue;
-                    }
+                String visibleName = profile.title();
+                boolean attempted = false;
+                boolean sent = false;
+                boolean skippedForLimit = false;
+                String failureReason = "확인된 답장 세션 없음";
 
-                    attempted++;
-                    boolean sent = false;
-                    String failureReason = "확인된 답장 세션 없음";
+                if (!profile.unlimited() && profile.todayCount >= profile.dailyLimit) {
+                    long next = MultiRoomStore.nextAfterDailyLimit(profile, System.currentTimeMillis());
+                    String status = "오늘 방별 한도 도달: " + visibleName + " ("
+                            + profile.todayCount + "/" + profile.dailyLimit + ")";
+                    MultiRoomStore.markSkippedForLimit(app, profile.room, next, status);
+                    skippedForLimit = true;
+                } else {
+                    attempted = true;
                     for (int i = 0; i < 3 && !sent; i++) {
+                        if (!Prefs.p(app).getBoolean(Prefs.KEY_ACTIVE, false)) break;
                         sent = KakaoNotificationListener.sendToRoom(app, profile.room, profile.message);
                         if (!sent) {
                             failureReason = KakaoNotificationListener.lastSendError();
@@ -68,7 +72,7 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                             }
                             if (i < 2) {
                                 KakaoNotificationListener.requestRefresh();
-                                sleep(400L);
+                                sleep(ReliabilityTiming.retryGapMillis());
                             }
                         }
                     }
@@ -77,7 +81,6 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                     if (sent) {
                         MultiRoomStore.markSuccess(app, profile.room, next,
                                 "자동전송 성공: " + visibleName);
-                        success++;
                     } else {
                         String recovery = KakaoNotificationListener.hasStoredBinding(app, profile.room)
                                 ? "자동복구 정보 있음 · 같은 방 새 알림 대기"
@@ -85,14 +88,46 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                         MultiRoomStore.markFailure(app, profile.room, next,
                                 "자동전송 실패: " + visibleName + " · " + failureReason + " · " + recovery);
                     }
-
-                    // Same-time rooms are serialized to avoid reply PendingIntent collisions.
-                    sleep(650L);
                 }
 
-                Prefs.setStatus(app, "예약 실행 · 시도 " + attempted + " · 성공 " + success
-                        + (skipped > 0 ? " · 한도대기 " + skipped : ""));
-                SendScheduler.scheduleNext(app);
+                if (!Prefs.p(app).getBoolean(Prefs.KEY_ACTIVE, false)) {
+                    SendScheduler.cancel(app);
+                    return;
+                }
+
+                long nextDue = ReliabilityTiming.nextEffectiveDueAt(app);
+                if (nextDue <= 0L) {
+                    SendScheduler.cancel(app);
+                    return;
+                }
+
+                long nowAfter = System.currentTimeMillis();
+                long scheduledAt = nextDue;
+                int gapSeconds = 0;
+
+                // If another room is already due (or is about to be due), force a 2-5s
+                // cross-room gap. We schedule a new alarm instead of sleeping inside this
+                // receiver, so large room sets do not hit BroadcastReceiver time limits.
+                if (attempted) {
+                    long gap = ReliabilityTiming.roomGapMillis();
+                    long minimumAfterCurrentRoom = nowAfter + gap;
+                    if (scheduledAt < minimumAfterCurrentRoom) {
+                        scheduledAt = minimumAfterCurrentRoom;
+                        gapSeconds = ReliabilityTiming.secondsCeil(gap);
+                    }
+                }
+
+                StringBuilder status = new StringBuilder();
+                if (skippedForLimit) {
+                    status.append("예약 실행 · 한도대기 · ").append(visibleName);
+                } else if (sent) {
+                    status.append("예약 실행 · 성공 · ").append(visibleName);
+                } else {
+                    status.append("예약 실행 · 실패 · ").append(visibleName);
+                }
+                if (gapSeconds > 0) status.append(" · 다음 방 ").append(gapSeconds).append("초 후");
+                Prefs.setStatus(app, status.toString());
+                SendScheduler.scheduleAt(app, scheduledAt);
             } catch (Throwable t) {
                 Prefs.recordFailure(app);
                 Prefs.setStatus(app, "자동전송 내부 오류: " + t.getClass().getSimpleName());
