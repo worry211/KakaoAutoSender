@@ -24,6 +24,7 @@ final class VoiceRoomStore {
     static final String ENTRY_DEEPLINK = "DEEPLINK";
     static final String ENTRY_LAUNCHER = "LAUNCHER";
 
+    private static final int VERIFICATION_SCHEMA = 2;
     private static final String PREFS = "voiceroom_manager";
     private static final String KEY_ROOMS = "rooms_json";
     private static final String KEY_ACTIVE = "manager_active";
@@ -32,6 +33,7 @@ final class VoiceRoomStore {
     private static final String KEY_PENDING_MODE = "pending_mode";
     private static final String KEY_PENDING_ENTRY = "pending_entry";
     private static final String KEY_LAST_STATUS = "last_status";
+    private static final String KEY_VERIFICATION_SCHEMA = "verification_schema";
 
     private VoiceRoomStore() {}
 
@@ -75,7 +77,53 @@ final class VoiceRoomStore {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
+    /**
+     * v0.4.0 could accept a weak text combination from a normal chat/menu as an active VoiceRoom.
+     * Never carry that trust boundary forward. The migration is one-shot and intentionally keeps
+     * the non-destructive safe-probe result while requiring a fresh live check under the stricter
+     * v0.4.1 activation proof.
+     */
+    private static void ensureVerificationSchema(Context context) {
+        SharedPreferences prefs = p(context);
+        if (prefs.getInt(KEY_VERIFICATION_SCHEMA, 0) >= VERIFICATION_SCHEMA) return;
+
+        String raw = prefs.getString(KEY_ROOMS, "[]");
+        JSONArray migrated = new JSONArray();
+        try {
+            JSONArray source = new JSONArray(raw == null ? "[]" : raw);
+            for (int i = 0; i < source.length(); i++) {
+                JSONObject o = source.optJSONObject(i);
+                if (o == null) continue;
+                boolean safe = o.optBoolean("safeProbePassed", false);
+                o.put("liveCheckPassed", false);
+                o.put("verifiedAt", safe ? Math.max(0L, o.optLong("verifiedAt", 0L)) : 0L);
+                o.put("startedAt", 0L);
+                o.put("nextCheckAt", 0L);
+                o.put("failures", 0);
+                o.put("stageStartedAt", 0L);
+                o.put("status", safe ? "PROBE_OK" : "NEW");
+                o.put("lastError", "v0.4.1 활성 판정 강화로 실제 점검을 다시 해줘.");
+                migrated.put(o);
+            }
+        } catch (Exception ignored) {
+            migrated = new JSONArray();
+        }
+
+        prefs.edit()
+                .putString(KEY_ROOMS, migrated.toString())
+                .putBoolean(KEY_ACTIVE, false)
+                .putInt(KEY_VERIFICATION_SCHEMA, VERIFICATION_SCHEMA)
+                .remove(KEY_PENDING_ROOM)
+                .remove(KEY_PENDING_AT)
+                .remove(KEY_PENDING_MODE)
+                .remove(KEY_PENDING_ENTRY)
+                .putString(KEY_LAST_STATUS, "v0.4.1 활성 판정 강화 · 실제 점검 재확인 필요")
+                .apply();
+        AudioGuard.restore(context);
+    }
+
     static synchronized List<Room> list(Context context) {
+        ensureVerificationSchema(context);
         ArrayList<Room> out = new ArrayList<>();
         String raw = p(context).getString(KEY_ROOMS, "[]");
         try {
@@ -152,10 +200,12 @@ final class VoiceRoomStore {
     }
 
     static boolean managerActive(Context context) {
+        ensureVerificationSchema(context);
         return p(context).getBoolean(KEY_ACTIVE, false);
     }
 
     static void setManagerActive(Context context, boolean value) {
+        ensureVerificationSchema(context);
         p(context).edit().putBoolean(KEY_ACTIVE, value).apply();
     }
 
@@ -168,6 +218,7 @@ final class VoiceRoomStore {
     }
 
     static void setPending(Context context, String roomId, String mode, String entry) {
+        ensureVerificationSchema(context);
         p(context).edit()
                 .putString(KEY_PENDING_ROOM, roomId == null ? "" : roomId)
                 .putLong(KEY_PENDING_AT, System.currentTimeMillis())
@@ -182,20 +233,24 @@ final class VoiceRoomStore {
     }
 
     static String pendingRoomId(Context context) {
+        ensureVerificationSchema(context);
         String value = p(context).getString(KEY_PENDING_ROOM, "");
         return value == null ? "" : value;
     }
 
     static long pendingAt(Context context) {
+        ensureVerificationSchema(context);
         return p(context).getLong(KEY_PENDING_AT, 0L);
     }
 
     static String pendingMode(Context context) {
+        ensureVerificationSchema(context);
         String value = p(context).getString(KEY_PENDING_MODE, MODE_AUTO);
         return normalizeMode(value);
     }
 
     static String pendingEntry(Context context) {
+        ensureVerificationSchema(context);
         String value = p(context).getString(KEY_PENDING_ENTRY, ENTRY_UNKNOWN);
         return normalizeEntry(value);
     }
@@ -220,6 +275,7 @@ final class VoiceRoomStore {
     }
 
     static void clearPending(Context context) {
+        ensureVerificationSchema(context);
         p(context).edit()
                 .remove(KEY_PENDING_ROOM)
                 .remove(KEY_PENDING_AT)
@@ -230,10 +286,12 @@ final class VoiceRoomStore {
     }
 
     static void setLastStatus(Context context, String value) {
+        ensureVerificationSchema(context);
         p(context).edit().putString(KEY_LAST_STATUS, value == null ? "" : value).apply();
     }
 
     static String lastStatus(Context context) {
+        ensureVerificationSchema(context);
         String value = p(context).getString(KEY_LAST_STATUS, "");
         return value == null ? "" : value;
     }
