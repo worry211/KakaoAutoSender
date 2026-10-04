@@ -42,7 +42,8 @@ public partial class MainWindow : Window
 
         var kakao = System.Diagnostics.Process.GetProcessesByName("KakaoTalk").Any();
         var locked = DesktopSession.IsLocked();
-        SystemStatus.Text = $"카카오톡 {(kakao ? "확인" : "미실행")} · Windows {(locked ? "잠금" : "사용 가능")} · 등록 {State.Rooms.Count}개"
+        var linked = State.Rooms.Count(r => OpenChatLinkRegistry.IsSupported(r.OpenChatUrl));
+        SystemStatus.Text = $"카카오톡 {(kakao ? "확인" : "미실행")} · Windows {(locked ? "잠금" : "사용 가능")} · 등록 {State.Rooms.Count}개 · 링크 {linked}/{State.Rooms.Count}"
             + (State.ManagerActive ? " · PC 절전 방지 ON / 모니터 OFF 허용" : "");
         RuntimeStats.Text = $"스피커 요청 자동거절 {State.SpeakerRequestsRejected}회 · 요청받기 차단 {State.SpeakerRequestTogglesDisabled}회 · 오디오 재보호 {State.AudioRepairs}회";
         LastStatus.Text = State.LastStatus;
@@ -63,17 +64,66 @@ public partial class MainWindow : Window
 
     private void AddRoom_Click(object sender, RoutedEventArgs e)
     {
-        var title = Interaction.InputBox("PC 카카오톡에 표시되는 오픈채팅방 이름을 정확히 입력해줘.", "방 추가", "").Trim();
+        var title = Interaction.InputBox("PC 카카오톡에 표시되는 오픈채팅방 이름을 정확히 입력해줘.\n링크로 진입한 뒤 이 제목으로 실제 방이 맞는지 검증해.", "방 추가 · 이름", "").Trim();
         if (title.Length == 0) return;
-        if (State.Rooms.Any(r => string.Equals(r.Title, title, StringComparison.Ordinal)))
+
+        var url = Interaction.InputBox("오픈채팅 링크를 입력해줘.\n예: https://open.kakao.com/o/xxxx", "방 추가 · 오픈채팅 링크", "").Trim();
+        if (!OpenChatLinkRegistry.IsSupported(url))
         {
-            MessageBox.Show(this, "같은 이름의 방이 이미 등록되어 있어.");
+            MessageBox.Show(this, "https://open.kakao.com/o/... 형식의 정상 오픈채팅 링크만 등록할 수 있어.", "링크 확인", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        State.Rooms.Add(new RoomState { Title = title, Enabled = true });
-        State.LastStatus = title + " · 방 추가 · 안전 점검 필요";
+        url = OpenChatLinkRegistry.Normalize(url);
+
+        var existing = State.Rooms.FirstOrDefault(r => string.Equals(r.Title, title, StringComparison.Ordinal));
+        if (existing is not null)
+        {
+            if (MessageBox.Show(this, $"같은 이름의 방 ‘{title}’이 이미 있어.\n이 방의 오픈채팅 링크를 새 링크로 바꿀까?\n검증 상태는 안전하게 초기화돼.", "기존 방 링크 변경",
+                    MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            existing.OpenChatUrl = url;
+            ResetVerification(existing);
+            State.LastStatus = title + " · 오픈채팅 링크 변경 · 재검증 필요";
+        }
+        else
+        {
+            State.Rooms.Add(new RoomState { Title = title, OpenChatUrl = url, Enabled = true });
+            State.LastStatus = title + " · 방/링크 추가 · 안전 점검 필요";
+        }
         _coordinator.Save();
         RefreshUi();
+    }
+
+    private void SetLink_Click(object sender, RoutedEventArgs e)
+    {
+        var room = SelectedRoom();
+        if (room is null) return;
+        var url = Interaction.InputBox("이 방의 오픈채팅 링크를 입력해줘.\n링크를 바꾸면 기존 검증/48시간 기준은 초기화돼.", "오픈채팅 링크 설정", room.OpenChatUrl).Trim();
+        if (url.Length == 0) return;
+        if (!OpenChatLinkRegistry.IsSupported(url))
+        {
+            MessageBox.Show(this, "https://open.kakao.com/o/... 형식의 정상 오픈채팅 링크만 등록할 수 있어.", "링크 확인", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        url = OpenChatLinkRegistry.Normalize(url);
+        if (string.Equals(room.OpenChatUrl, url, StringComparison.Ordinal)) return;
+        room.OpenChatUrl = url;
+        ResetVerification(room);
+        State.LastStatus = room.Title + " · 오픈채팅 링크 설정 완료 · 안전 점검부터 다시 진행";
+        _coordinator.Save();
+        RefreshUi();
+    }
+
+    private static void ResetVerification(RoomState room)
+    {
+        room.LiveVerified = false;
+        room.MicMuted = false;
+        room.SpeakerMuted = false;
+        room.StartedAt = null;
+        room.NextCheckAt = null;
+        room.Status = "NEW";
+        room.LastError = "";
+        room.LastDiagnostic = "링크 변경으로 검증 상태 초기화";
+        room.Failures = 0;
     }
 
     private void RemoveRoom_Click(object sender, RoutedEventArgs e)
