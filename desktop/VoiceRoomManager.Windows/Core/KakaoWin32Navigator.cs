@@ -109,6 +109,16 @@ public sealed class KakaoWin32Navigator
         if (main == IntPtr.Zero)
             return new(false, IntPtr.Zero, "카카오톡 메인 Win32 창(EVA_Window_Dblclk)을 찾지 못함");
 
+        // Link-based entry can legitimately open the room inside Kakao's main window rather than
+        // an independent chat window. Reuse it only when a very recent verified link-entry token
+        // exists AND the real chat composer is visible. This avoids re-running a fragile search.
+        if (OpenChatLinkRegistry.IsRecentlyVerifiedEntry(title)
+            && KakaoOpenChatEntry.HasVisibleChatComposer(main))
+        {
+            Activate(main);
+            return new(true, main, "최근 링크 진입 검증 + 메인창 실제 채팅 입력창 확인 · 방 재검색 생략");
+        }
+
         Activate(main);
         Thread.Sleep(180);
 
@@ -120,13 +130,11 @@ public sealed class KakaoWin32Navigator
         var chatView = children.FirstOrDefault(x => x.Visible && x.Title.StartsWith(ChatViewPrefix, StringComparison.Ordinal));
         if (chatView is null)
         {
-            // It may already be the chats tab on a build where Ctrl+2 is ignored.
             chatView = children.FirstOrDefault(x => x.Visible && x.Title.StartsWith(ChatViewPrefix, StringComparison.Ordinal));
         }
         if (chatView is null)
             return new(false, IntPtr.Zero, BuildMainDiagnostic(main, "채팅 탭(ChatRoomListView_*) 활성 확인 실패"));
 
-        // Ctrl+F makes the tab's standard Edit search HWND visible on observed current builds.
         Activate(main);
         SendChord(VkControl, VkF);
         Thread.Sleep(260);
@@ -143,7 +151,6 @@ public sealed class KakaoWin32Navigator
         if (!FocusChild(main, edit.Hwnd))
             return new(false, IntPtr.Zero, "검색 Edit 포커스 실패 · " + BuildMainDiagnostic(main, "focus=0"));
 
-        // Use real Unicode key input rather than WM_SETTEXT so Kakao's live search handlers fire.
         SendChord(VkControl, VkA);
         SendKey(VkBack);
         if (!SendUnicodeText(title))
@@ -156,10 +163,6 @@ public sealed class KakaoWin32Navigator
             return new(false, IntPtr.Zero, BuildMainDiagnostic(main, "검색 결과 SearchListCtrl_*가 나타나지 않음"));
 
         var prior = EnumerateChatWindows().Select(x => x.Hwnd).ToHashSet();
-
-        // Enter selects the first scoped search result; Alt+Enter opens it as an independent
-        // chat window on observed builds. The new window is never trusted until its title
-        // exactly equals the requested room name.
         SendKey(VkReturn);
         Thread.Sleep(180);
         SendChord(VkMenu, VkReturn);
@@ -185,7 +188,6 @@ public sealed class KakaoWin32Navigator
                 }
             }
 
-            // Some builds reuse an already-existing chat HWND rather than creating a new one.
             var exact = FindExactChat(title);
             if (exact != IntPtr.Zero)
             {
@@ -284,7 +286,6 @@ public sealed class KakaoWin32Navigator
     {
         if (hwnd == IntPtr.Zero) return;
         ShowWindowAsync(hwnd, SwRestore);
-        // Alt press helps satisfy foreground restrictions without bypassing Windows lock/session security.
         SendKey(VkMenu);
         SetForegroundWindow(hwnd);
     }
