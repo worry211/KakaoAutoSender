@@ -6,6 +6,7 @@ import android.app.Activity;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.os.Build;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -66,18 +67,12 @@ final class PremiumChrome {
 
   private static void polishTree(View v, float density) {
     if (POLISHED.put(v, Boolean.TRUE) == null) {
-      if (v instanceof ScrollView) {
-        v.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        ((ScrollView) v).setFillViewport(true);
-      }
-      if (v instanceof TextView) ((TextView) v).setIncludeFontPadding(false);
+      if (v instanceof ScrollView) polishScroll((ScrollView) v);
+      if (v instanceof TextView) polishText((TextView) v);
       if (v instanceof LinearLayout && v.getBackground() != null) {
         v.setElevation(Math.max(v.getElevation(), dp(density, 1)));
       }
-      if (v instanceof EditText) {
-        v.setElevation(dp(density, 1));
-        ((EditText) v).setSelectAllOnFocus(false);
-      }
+      if (v instanceof EditText) polishEdit((EditText) v, density);
       if (v instanceof CompoundButton) polishCompound((CompoundButton) v);
       if (v instanceof Button) polishButton((Button) v, density);
     }
@@ -85,6 +80,30 @@ final class PremiumChrome {
       ViewGroup g = (ViewGroup) v;
       for (int i = 0; i < g.getChildCount(); i++) polishTree(g.getChildAt(i), density);
     }
+  }
+
+  private static void polishScroll(ScrollView scroll) {
+    scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+    scroll.setFillViewport(true);
+    // The stock Android scrollbar made the premium screens read like a debug/settings surface.
+    // Content remains fully scrollable; only the decorative gutter indicator is hidden.
+    scroll.setVerticalScrollBarEnabled(false);
+    scroll.setHorizontalScrollBarEnabled(false);
+    scroll.setFadingEdgeLength(0);
+  }
+
+  private static void polishText(TextView text) {
+    text.setIncludeFontPadding(false);
+    if (Build.VERSION.SDK_INT >= 23) {
+      text.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_HIGH_QUALITY);
+      text.setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE);
+    }
+  }
+
+  private static void polishEdit(EditText edit, float density) {
+    edit.setElevation(dp(density, 1));
+    edit.setSelectAllOnFocus(false);
+    edit.setSingleLine(edit.isSingleLine());
   }
 
   private static void polishCompound(CompoundButton button) {
@@ -99,9 +118,25 @@ final class PremiumChrome {
   private static void polishButton(Button button, float density) {
     button.setAllCaps(false);
     button.setHapticFeedbackEnabled(true);
-    button.setLetterSpacing(0.01f);
     button.setMinHeight(dp(density, 48));
     button.setStateListAnimator(buttonAnimator(dp(density, 2), dp(density, 0)));
+
+    CharSequence raw = button.getText();
+    String label = raw == null ? "" : raw.toString();
+    boolean twoLineTool = label.indexOf('\n') >= 0;
+    if (twoLineTool) {
+      // Commercial settings cards read better as title/subtitle rows than centered stacked tiles.
+      button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+      button.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+      button.setPadding(dp(density, 17), dp(density, 10), dp(density, 14), dp(density, 10));
+      button.setLineSpacing(0, 1.08f);
+      button.setLetterSpacing(0f);
+      button.setMinHeight(dp(density, 66));
+    } else {
+      button.setGravity(Gravity.CENTER);
+      button.setLetterSpacing(0.005f);
+    }
+
     button.setOnTouchListener(
         (v, event) -> {
           switch (event.getActionMasked()) {
