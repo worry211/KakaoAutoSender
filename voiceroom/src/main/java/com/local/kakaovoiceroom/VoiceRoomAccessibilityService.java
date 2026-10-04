@@ -37,12 +37,23 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private long lastStepAt;
     private String watchedRoomId = "";
+    private boolean followUpScheduled;
+
     private final Runnable timeoutRunnable = new Runnable() {
         @Override public void run() {
             String pending = VoiceRoomStore.pendingRoomId(VoiceRoomAccessibilityService.this);
             if (pending.isEmpty() || !pending.equals(watchedRoomId)) return;
             VoiceRoomStore.Room room = VoiceRoomStore.get(VoiceRoomAccessibilityService.this, pending);
             if (room != null) fail(room, "카카오톡 화면 인식 제한시간 초과");
+        }
+    };
+
+    private final Runnable followUpRunnable = new Runnable() {
+        @Override public void run() {
+            followUpScheduled = false;
+            if (!VoiceRoomStore.pendingRoomId(VoiceRoomAccessibilityService.this).isEmpty()) {
+                stepPendingJob();
+            }
         }
     };
 
@@ -70,6 +81,8 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
 
     @Override public void onDestroy() {
         handler.removeCallbacks(timeoutRunnable);
+        handler.removeCallbacks(followUpRunnable);
+        followUpScheduled = false;
         super.onDestroy();
     }
 
@@ -100,21 +113,40 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         }
 
         try {
+            CharSequence rootPackage = root.getPackageName();
+            if (rootPackage == null || !KAKAO_PACKAGE.contentEquals(rootPackage)) {
+                // A delayed follow-up may run after the user/app returned to VoiceRoom Manager.
+                // Never inspect or click a non-Kakao window.
+                scheduleFollowUp();
+                return;
+            }
+
             boolean titleVisible = containsExact(root, room.title);
             boolean roomScreen = titleVisible && containsAny(root, ROOM_READY_TERMS);
             String status = room.status == null ? "" : room.status;
+            boolean openingRoom = "OPENING_ROOM".equals(status)
+                    || "PROBE_OPENING_ROOM".equals(status);
             boolean roomMenu = "ROOM_MENU".equals(status) || "PROBE_ROOM_MENU".equals(status);
             boolean voiceMenu = "VOICE_MENU".equals(status) || "PROBE_VOICE_MENU".equals(status);
             boolean creating = "CREATING".equals(status);
             boolean modalProgress = roomMenu || voiceMenu || creating;
 
             if (!roomScreen && !modalProgress) {
+                // Once we clicked a room, wait for the room screen instead of clicking the
+                // same title again on every Accessibility event/follow-up tick.
+                if (openingRoom) {
+                    scheduleFollowUp();
+                    return;
+                }
+
                 AccessibilityNodeInfo roomNode = findExact(root, room.title);
                 if (roomNode != null && clickNodeOrParent(roomNode)) {
                     room.status = probe ? "PROBE_OPENING_ROOM" : "OPENING_ROOM";
                     room.lastError = "";
                     VoiceRoomStore.update(this, room);
                     VoiceRoomStore.setLastStatus(this, room.title + " · 대상 방 진입 중");
+                    scheduleFollowUp();
+                } else {
                     scheduleFollowUp();
                 }
                 return;
@@ -136,6 +168,8 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                     room.status = probe ? "PROBE_ROOM_MENU" : "ROOM_MENU";
                     VoiceRoomStore.update(this, room);
                     VoiceRoomStore.setLastStatus(this, room.title + " · 방 메뉴 확인 중");
+                    scheduleFollowUp();
+                } else {
                     scheduleFollowUp();
                 }
                 return;
@@ -247,6 +281,8 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
 
     private void finishPending() {
         handler.removeCallbacks(timeoutRunnable);
+        handler.removeCallbacks(followUpRunnable);
+        followUpScheduled = false;
         watchedRoomId = "";
         VoiceRoomStore.clearPending(this);
         VoiceRoomScheduler.scheduleNext(this);
@@ -262,9 +298,9 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     }
 
     private void scheduleFollowUp() {
-        handler.postDelayed(() -> {
-            if (!VoiceRoomStore.pendingRoomId(this).isEmpty()) stepPendingJob();
-        }, FOLLOW_UP_MS);
+        if (followUpScheduled) return;
+        followUpScheduled = true;
+        handler.postDelayed(followUpRunnable, FOLLOW_UP_MS);
     }
 
     private boolean clickAny(AccessibilityNodeInfo root, List<String> terms) {
