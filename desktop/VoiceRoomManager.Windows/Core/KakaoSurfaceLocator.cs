@@ -129,22 +129,22 @@ internal static class KakaoSurfaceLocator
 
     public static IReadOnlyList<Surface> PreviewCandidates()
     {
-        var snapshot = VisibleSurfaces(minWidth: 240, minHeight: 220);
+        var snapshot = VisibleSurfaces(minWidth: 220, minHeight: 220);
         var main = FindMainWindow();
         var mainRect = snapshot.FirstOrDefault(x => x.Hwnd == main)?.Rect;
 
-        // In KakaoTalk 26.x the OpenChat cover can be a separate untitled surface only ~300px
-        // wide, immediately to the right of the titled chat-list window. Do not assume the main
-        // titled HWND spans the whole visible client.
+        // Kakao 26.x can host the OpenChat cover in three ways: a separate untitled right-side
+        // child surface, a separate top-level panel, or directly inside the titled main HWND.
+        // Keep all large Kakao-owned surfaces and let the strict CTA visual proof choose the target.
         return snapshot
-            .Where(x => x.Hwnd != main)
-            .Where(x => x.Rect.Width >= 250 && x.Rect.Height >= 300)
+            .Where(x => x.Rect.Width >= 240 && x.Rect.Height >= 280)
             .OrderByDescending(x =>
             {
                 long score = x.Rect.Area;
                 if (string.IsNullOrWhiteSpace(x.Title)) score += 5_000_000;
                 if (mainRect is { } m && x.Rect.Left >= m.Left + m.Width / 2) score += 3_000_000;
                 if (x.Rect.Height >= 500) score += 1_000_000;
+                if (x.Hwnd == main) score += 500_000; // allow main-hosted preview, but do not dominate children.
                 return score;
             })
             .ToList();
