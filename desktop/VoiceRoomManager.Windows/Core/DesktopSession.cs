@@ -5,6 +5,7 @@ namespace VoiceRoomManager.Windows.Core;
 internal static class DesktopSession
 {
     private const uint DesktopSwitchDesktop = 0x0100;
+    private const int SwRestore = 9;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct LastInputInfo
@@ -24,6 +25,12 @@ internal static class DesktopSession
 
     [DllImport("user32.dll")]
     private static extern bool GetLastInputInfo(ref LastInputInfo info);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     public static bool IsLocked()
     {
@@ -58,5 +65,16 @@ internal static class DesktopSession
         {
             return TimeSpan.Zero;
         }
+    }
+
+    public static void ActivateWindow(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero) return;
+        try
+        {
+            ShowWindowAsync(handle, SwRestore);
+            SetForegroundWindow(handle);
+        }
+        catch { }
     }
 }
