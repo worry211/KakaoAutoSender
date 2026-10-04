@@ -75,6 +75,13 @@ final class ReliabilityTiming {
         return INTERVAL_JITTER_MIN_MS + offset;
     }
 
+    static long intervalJitterMillis(MultiRoomStore.Profile profile, long baseTimestamp) {
+        if (profile == null) return 0L;
+        MultiRoomStore.Profile copy = profile.copy();
+        copy.nextAt = baseTimestamp;
+        return intervalJitterMillis(copy);
+    }
+
     static long roomGapMillis() {
         return ThreadLocalRandom.current().nextLong(ROOM_GAP_MIN_MS, ROOM_GAP_MAX_MS + 1L);
     }
