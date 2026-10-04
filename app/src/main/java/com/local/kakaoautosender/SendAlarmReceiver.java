@@ -23,6 +23,13 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 Prefs.ensureLabelSchema(app);
                 MultiRoomStore.ensureMigrated(app);
 
+                if (!LicenseManager.isUsable(app)) {
+                    Prefs.p(app).edit().putBoolean(Prefs.KEY_ACTIVE, false).apply();
+                    SendScheduler.cancel(app);
+                    Prefs.setStatus(app, "라이선스 인증 필요 · 자동전송 중단");
+                    return;
+                }
+
                 if (!Prefs.p(app).getBoolean(Prefs.KEY_ACTIVE, false)) {
                     SendScheduler.cancel(app);
                     return;
