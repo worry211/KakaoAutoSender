@@ -31,8 +31,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      # Test convenience only. PR caches may be read-only on a cold key, so production/update
-      # signing must use a separate protected release key and must never rely on this cache.
+      # Test convenience only. Production/update signing uses a separate protected release key.
       - name: Restore test debug keystore cache
         uses: actions/cache@v4
         with:
@@ -47,6 +46,11 @@ jobs:
           gradle --no-daemon
           :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
           :voiceroom:testDebugUnitTest :voiceroom:lintDebug :voiceroom:assembleDebug
+      - name: Dump Android test diagnostics
+        if: failure()
+        run: |
+          find app/build/test-results/testDebugUnitTest -type f -name '*.xml' -print -exec cat {} \; || true
+          find voiceroom/build/test-results/testDebugUnitTest -type f -name '*.xml' -print -exec cat {} \; || true
       - name: Validate minified releases using ephemeral CI fixture
         env:
           ANDROID_API_BASE_URL: https://license.example.com
