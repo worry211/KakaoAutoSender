@@ -1,79 +1,161 @@
 # VoiceRoom Manager Windows
 
-Native Windows companion for KakaoTalk Open Chat VoiceRoom management.
+Native Windows manager for KakaoTalk Open Chat VoiceRoom maintenance.
 
-Current calibration build: **v0.1.2**.
+Current Windows build: **v0.2.0**.
 
-## Why native Windows
+The Windows app is a separate product from both KakaoAutoSender and the Android VoiceRoom Manager. It uses the user's account already signed into the official KakaoTalk Windows client and never asks for or stores Kakao credentials.
 
-KakaoTalk for Windows supports creating VoiceRooms in Open Chat. This manager controls the official Windows KakaoTalk client through Windows UI Automation instead of running an Android emulator or using coordinate-only macros.
+## v0.2.0 architecture
 
-## Operation model
+v0.2.0 replaces the earlier one-selector-at-a-time calibration approach with one verified room-session pipeline:
 
-- Kakao credentials are never collected or stored.
-- Uses the KakaoTalk Windows account already signed in on the PC.
-- Monitor may turn off; the Windows session must remain unlocked for UI Automation.
-- While automatic management is ON, the app requests `SYSTEM_REQUIRED` only: Windows system sleep is prevented, but the display is still allowed to turn off.
-- If Windows is locked, automation fails closed and waits; it does not bypass the lock screen.
-- Automatic scheduled work waits if the user has interacted with the PC in the last 30 seconds, then retries later instead of stealing the foreground.
-- If KakaoTalk is closed when a scheduled check is due, the manager attempts to reopen the official client.
-- Room state is stored under `%LOCALAPPDATA%\VoiceRoomManagerWindows\state.json`.
-- Optional per-user startup uses `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+1. validate and open the registered `https://open.kakao.com/o/...` link
+2. allow a direct Kakao handoff when Windows/browser protocol handling supports it
+3. if the browser landing page appears, invoke only the exact OpenChat join action
+4. treat Kakao's OpenChat cover/profile surface as a normal intermediate screen
+5. enter the already-joined room through `참여 중인 오픈채팅방`
+6. require a real chat proof: exact Kakao chat-window title or visible `RICHEDIT*` composer
+7. issue a short-lived verified-entry token for that operation
+8. reuse the same verified room session for safe probe / live check / VoiceRoom creation instead of searching for the room again
+9. use Win32 room search only as the final verified fallback
 
-## Room navigation model
+This removes the old failure mode where link entry succeeded and the next stage immediately re-ran a fragile room search.
 
-v0.1.1's first target-PC calibration showed that the installed KakaoTalk build does not expose the room title reliably in the raw room-list tree. v0.1.2 therefore uses a staged, fail-closed navigator for **safe probe, live check and unattended scheduled work alike**:
+## Unified Kakao surface discovery
 
-1. prove that the target room is already open when possible
-2. use an unambiguous visible room item only for safe non-trivial names
-3. enter Kakao's semantic Chat/search UI when exposed
-4. populate the search edit through `ValuePattern`
-5. rank exact room-title results and reject ambiguous ties (especially one-character/numeric names such as `1`)
-6. click only one proven best result
-7. require current-room header/window-title evidence plus a message composer before continuing into VoiceRoom controls
+Current KakaoTalk Windows builds can render the narrow chat list, right-side OpenChat preview and actual chat/VoiceRoom surfaces in different HWNDs while exposing little or no useful UI Automation tree.
 
-No coordinate fallback is used. Navigation failures report privacy-safe counts such as Kakao window count, button/edit/search-control counts and exact-title candidate count instead of only saying `방 제목 UI를 찾지 못함`.
+`KakaoSurfaceLocator` is the single Win32 source of truth for:
 
-## Automation model
+- all KakaoTalk top-level and child HWNDs
+- class/title/visibility/geometry
+- exact independent chat windows
+- actual `RICHEDIT*` chat composers
+- likely OpenChat preview surfaces, including narrow untitled panes
+- privacy-safe surface diagnostics on failure
 
-- Enumerates all top-level UI Automation windows belonging to KakaoTalk, so the main chat window, create dialog and VoiceRoom/PIP surfaces can be evaluated together.
-- Room matching supports a title followed by participant count.
-- Safe probe verifies room/VoiceRoom controls without creating a room.
-- Live check enters the room, opens VoiceRoom controls, fills the name, clicks create, and requires strong VoiceRoom-only active evidence twice.
-- An existing VoiceRoom with unknown start time does **not** get a fake fresh 48-hour baseline; it is rechecked every 10 minutes until the next proven recreation establishes a timestamp.
-- A newly created VoiceRoom gets a 48-hour baseline, a precheck around 47h55m, then one-minute UI polling around expiry. Kakao UI remains the source of truth.
-- Multi-room work is serialized through a single-flight semaphore.
+The app no longer assumes that the top-level window titled `카카오톡` owns all visible Kakao pixels.
 
-## Audio and speaker-request safety
+## OpenChat preview entry
 
-- UI Automation names/control patterns first; no blind coordinate clicking.
-- VoiceRoom creation is considered successful only after strong active proof.
-- Speaker requests are never auto-accepted/promoted.
-- Incoming requests are auto-rejected only when an explicit request context and explicit `거절/거부` action can be associated safely.
-- If Kakao exposes an explicit action label such as `스피커 요청 끄기/받지 않기/차단하기`, the manager may turn request reception off; plain state text is never clicked.
-- Mic/speaker protection uses exact semantic controls such as `마이크 끄기/켜기`, `스피커 끄기/켜기` when exposed.
-- Ambiguous UI fails closed and reports diagnostics.
-- Runtime counters track request rejects, request-reception disable actions and real audio repairs.
+`KakaoOpenChatPreviewBridge` prefers semantic UI Automation for exact actions such as `참여 중인 오픈채팅방`.
+
+When Kakao custom-renders the preview and exposes no actionable UIA descendants, the app may use a tightly scoped visual fallback:
+
+- scan only Kakao-owned visible preview surfaces
+- search only the lower part of plausible preview panes
+- require a unique, large Kakao-yellow CTA candidate
+- reject ambiguous candidates
+- never accept the click itself as success
+- require an exact chat title or real chat composer after the click
+
+This is a verified visual fallback, not a blind absolute-coordinate macro.
+
+## Adaptive UI calibration
+
+For Kakao controls that remain completely hidden from UIA/Win32, v0.2.0 includes an optional in-app **UI 캘리브레이션** system.
+
+Automatic semantic/Win32 detection is always preferred. Only a missing stage needs calibration.
+
+Supported calibration targets:
+
+1. VoiceRoom menu/button
+2. VoiceRoom name input
+3. create button
+4. active VoiceRoom leave/exit control used as active proof
+5. unmuted microphone icon
+6. unmuted speaker icon
+7. speaker-request reject action
+
+The user chooses a target, the manager hides for six seconds, and the user only hovers the mouse over the correct Kakao UI. The program stores:
+
+- position relative to the owning Kakao top-level surface
+- host window class/title kind
+- host size/aspect information
+- a local 9-point pixel signature
+- KakaoTalk file version metadata
+
+Before replay, the host geometry and visual signature must still match. If they do not, the click is refused and recalibration is requested. Moving or resizing the Kakao window is therefore not treated like an absolute-coordinate macro, while changed UI fails closed.
+
+Calibration data is stored locally under `%LOCALAPPDATA%\VoiceRoomManagerWindows\calibration.json`.
+
+## VoiceRoom automation
+
+After a verified room session is available, the engine:
+
+- recognizes an already-active VoiceRoom first
+- otherwise opens the VoiceRoom flow
+- fills the VoiceRoom name
+- invokes create
+- requires strong active proof twice before recording success
+- establishes a new 48-hour baseline only after a proven creation
+- does not invent a fresh start time for an already-existing room whose start time is unknown
+- prechecks around 47h55m and polls the real Kakao UI around expiry
+- serializes multi-room foreground work through one single-flight queue
+
+Kakao UI remains the final source of truth; the timer only decides when to inspect.
+
+## Audio and speaker-request protection
+
+- mic/speaker protection prefers exact semantic controls
+- calibrated visual fallback is used only when a stored signature still matches
+- speaker requests are never auto-accepted or promoted
+- explicit request-context + explicit reject action is preferred
+- a calibrated reject target is optional for custom-rendered request UI
+- runtime counters track reject, request-reception disable and audio-repair actions
+
+## Long-running Windows behavior
+
+- monitor may turn off
+- while management is ON, system sleep is prevented but display sleep is allowed
+- Windows lock/logoff is never bypassed; automation waits safely
+- scheduled foreground work defers while the user has recently interacted with the PC
+- KakaoTalk is relaunched when needed if the official client is closed
+- state is stored under `%LOCALAPPDATA%\VoiceRoomManagerWindows\state.json`
+- optional per-user startup uses `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+- OpenChat/VoiceRoom operations are serialized so two managed rooms cannot drive the UI at the same time
 
 ## Product UI
 
-- Dark standalone WPF dashboard.
-- Room add/remove, per-room management ON/OFF, safe probe, live check, start/stop all.
-- Human-readable states (`등록 대기`, `안전 점검 완료`, `보룸 활성`, etc.) instead of internal enum codes.
-- Status table for active verification, remaining time, mic/speaker protection and diagnostics.
-- Windows-login auto-start option.
-- Runtime protection counters and latest operational status.
+The WPF dashboard includes:
 
-## Current live gates
+- room + OpenChat-link registration
+- duplicate-link protection
+- per-room management ON/OFF
+- safe probe and live check
+- start/stop all
+- Windows-login autostart
+- human-readable room state and remaining time
+- real active / mic / speaker indicators
+- latest diagnostics and runtime counters
+- adaptive `UI 캘리브레이션` controls
 
-The project builds as a self-contained x64 EXE. v0.1.2 resolves the first target-PC gate (`방 제목 UI를 찾지 못함`) structurally by adding the verified search-navigation stage, but the exact search labels/results still require one target-PC execution to confirm what the installed KakaoTalk build exposes.
+## Safety boundaries
 
-Pending runtime gates:
-1. v0.1.2 search-navigation result on the user's installed KakaoTalk Windows build
-2. VoiceRoom create dialog selector and strong active proof on that build
-3. mic/speaker accessibility action labels
-4. real speaker-request deny UI from another account/device
-5. full 48-hour expiration/recreation cycle and multiple-room concurrency behavior
+The project intentionally does **not** implement:
+
+- Kakao credential/session-token collection
+- CAPTCHA or security-check bypass
+- PIN/pattern/biometric or Windows lock-screen bypass
+- account/session-limit bypass
+- sanctions/ban evasion
+- anti-detection/fingerprint spoofing
+- ambiguous blind clicking
+
+Uncertain surfaces fail closed.
+
+## Runtime-only release gates
+
+The software now contains the adaptive mechanisms needed to finish target-PC calibration without shipping a new code patch for each hidden control. The remaining facts can only be proven against real Kakao runtime behavior:
+
+1. end-to-end VoiceRoom create/PIP on the installed KakaoTalk Windows build
+2. actual mic/speaker state labels or one-time calibrated equivalents
+3. real incoming speaker-request reject UI from another account/device
+4. a real 47h55m -> 48h expiry/recreation cycle
+5. one-account multi-room concurrency behavior enforced by Kakao
+
+These are runtime validation gates, not reasons to bypass Kakao/Windows security boundaries.
 
 ## Build
 
