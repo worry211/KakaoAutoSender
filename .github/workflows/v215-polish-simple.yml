@@ -1,0 +1,33 @@
+name: v2.1.5 polish runner
+
+on:
+  push:
+    branches:
+      - "polish/v2-1-5-commercial-surface"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: "polish/v2-1-5-commercial-surface"
+          fetch-depth: 0
+      - name: Apply polish script
+        run: python scripts/v215_polish.py
+      - name: Commit if changed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No dashboard changes required."
+            exit 0
+          fi
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/local/kakaoautosender/MainActivityV4.java
+          git commit -m "polish: apply v2.1.5 dashboard refinements"
+          git push origin HEAD:polish/v2-1-5-commercial-surface
