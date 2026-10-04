@@ -143,11 +143,21 @@ public sealed class VoiceRoomCoordinator : IDisposable
         if (!launch.Success) return launch;
         Thread.Sleep(450);
 
+        var link = OpenChatLinkLauncher.TryOpen(room);
+        if (link.Success)
+            return new(true, link.Diagnostic);
+
         var navigation = _navigator.OpenRoom(room.Title);
         if (!navigation.Success)
-            return new(false, "방 진입 실패 · " + navigation.Diagnostic);
+        {
+            var prefix = link.Attempted ? link.Diagnostic + " → " : "";
+            return new(false, "방 진입 실패 · " + prefix + navigation.Diagnostic);
+        }
 
-        return new(true, navigation.Diagnostic);
+        var fallback = link.Attempted
+            ? link.Diagnostic + " → Win32 검색 fallback 성공 · " + navigation.Diagnostic
+            : navigation.Diagnostic;
+        return new(true, fallback);
     }
 
     private void ApplyResult(RoomState room, KakaoPcAutomation.Result result, bool manual)
@@ -172,8 +182,6 @@ public sealed class VoiceRoomCoordinator : IDisposable
             }
             else
             {
-                // Existing room was discovered after this manager started. Never invent a fresh
-                // 48-hour baseline: poll the real Kakao UI until a recreation gives us proof.
                 room.Status = "ACTIVE_UNKNOWN_START";
                 room.NextCheckAt = now.AddMinutes(10);
             }
