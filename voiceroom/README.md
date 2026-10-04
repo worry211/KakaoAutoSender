@@ -5,7 +5,7 @@
 - module: `:voiceroom`
 - application ID: `com.local.kakaovoiceroom`
 - app label: `보이스룸 매니저`
-- current version: `0.4.2` / versionCode `11`
+- current version: `0.5.0` / versionCode `12`
 - debug CI artifact: `KakaoVoiceRoomManager-debug-apk`
 - production workflow: `VoiceRoom signed release APK`
 
@@ -25,10 +25,11 @@ KakaoAutoSender의 launcher/UI/preferences/notification listener/application ID�
 4. 일반 채팅/메뉴 문구가 아닌 VoiceRoom 전용 강한 활성 증거 2회 확인
 5. 실제 Kakao PIP VoiceRoom 카드가 생성되고 `1명 참여 중` 및 마이크/스피커/퇴장 컨트롤이 노출됨
 6. 앱 카드에 `보룸 활성 · 47시간59분`, `안전 ✓`, `실제 활성 ✓`가 표시되고 새 48시간 기준이 저장됨
+7. v0.4.2 오디오 가드가 실제 PIP의 마이크와 스피커를 모두 음소거 상태로 만들고 앱에서 `마이크 ✓ · 스피커 ✓`를 확인함
 
-v0.4.0에서 실제 보룸 없이 `실제 ✓`가 찍힌 오탐은 v0.4.1에서 제거됐다. v0.4.2는 이 성공 기준을 유지하면서 오디오 보호와 운영 UX를 추가한다.
+v0.4.0에서 실제 보룸 없이 `실제 ✓`가 찍힌 오탐은 v0.4.1에서 제거됐다. v0.4.2에서 실제 생성/오디오 보호까지 target phone에서 확인됐고, v0.5.0은 장시간 런타임 요청 보호와 운영 가시성을 추가한다.
 
-## v0.4.2 audio protection
+## Audio protection
 
 활성 VoiceRoom을 확인한 뒤 앱은 카카오 내부 마이크/스피커 컨트롤을 fail-safe 방식으로 점검한다.
 
@@ -38,17 +39,34 @@ v0.4.0에서 실제 보룸 없이 `실제 ✓`가 찍힌 오탐은 v0.4.1에서 
 - 의미를 확정할 수 없는 아이콘은 맹목적으로 누르지 않는다
 - 방별 `micMuted`, `speakerMuted`, `audioCheckedAt` 증거를 저장한다
 - VoiceRoom 활성 성공 자체와 오디오 보호 검증은 UI에서 별개로 표시한다
+- 자동관리 중 Kakao가 명확한 mic/speaker action label을 다시 노출하면 runtime guard가 재음소거한다
+- mic와 speaker 의미가 한 컨테이너에 동시에 섞인 broad control은 runtime guard가 클릭하지 않는다
 
 전역 휴대폰 미디어 볼륨은 자동화 트랜잭션 동안만 임시 0으로 만들고 성공/실패/복구 시 원래 값으로 돌린다. 48시간 동안 휴대폰 전체를 강제 무음으로 두는 방식은 사용하지 않는다.
+
+## v0.5.0 speaker-request protection
+
+카카오 VoiceRoom의 스피커 요청은 runtime event guard가 처리한다. 앱이 48시간 점검을 수행하지 않는 평상시에도 접근성 서비스가 Kakao 창/오버레이 이벤트를 관찰한다.
+
+- 관리가 ON이고 `실제 활성 ✓`인 방만 요청 보호 대상이다
+- 카카오가 `스피커 요청 끄기`, `스피커 요청 받지 않기`, `...차단하기`처럼 **행동 의미가 명확한** request-control label을 제공할 때만 자동으로 요청 받기를 끈다
+- `스피커 요청 차단`처럼 단순 상태 문구는 절대 클릭 근거로 쓰지 않는다
+- 들어온 요청은 explicit speaker-request context와 같은 작은 UI subtree 안에 explicit `거절/거부` action이 함께 있을 때만 자동 거절한다
+- `수락`, `승인`, `스피커로 참여/전환/승격` 계열 action은 보호 대상이 아니라 금지 action으로 취급하며 자동 클릭하지 않는다
+- generic `취소`, profile name, 좌표/아이콘 추측으로 요청을 처리하지 않는다
+- 여러 관리 보룸 중 어느 방 요청인지 확정되지 않으면 자동 클릭하지 않고 ambiguous 진단을 남긴다
+- request notification text만 감지되고 안전한 reject action이나 room identity가 없을 때도 자동 조작하지 않는다
+- 런타임 운영 지표로 요청거절 횟수, request-toggle 차단 횟수, passive audio re-protection 횟수를 표시한다
 
 ## Product/UX behavior
 
 - `보룸 활성`과 `관리 ON/OFF`를 분리해서 표시한다.
-- `관리 OFF`는 현재 VoiceRoom을 종료하지 않고 48시간 자동 재점검/재개설만 끈다.
-- 방 카드에 `실제 활성 ✓`, 마이크 보호, 스피커 보호를 별도 표시한다.
+- `관리 OFF`는 현재 VoiceRoom을 종료하지 않고 48시간 자동 재점검/재개설 및 runtime request protection만 끈다.
+- 방 카드에 `실제 활성 ✓`, 마이크 보호, 스피커 보호, 스피커 요청 보호 상태를 별도 표시한다.
 - 오디오 보호가 아직 확인되지 않은 활성 방은 `오디오 확인` 버튼으로 기존 VoiceRoom을 재점검할 수 있다.
-- `전체 시작`은 실제 활성 검증을 통과한 관리 ON 방만 스케줄링한다.
+- `전체 시작`은 실제 활성 검증을 통과한 관리 ON 방만 스케줄링하고 runtime request guard도 함께 활성화한다.
 - `20초 화면 OFF 자동점검 테스트`는 자동관리 ON 상태에서 실제 AlarmManager/WakeActivity 경로를 빠르게 검증하기 위한 운영 테스트다.
+- footer에 runtime 보호 누적 지표와 최근 동작 상태를 표시한다.
 
 ## Reliability behavior
 
@@ -60,8 +78,10 @@ v0.4.0에서 실제 보룸 없이 `실제 ✓`가 찍힌 오탐은 v0.4.1에서 
 - 실제 `만들기` 클릭 전 새 VoiceRoom 성공 처리 금지
 - strong active proof 2회 연속 확인
 - Compose/custom input fallback using focus, `ACTION_SET_TEXT`, bounds, max-length, parent/child nodes
+- request decisions are semantic + room-scoped and fail closed
+- interactive Kakao windows are scanned so PIP/overlay controls can be handled without coordinate macros
 - per-stage timeout + whole-job watchdog
-- privacy-safe boolean diagnostics
+- privacy-safe boolean diagnostics and aggregate runtime counters
 - progressive unattended retry: 1m -> 3m -> 10m -> 30m -> 1h
 - ~47h55m precheck; actual Kakao UI remains source of truth
 - crash/stale-pending/reboot/app-update recovery
@@ -74,9 +94,9 @@ PR CI validates backend plus KakaoAutoSender and VoiceRoom Manager unit tests, l
 
 ## Remaining live-device gates
 
-1. v0.4.2 audio guard: actual PIP mic/speaker accessibility state and automatic mute result on the target Samsung phone
+1. v0.5.0 speaker-request runtime guard against a real request from another account/device
 2. 20-second screen-off unattended wake/check path on the target Samsung firmware
 3. full 47h55m -> 48h expiry -> recreation cycle
 4. one-account/device multi-VoiceRoom concurrency behavior
 
-Runtime-only gates remain pending until they pass on the target phone. The app does not bypass lock screens, security checks, CAPTCHAs, account/session limits, moderation controls, or sanctions.
+These runtime-only gates remain pending until they pass on the target phone. The app does not bypass lock screens, security checks, CAPTCHAs, account/session limits, moderation controls, or sanctions.
