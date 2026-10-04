@@ -86,8 +86,16 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || event.getPackageName() == null) return;
         if (!KAKAO_PACKAGE.contentEquals(event.getPackageName())) return;
-        if (VoiceRoomStore.pendingRoomId(this).isEmpty()) return;
-        if (!VoiceRoomStore.managerActive(this)
+
+        boolean managerActive = VoiceRoomStore.managerActive(this);
+        String pendingRoom = VoiceRoomStore.pendingRoomId(this);
+        if (managerActive && pendingRoom.isEmpty()) {
+            VoiceRoomRuntimeGuard.onKakaoEvent(this, event);
+            return;
+        }
+
+        if (pendingRoom.isEmpty()) return;
+        if (!managerActive
                 && !VoiceRoomStore.isProbePending(this)
                 && !VoiceRoomStore.isManualPending(this)) return;
         long now = System.currentTimeMillis();
