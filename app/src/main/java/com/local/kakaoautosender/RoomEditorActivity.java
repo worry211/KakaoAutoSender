@@ -2,9 +2,13 @@ package com.local.kakaoautosender;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -25,6 +29,7 @@ import java.util.Locale;
 
 public class RoomEditorActivity extends Activity {
     static final String EXTRA_ROOM = "room";
+    private static final int REQUEST_IMAGE = 4102;
 
     private String routeAlias;
     private EditText messageInput;
@@ -39,6 +44,7 @@ public class RoomEditorActivity extends Activity {
     private LinearLayout timesBox;
     private TextView connectionStatus;
     private TextView nextPreview;
+    private TextView imageStatus;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -57,6 +63,7 @@ public class RoomEditorActivity extends Activity {
         super.onResume();
         KakaoNotificationListener.requestRefresh();
         refreshConnection();
+        refreshMedia();
         refreshNextPreview();
     }
 
@@ -71,7 +78,7 @@ public class RoomEditorActivity extends Activity {
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
         String roomName = p == null ? "방 설정" : p.title();
         root.addView(text(roomName, 26, true));
-        TextView subtitle = text("이 방의 메시지와 전송 시간을 설정해", 12, false);
+        TextView subtitle = text("이 방의 메시지, 사진, 전송 시간을 설정해", 12, false);
         subtitle.setTextColor(Color.rgb(143, 149, 160));
         root.addView(subtitle, top(4));
 
@@ -86,6 +93,30 @@ public class RoomEditorActivity extends Activity {
         root.addView(section("보낼 메시지"), top(24));
         messageInput = edit("자동으로 보낼 메시지", true);
         root.addView(messageInput, top(8));
+
+        root.addView(section("사진 첨부 · 선택"), top(22));
+        LinearLayout imageCard = card(Color.rgb(28, 31, 37));
+        imageStatus = text("사진 없음", 13, true);
+        imageCard.addView(imageStatus);
+        LinearLayout imageButtons = new LinearLayout(this);
+        imageButtons.setOrientation(LinearLayout.HORIZONTAL);
+        Button choose = compactButton("사진 선택", Color.rgb(48, 88, 158));
+        choose.setOnClickListener(v -> chooseImage());
+        imageButtons.addView(choose, weight());
+        Button remove = compactButton("사진 제거", Color.rgb(94, 58, 62));
+        remove.setOnClickListener(v -> {
+            RoomMediaStore.clear(this, routeAlias);
+            refreshMedia();
+            toast("사진 첨부를 제거했어.");
+        });
+        LinearLayout.LayoutParams removeLp = weight();
+        removeLp.leftMargin = dp(7);
+        imageButtons.addView(remove, removeLp);
+        imageCard.addView(imageButtons, top(9));
+        TextView imageHelp = text("사진은 Android 알림 답장 액션이 이미지 첨부를 허용할 때만 자동 전송돼. 지원하지 않는 카카오 버전/방에서는 사진을 빼고 텍스트만 몰래 보내지 않고 전송을 실패 처리해.", 11, false);
+        imageHelp.setTextColor(Color.rgb(135, 141, 153));
+        imageCard.addView(imageHelp, top(8));
+        root.addView(imageCard, top(8));
 
         root.addView(section("전송 시간"), top(22));
         RadioGroup modes = new RadioGroup(this);
@@ -113,13 +144,16 @@ public class RoomEditorActivity extends Activity {
         for (int i = 0; i < values.length; i++) {
             final int value = values[i];
             Button b = miniButton(labels[i]);
-            b.setOnClickListener(v -> intervalInput.setText(String.valueOf(value)));
+            b.setOnClickListener(v -> {
+                intervalInput.setText(String.valueOf(value));
+                refreshNextPreview();
+            });
             LinearLayout.LayoutParams lp = weight();
             if (i > 0) lp.leftMargin = dp(5);
             presets.addView(b, lp);
         }
         intervalBox.addView(presets, top(7));
-        TextView intervalHelp = text("1분부터 자유롭게 설정 가능해. 너무 짧은 반복은 카카오의 도배 제한이나 안드로이드 절전 정책 영향을 받을 수 있어.", 11, false);
+        TextView intervalHelp = text("간격 반복은 설정한 분 + 3~10초의 분산 시간을 더해 같은 시각 연속 전송을 줄여.", 11, false);
         intervalHelp.setTextColor(Color.rgb(135, 141, 153));
         intervalBox.addView(intervalHelp, top(6));
         root.addView(intervalBox, top(8));
@@ -128,7 +162,7 @@ public class RoomEditorActivity extends Activity {
         timesBox.setOrientation(LinearLayout.VERTICAL);
         timesInput = edit("예: 09:00, 13:30, 20:00", false);
         timesBox.addView(timesInput);
-        TextView timesHelp = text("쉼표나 공백으로 여러 시각을 넣을 수 있어. 정확한 알람 권한이 없으면 안드로이드가 몇 분 늦출 수 있어.", 11, false);
+        TextView timesHelp = text("쉼표나 공백으로 여러 시각을 넣을 수 있어. 같은 시각에 여러 방이 겹치면 방 사이를 2~5초씩 나눠서 보내.", 11, false);
         timesHelp.setTextColor(Color.rgb(135, 141, 153));
         timesBox.addView(timesHelp, top(6));
         root.addView(timesBox, top(8));
@@ -194,7 +228,62 @@ public class RoomEditorActivity extends Activity {
         enabledCheck.setChecked(p.enabled);
         updateScheduleVisibility();
         refreshConnection();
+        refreshMedia();
         refreshNextPreview();
+    }
+
+    private void chooseImage() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("image/*");
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(i, REQUEST_IMAGE);
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_IMAGE || resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        try {
+            getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (Throwable ignored) {}
+        String mime = getContentResolver().getType(uri);
+        if (mime == null || !mime.toLowerCase(Locale.ROOT).startsWith("image/")) mime = "image/*";
+        RoomMediaStore.set(this, routeAlias, uri.toString(), mime, displayName(uri));
+        refreshMedia();
+        toast("사진을 저장했어. 1회 전송으로 먼저 확인해줘.");
+    }
+
+    private String displayName(Uri uri) {
+        Cursor c = null;
+        try {
+            c = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null);
+            if (c != null && c.moveToFirst()) {
+                int idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (idx >= 0) {
+                    String name = c.getString(idx);
+                    if (name != null && !name.trim().isEmpty()) return name.trim();
+                }
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            if (c != null) c.close();
+        }
+        String tail = uri.getLastPathSegment();
+        return tail == null || tail.trim().isEmpty() ? "선택한 사진" : tail;
+    }
+
+    private void refreshMedia() {
+        if (imageStatus == null) return;
+        RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
+        if (!media.hasImage()) {
+            imageStatus.setText("사진 없음 · 텍스트만 전송");
+            imageStatus.setTextColor(Color.rgb(174, 180, 191));
+        } else {
+            String name = media.name.trim().isEmpty() ? "선택한 사진" : media.name;
+            imageStatus.setText("● 사진 첨부 · " + name);
+            imageStatus.setTextColor(Color.rgb(143, 190, 255));
+        }
     }
 
     private void updateScheduleVisibility() {
@@ -259,14 +348,17 @@ public class RoomEditorActivity extends Activity {
             toast("이 방 연결이 없어. 방에서 새 메시지를 받은 뒤 ‘연결 다시 확인’을 눌러줘.");
             return;
         }
+        RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
+        String mediaLine = media.hasImage() ? "\n사진: " + (media.name.isEmpty() ? "첨부됨" : media.name) : "";
         new AlertDialog.Builder(this)
                 .setTitle(p.title())
-                .setMessage("지금 1회 전송할까?\n\n" + p.message)
+                .setMessage("지금 1회 전송할까?\n\n" + p.message + mediaLine)
                 .setPositiveButton("전송", (d, w) -> {
-                    boolean ok = KakaoNotificationListener.sendToRoom(this, routeAlias, p.message);
+                    boolean ok = KakaoMessageSender.send(this, routeAlias, p.message, media);
+                    String error = KakaoMessageSender.lastError();
                     Prefs.setStatus(this, ok ? "수동 전송 성공: " + p.title()
-                            : "수동 전송 실패: " + p.title() + " · " + KakaoNotificationListener.lastSendError());
-                    toast(ok ? "전송 성공" : "전송 실패: " + KakaoNotificationListener.lastSendError());
+                            : "수동 전송 실패: " + p.title() + " · " + error);
+                    toast(ok ? "전송 성공" : "전송 실패: " + error);
                     refreshConnection();
                 })
                 .setNegativeButton("취소", null)
@@ -304,9 +396,10 @@ public class RoomEditorActivity extends Activity {
         String title = p == null ? "이 방" : p.title();
         new AlertDialog.Builder(this)
                 .setTitle(title + " 삭제")
-                .setMessage("메시지, 시간 설정, 카카오 연결 정보가 모두 삭제돼.")
+                .setMessage("메시지, 사진, 시간 설정, 카카오 연결 정보가 모두 삭제돼.")
                 .setPositiveButton("삭제", (d, w) -> {
                     MultiRoomStore.remove(this, routeAlias);
+                    RoomMediaStore.clear(this, routeAlias);
                     KakaoNotificationListener.unbindRoom(this, routeAlias);
                     if (Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false)) SendScheduler.scheduleNext(this);
                     toast("삭제했어.");
@@ -345,7 +438,8 @@ public class RoomEditorActivity extends Activity {
             temp.intervalMinutes = Math.max(1, parseInt(intervalInput == null ? "" : intervalInput.getText().toString(), p.intervalMinutes));
         }
         long next = MultiRoomStore.computeNextAt(temp, System.currentTimeMillis());
-        nextPreview.setText("다음 전송 기준  ·  " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(next)));
+        if (!temp.fixedTimes()) next += ReliabilityTiming.intervalJitterMillis(temp, next);
+        nextPreview.setText("다음 전송 기준  ·  " + new SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA).format(new Date(next)));
     }
 
     private int parseInt(String s, int fallback) {

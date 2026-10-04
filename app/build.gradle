@@ -10,16 +10,29 @@ android {
         applicationId 'com.local.kakaoautosender'
         minSdk 26
         targetSdk 35
-        versionCode 11
-        versionName '1.1.0'
+        versionCode 12
+        versionName '1.2.0'
     }
 
     buildFeatures {
         buildConfig true
     }
 
+    signingConfigs {
+        release {
+            def ksPath = System.getenv('KAS_KEYSTORE_PATH')
+            if (ksPath != null && !ksPath.trim().isEmpty()) {
+                storeFile file(ksPath)
+                storePassword System.getenv('KAS_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('KAS_KEY_ALIAS')
+                keyPassword System.getenv('KAS_KEY_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

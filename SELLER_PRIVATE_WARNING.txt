@@ -1,0 +1,5 @@
+PRIVATE SELLER MATERIAL
+
+Do not include the license signing private key in this repository, APK, release artifact, buyer package, or support message.
+
+Only the seller-side offline key generator may hold the signing private key. The Android app must contain only the verification public key.

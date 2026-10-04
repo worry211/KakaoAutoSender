@@ -4,17 +4,18 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <application
+        android:name=".KakaoMacroApplication"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
-        android:label="카톡 자동전송"
+        android:label="카톡매크로"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
 
         <activity
-            android:name=".MainActivityV4"
+            android:name=".LicenseActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -23,12 +24,16 @@
         </activity>
 
         <activity
+            android:name=".MainActivityV4"
+            android:exported="false" />
+
+        <activity
             android:name=".RoomEditorActivity"
             android:exported="false" />
 
         <service
             android:name=".KakaoNotificationListener"
-            android:label="카톡 자동전송 알림 접근"
+            android:label="카톡매크로 알림 접근"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
             android:exported="true">
             <intent-filter>
