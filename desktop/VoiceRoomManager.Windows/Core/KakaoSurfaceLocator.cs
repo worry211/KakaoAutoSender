@@ -1,0 +1,185 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace VoiceRoomManager.Windows.Core;
+
+/// <summary>
+/// Single source of truth for KakaoTalk Win32 surfaces. Current Kakao Windows builds can render
+/// the chat list, OpenChat preview and actual chat in separate HWND surfaces while exposing an
+/// almost empty UI Automation tree. All higher-level automation must use this locator rather than
+/// assuming the titled main window owns every visible pixel/control.
+/// </summary>
+internal static class KakaoSurfaceLocator
+{
+    internal const string KakaoWindowClass = "EVA_Window_Dblclk";
+    internal const string KakaoMainTitle = "카카오톡";
+
+    internal readonly record struct Bounds(int Left, int Top, int Right, int Bottom)
+    {
+        public int Width => Math.Max(0, Right - Left);
+        public int Height => Math.Max(0, Bottom - Top);
+        public long Area => (long)Width * Height;
+        public bool Contains(int x, int y) => x >= Left && x < Right && y >= Top && y < Bottom;
+    }
+
+    internal sealed record Surface(
+        IntPtr Hwnd,
+        IntPtr TopLevel,
+        string ClassName,
+        string Title,
+        Bounds Rect,
+        bool Visible,
+        bool IsTopLevel);
+
+    private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr hwnd, StringBuilder className, int maxCount);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int maxCount);
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out NativeRect rect);
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindowAsync(IntPtr hwnd, int cmdShow);
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hwnd);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect { public int Left; public int Top; public int Right; public int Bottom; }
+
+    public static IReadOnlyList<Surface> Snapshot(bool includeChildren = true)
+    {
+        var pids = Process.GetProcessesByName("KakaoTalk").Select(p => (uint)p.Id).ToHashSet();
+        if (pids.Count == 0) return Array.Empty<Surface>();
+
+        var result = new List<Surface>();
+        EnumWindows((hwnd, _) =>
+        {
+            GetWindowThreadProcessId(hwnd, out var pid);
+            if (!pids.Contains(pid)) return true;
+
+            var top = Read(hwnd, hwnd, true);
+            result.Add(top);
+            if (!includeChildren) return true;
+
+            EnumChildWindows(hwnd, (child, __) =>
+            {
+                result.Add(Read(child, hwnd, false));
+                return true;
+            }, IntPtr.Zero);
+            return true;
+        }, IntPtr.Zero);
+
+        return result
+            .GroupBy(x => x.Hwnd)
+            .Select(g => g.First())
+            .ToList();
+    }
+
+    public static IReadOnlyList<Surface> VisibleTopLevels() =>
+        Snapshot(includeChildren: false)
+            .Where(x => x.Visible && x.Rect.Width > 0 && x.Rect.Height > 0)
+            .OrderByDescending(x => x.Rect.Area)
+            .ToList();
+
+    public static IReadOnlyList<Surface> VisibleSurfaces(int minWidth = 80, int minHeight = 24) =>
+        Snapshot(includeChildren: true)
+            .Where(x => x.Visible && x.Rect.Width >= minWidth && x.Rect.Height >= minHeight)
+            .OrderByDescending(x => x.Rect.Area)
+            .ToList();
+
+    public static IntPtr FindMainWindow()
+    {
+        return VisibleTopLevels()
+            .FirstOrDefault(x => string.Equals(x.ClassName, KakaoWindowClass, StringComparison.Ordinal)
+                              && string.Equals(x.Title.Trim(), KakaoMainTitle, StringComparison.Ordinal))?.Hwnd ?? IntPtr.Zero;
+    }
+
+    public static IntPtr FindExactChat(string title)
+    {
+        var wanted = (title ?? "").Trim();
+        if (wanted.Length == 0) return IntPtr.Zero;
+        return VisibleTopLevels()
+            .FirstOrDefault(x => string.Equals(x.ClassName, KakaoWindowClass, StringComparison.Ordinal)
+                              && !string.Equals(x.Title.Trim(), KakaoMainTitle, StringComparison.Ordinal)
+                              && string.Equals(x.Title.Trim(), wanted, StringComparison.Ordinal))?.Hwnd ?? IntPtr.Zero;
+    }
+
+    public static bool TryFindChatComposer(out Surface? composer)
+    {
+        composer = Snapshot(includeChildren: true)
+            .Where(x => x.Visible
+                     && x.Rect.Width >= 120
+                     && x.Rect.Height >= 18
+                     && x.Rect.Height <= 180
+                     && x.ClassName.Contains("RICHEDIT", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(x => x.Rect.Width)
+            .FirstOrDefault();
+        return composer is not null;
+    }
+
+    public static IReadOnlyList<Surface> PreviewCandidates()
+    {
+        var snapshot = VisibleSurfaces(minWidth: 280, minHeight: 220);
+        var main = FindMainWindow();
+        var mainRect = snapshot.FirstOrDefault(x => x.Hwnd == main)?.Rect;
+
+        // Prefer large surfaces other than the narrow titled chat-list window. The 2026 Kakao PC
+        // OpenChat cover can appear as a separate untitled surface immediately to the right.
+        return snapshot
+            .Where(x => x.Hwnd != main)
+            .Where(x => x.Rect.Width >= 420 && x.Rect.Height >= 320)
+            .OrderByDescending(x =>
+            {
+                var score = x.Rect.Area;
+                if (string.IsNullOrWhiteSpace(x.Title)) score += 5_000_000;
+                if (mainRect is { } m && x.Rect.Left >= m.Left + m.Width / 2) score += 3_000_000;
+                return score;
+            })
+            .ToList();
+    }
+
+    public static void Activate(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return;
+        try
+        {
+            ShowWindowAsync(hwnd, 9);
+            SetForegroundWindow(hwnd);
+        }
+        catch { }
+    }
+
+    public static string Diagnostic(int max = 10)
+    {
+        var rows = VisibleSurfaces(minWidth: 120, minHeight: 40).Take(max)
+            .Select(x => $"{(x.IsTopLevel ? 'T' : 'C')}:{Clean(x.ClassName)}:'{Clean(x.Title)}'@{x.Rect.Left},{x.Rect.Top},{x.Rect.Width}x{x.Rect.Height}");
+        return "surfaces=[" + string.Join(" | ", rows) + "]";
+    }
+
+    private static Surface Read(IntPtr hwnd, IntPtr topLevel, bool isTopLevel)
+    {
+        var cls = new StringBuilder(256);
+        var title = new StringBuilder(512);
+        GetClassName(hwnd, cls, cls.Capacity);
+        GetWindowText(hwnd, title, title.Capacity);
+        GetWindowRect(hwnd, out var r);
+        return new Surface(hwnd, topLevel, cls.ToString(), title.ToString(),
+            new Bounds(r.Left, r.Top, r.Right, r.Bottom), IsWindowVisible(hwnd), isTopLevel);
+    }
+
+    private static string Clean(string value)
+    {
+        value = (value ?? "").Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return value.Length <= 48 ? value : value[..48];
+    }
+}
