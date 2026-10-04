@@ -23,19 +23,21 @@ public class WakeActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        boolean probe = getIntent() != null && getIntent().getBooleanExtra(EXTRA_PROBE, false);
+        Intent source = getIntent();
+        boolean probe = source != null && source.getBooleanExtra(EXTRA_PROBE, false);
+        boolean manual = source != null && source.getBooleanExtra(VoiceRoomScheduler.EXTRA_MANUAL, false);
         boolean wasInteractive = isDeviceInteractive();
         acquireWakeLock();
 
-        if (!VoiceRoomStore.managerActive(this) && !probe) {
+        if (!VoiceRoomStore.managerActive(this) && !probe && !manual) {
             AudioGuard.restore(this);
             finishSafely();
             return;
         }
 
-        String roomId = getIntent() == null ? "" : getIntent().getStringExtra(VoiceRoomScheduler.EXTRA_ROOM_ID);
+        String roomId = source == null ? "" : source.getStringExtra(VoiceRoomScheduler.EXTRA_ROOM_ID);
         VoiceRoomStore.Room room = VoiceRoomStore.get(this, roomId);
-        if (room == null || (!room.enabled && !probe)) {
+        if (room == null || (!room.enabled && !probe && !manual)) {
             VoiceRoomStore.clearPending(this);
             AudioGuard.restore(this);
             VoiceRoomScheduler.scheduleNext(this);
@@ -47,7 +49,7 @@ public class WakeActivity extends Activity {
         if (!pendingId.isEmpty()) {
             if (VoiceRoomStore.hasFreshPending(this)) {
                 VoiceRoomStore.setLastStatus(this, "이전 보이스룸 점검 처리 중 · 중복 실행 방지");
-                if (!probe) {
+                if (!probe && !manual) {
                     room.nextCheckAt = Math.max(room.nextCheckAt,
                             VoiceRoomStore.pendingAt(this) + VoiceRoomStore.PENDING_TIMEOUT_MS + 5_000L);
                     VoiceRoomStore.update(this, room);
@@ -58,6 +60,7 @@ public class WakeActivity extends Activity {
             }
 
             boolean staleProbe = VoiceRoomStore.isProbePending(this);
+            boolean staleManual = VoiceRoomStore.isManualPending(this);
             VoiceRoomStore.Room stale = VoiceRoomStore.get(this, pendingId);
             VoiceRoomStore.clearPending(this);
             AudioGuard.restore(this);
@@ -68,6 +71,11 @@ public class WakeActivity extends Activity {
                     stale.lastError = "안전 인식 점검이 응답 없이 종료됨";
                     VoiceRoomStore.update(this, stale);
                     VoiceRoomStore.setLastStatus(this, stale.title + " · 안전 인식 점검 실패");
+                } else if (staleManual) {
+                    stale.status = "MANUAL_ERROR";
+                    stale.lastError = "실제 점검이 응답 없이 종료됨";
+                    VoiceRoomStore.update(this, stale);
+                    VoiceRoomStore.setLastStatus(this, stale.title + " · 실제 점검 실패");
                 } else {
                     stale.failures += 1;
                     stale.status = "ERROR";
@@ -78,20 +86,26 @@ public class WakeActivity extends Activity {
                 }
             }
             VoiceRoomScheduler.scheduleNext(this);
-            if (!probe) {
+            if (!probe && !manual) {
                 finishSafely();
                 return;
             }
         }
 
-        // Check the lock state before turning the display on. This prevents a secure phone from
-        // flashing its screen every retry interval while unattended automation cannot proceed.
         KeyguardManager keyguard = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
         if (keyguard != null && keyguard.isDeviceLocked()) {
-            room.status = probe ? "PROBE_ERROR" : "WAITING_UNLOCK";
+            if (probe) {
+                room.status = "PROBE_ERROR";
+                room.lastError = "안전 점검 전 휴대폰 잠금 해제가 필요함";
+            } else if (manual) {
+                room.status = "MANUAL_ERROR";
+                room.lastError = "실제 점검 전 휴대폰 잠금 해제가 필요함";
+            } else {
+                room.status = "WAITING_UNLOCK";
+                room.lastError = "휴대폰 잠금 해제가 필요함";
+                room.nextCheckAt = System.currentTimeMillis() + 5L * 60L * 1000L;
+            }
             room.stageStartedAt = 0L;
-            room.lastError = probe ? "안전 점검 전 휴대폰 잠금 해제가 필요함" : "휴대폰 잠금 해제가 필요함";
-            if (!probe) room.nextCheckAt = System.currentTimeMillis() + 5L * 60L * 1000L;
             VoiceRoomStore.update(this, room);
             VoiceRoomStore.clearPending(this);
             AudioGuard.restore(this);
@@ -101,11 +115,8 @@ public class WakeActivity extends Activity {
             return;
         }
 
-        // Do not steal the foreground from someone actively using their phone for a routine
-        // scheduled re-check. NEW/CHECK_DUE are direct setup/manual actions and are allowed to
-        // run immediately; long-running ACTIVE/ERROR maintenance waits until the phone is idle.
         String currentStatus = room.status == null ? "" : room.status;
-        boolean directAction = "NEW".equals(currentStatus) || "CHECK_DUE".equals(currentStatus);
+        boolean directAction = manual || "NEW".equals(currentStatus) || "CHECK_DUE".equals(currentStatus);
         if (!probe && wasInteractive && !directAction) {
             room.status = currentStatus.isEmpty() ? "CHECK_DUE" : currentStatus;
             room.stageStartedAt = 0L;
@@ -120,7 +131,7 @@ public class WakeActivity extends Activity {
         }
 
         prepareDisplayForAutomation();
-        launchKakao(room, probe);
+        launchKakao(room, probe, manual);
     }
 
     private void prepareDisplayForAutomation() {
@@ -133,23 +144,29 @@ public class WakeActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
-    private void launchKakao(VoiceRoomStore.Room room, boolean probe) {
+    private void launchKakao(VoiceRoomStore.Room room, boolean probe, boolean manual) {
         long now = System.currentTimeMillis();
         room.status = probe ? "PROBE_OPENING_KAKAO" : "OPENING_KAKAO";
         room.stageStartedAt = now;
         room.lastError = "";
         room.lastDiagnostic = "launch=scheduled";
-        if (!probe) room.nextCheckAt = now + VoiceRoomStore.PENDING_TIMEOUT_MS + 5_000L;
+        if (!probe && !manual) room.nextCheckAt = now + VoiceRoomStore.PENDING_TIMEOUT_MS + 5_000L;
         VoiceRoomStore.update(this, room);
+
+        if (manual && !VoiceRoomStore.managerActive(this)) {
+            VoiceRoomStore.setManagerActive(this, true);
+        }
         VoiceRoomStore.setPending(this, room.id,
-                probe ? VoiceRoomStore.MODE_PROBE : VoiceRoomStore.MODE_AUTO,
+                probe ? VoiceRoomStore.MODE_PROBE
+                        : (manual ? VoiceRoomStore.MODE_MANUAL : VoiceRoomStore.MODE_AUTO),
                 VoiceRoomStore.ENTRY_UNKNOWN);
         VoiceRoomStore.setLastStatus(this,
-                room.title + (probe ? " · 안전 인식 점검 시작" : " · 카카오톡 여는 중"));
+                room.title + (probe ? " · 안전 인식 점검 시작"
+                        : (manual ? " · 실제 점검 시작" : " · 카카오톡 여는 중")));
 
         List<Intent> candidates = buildKakaoLaunchCandidates(room);
         if (candidates.isEmpty()) {
-            fail(room, probe, "카카오톡 실행 경로를 찾지 못함");
+            fail(room, probe, manual, "카카오톡 실행 경로를 찾지 못함");
             return;
         }
 
@@ -168,7 +185,7 @@ public class WakeActivity extends Activity {
                 startActivity(target);
                 VoiceRoomStore.setLastStatus(this,
                         room.title + " · 카카오톡 실행 성공 (경로 " + (i + 1) + ")");
-                if (!probe) VoiceRoomScheduler.scheduleNext(this);
+                if (!probe && !manual) VoiceRoomScheduler.scheduleNext(this);
                 getWindow().getDecorView().postDelayed(this::finishSafely, 3_000L);
                 return;
             } catch (Exception e) {
@@ -176,7 +193,7 @@ public class WakeActivity extends Activity {
             }
         }
 
-        fail(room, probe, "카카오톡 실행 실패 · " + describe(lastError));
+        fail(room, probe, manual, "카카오톡 실행 실패 · " + describe(lastError));
     }
 
     private List<Intent> buildKakaoLaunchCandidates(VoiceRoomStore.Room room) {
@@ -224,11 +241,15 @@ public class WakeActivity extends Activity {
         return name + ": " + message;
     }
 
-    private void fail(VoiceRoomStore.Room room, boolean probe, String error) {
-        room.status = probe ? "PROBE_ERROR" : "ERROR";
+    private void fail(VoiceRoomStore.Room room, boolean probe, boolean manual, String error) {
         room.stageStartedAt = 0L;
         room.lastError = error;
-        if (!probe) {
+        if (probe) {
+            room.status = "PROBE_ERROR";
+        } else if (manual) {
+            room.status = "MANUAL_ERROR";
+        } else {
+            room.status = "ERROR";
             room.failures += 1;
             room.nextCheckAt = System.currentTimeMillis() + KakaoUiPolicy.retryDelayMs(room.failures);
         }
