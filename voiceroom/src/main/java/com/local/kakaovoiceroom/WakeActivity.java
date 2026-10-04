@@ -16,6 +16,7 @@ import java.util.List;
 public class WakeActivity extends Activity {
     static final String EXTRA_PROBE = "probe_only";
     private static final String KAKAO_PACKAGE = "com.kakao.talk";
+    private static final long USER_BUSY_RETRY_MS = 5L * 60L * 1000L;
 
     private PowerManager.WakeLock wakeLock;
 
@@ -23,6 +24,7 @@ public class WakeActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         boolean probe = getIntent() != null && getIntent().getBooleanExtra(EXTRA_PROBE, false);
+        boolean wasInteractive = isDeviceInteractive();
 
         if (Build.VERSION.SDK_INT >= 27) {
             setTurnScreenOn(true);
@@ -105,6 +107,24 @@ public class WakeActivity extends Activity {
             return;
         }
 
+        // Do not steal the foreground from someone actively using their phone for a routine
+        // scheduled re-check. NEW/CHECK_DUE are direct setup/manual actions and are allowed to
+        // run immediately; long-running ACTIVE/ERROR maintenance waits until the phone is idle.
+        String currentStatus = room.status == null ? "" : room.status;
+        boolean directAction = "NEW".equals(currentStatus) || "CHECK_DUE".equals(currentStatus);
+        if (!probe && wasInteractive && !directAction) {
+            room.status = currentStatus.isEmpty() ? "CHECK_DUE" : currentStatus;
+            room.stageStartedAt = 0L;
+            room.lastError = "";
+            room.nextCheckAt = System.currentTimeMillis() + USER_BUSY_RETRY_MS;
+            VoiceRoomStore.update(this, room);
+            VoiceRoomStore.setLastStatus(this,
+                    room.title + " · 휴대폰 사용 중이라 자동 점검을 5분 미룸");
+            VoiceRoomScheduler.scheduleNext(this);
+            finishSafely();
+            return;
+        }
+
         launchKakao(room, probe);
     }
 
@@ -178,6 +198,15 @@ public class WakeActivity extends Activity {
         } catch (Exception ignored) {}
 
         return out;
+    }
+
+    private boolean isDeviceInteractive() {
+        try {
+            PowerManager power = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            return power != null && power.isInteractive();
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private static String describe(Exception error) {
