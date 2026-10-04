@@ -10,13 +10,14 @@ import android.widget.TextView;
 
 /** Launcher gate that refuses to enter the product from a re-signed or debuggable release APK. */
 public final class IntegrityGateActivity extends Activity {
+  private boolean forwarded;
+
   @Override
   protected void onCreate(Bundle state) {
     super.onCreate(state);
     AppIntegrity.initialize(this);
     if (AppIntegrity.isAuthentic(this)) {
-      startActivity(new Intent(this, LicenseActivity.class));
-      finish();
+      forward();
       return;
     }
     AppIntegrity.trip(this);
@@ -26,10 +27,14 @@ public final class IntegrityGateActivity extends Activity {
   @Override
   protected void onResume() {
     super.onResume();
-    if (!BuildConfig.DEBUG && AppIntegrity.isAuthentic(this)) {
-      startActivity(new Intent(this, LicenseActivity.class));
-      finish();
-    }
+    if (!forwarded && !BuildConfig.DEBUG && AppIntegrity.isAuthentic(this)) forward();
+  }
+
+  private void forward() {
+    if (forwarded) return;
+    forwarded = true;
+    startActivity(new Intent(this, LicenseActivity.class));
+    finish();
   }
 
   private LinearLayout blockedView() {
