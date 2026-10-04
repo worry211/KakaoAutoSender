@@ -81,14 +81,14 @@
                       AlternationCount="2" RowHeaderWidth="0" ColumnHeaderHeight="38"
                       HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="방 이름" Binding="{Binding Title}" Width="2*"/>
+                    <DataGridTextColumn Header="방 이름" Binding="{Binding Title}" Width="1.7*"/>
                     <DataGridCheckBoxColumn Header="관리" Binding="{Binding Enabled}" Width="70"/>
-                    <DataGridTextColumn Header="상태" Binding="{Binding Status}" Width="125"/>
-                    <DataGridTextColumn Header="남은 시간" Binding="{Binding Remaining}" Width="125"/>
+                    <DataGridTextColumn Header="상태" Binding="{Binding StatusDisplay}" Width="160"/>
+                    <DataGridTextColumn Header="남은 시간" Binding="{Binding Remaining}" Width="145"/>
                     <DataGridCheckBoxColumn Header="실제 활성" Binding="{Binding LiveVerified}" Width="85"/>
                     <DataGridCheckBoxColumn Header="마이크" Binding="{Binding MicMuted}" Width="72"/>
                     <DataGridCheckBoxColumn Header="스피커" Binding="{Binding SpeakerMuted}" Width="72"/>
-                    <DataGridTextColumn Header="오류 / 진단" Binding="{Binding LastError}" Width="2.5*"/>
+                    <DataGridTextColumn Header="최근 동작 / 오류" Binding="{Binding OperationDetail}" Width="2.5*"/>
                 </DataGrid.Columns>
             </DataGrid>
         </Border>
