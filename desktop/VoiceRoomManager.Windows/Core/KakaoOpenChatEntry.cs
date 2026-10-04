@@ -1,8 +1,8 @@
 namespace VoiceRoomManager.Windows.Core;
 
 /// <summary>
-/// Unified OpenChat entry bridge. It first tries semantic/Win32 Kakao entry, then the verified
-/// Kakao-yellow visual fallback, then the browser landing visual fallback and repeats Kakao entry.
+/// Unified OpenChat entry bridge. Browser landing and Kakao preview are one continuous state
+/// machine. Every visual fallback is narrow and verified; ambiguous candidates are never clicked.
 /// </summary>
 internal static class KakaoOpenChatEntry
 {
@@ -10,44 +10,67 @@ internal static class KakaoOpenChatEntry
 
     public static Result TryEnter(RoomState room)
     {
-        var preview = KakaoOpenChatPreviewBridge.TryEnter(room.Title);
-        if (preview.Success)
+        var trace = new List<string>();
+
+        // Kakao may already be showing the OpenChat cover or the actual room.
+        var initial = TryKakaoStage(room.Title, TimeSpan.FromSeconds(1.2));
+        trace.Add(initial.Diagnostic);
+        if (initial.Success)
         {
             OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
-            return new(preview.Attempted, true, preview.Diagnostic);
+            return new(true, true, string.Join(" → ", trace));
         }
 
-        var kakaoVisual = KakaoPreviewVisualFallback.TryEnter(room.Title);
-        if (kakaoVisual.Success)
+        // The public landing page can render several hundred ms after its browser title appears.
+        // Retry the verified white-outline CTA instead of sampling it only once.
+        BrowserOpenChatVisualBridge.Result? browser = null;
+        var browserDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < browserDeadline)
+        {
+            browser = BrowserOpenChatVisualBridge.TryInvokeJoin();
+            if (browser.Clicked) break;
+            Thread.Sleep(220);
+        }
+
+        trace.Add("browser=" + (browser?.Diagnostic ?? "not-attempted"));
+        if (browser is null || !browser.Clicked)
+            return new(initial.Attempted || browser?.Attempted == true, false, string.Join(" → ", trace));
+
+        // After the browser CTA, Windows can take time to foreground Kakao and paint the custom
+        // OpenChat preview. Repeatedly try both semantic and strict yellow-CTA visual entry.
+        var afterBrowser = TryKakaoStage(room.Title, TimeSpan.FromSeconds(8));
+        trace.Add(afterBrowser.Diagnostic);
+        if (afterBrowser.Success)
         {
             OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
-            return new(true, true, "visualKakao=" + kakaoVisual.Diagnostic);
+            return new(true, true, string.Join(" → ", trace));
         }
 
-        var browser = BrowserOpenChatVisualBridge.TryInvokeJoin();
-        if (!browser.Clicked)
-            return new(preview.Attempted || kakaoVisual.Attempted || browser.Attempted, false,
-                "preview=" + preview.Diagnostic + " · visualKakao=" + kakaoVisual.Diagnostic + " · browser=" + browser.Diagnostic);
+        return new(true, false, string.Join(" → ", trace));
+    }
 
-        Thread.Sleep(900);
+    private static Result TryKakaoStage(string roomTitle, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow.Add(timeout);
+        KakaoOpenChatPreviewBridge.Result? lastPreview = null;
+        KakaoPreviewVisualFallback.Result? lastVisual = null;
 
-        var second = KakaoOpenChatPreviewBridge.TryEnter(room.Title);
-        if (second.Success)
+        while (DateTime.UtcNow < deadline)
         {
-            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
-            return new(true, true, browser.Diagnostic + " → " + second.Diagnostic);
+            lastPreview = KakaoOpenChatPreviewBridge.TryEnter(roomTitle);
+            if (lastPreview.Success)
+                return new(true, true, "preview=" + lastPreview.Diagnostic);
+
+            lastVisual = KakaoPreviewVisualFallback.TryEnter(roomTitle);
+            if (lastVisual.Success)
+                return new(true, true, "visualKakao=" + lastVisual.Diagnostic);
+
+            Thread.Sleep(180);
         }
 
-        var secondVisual = KakaoPreviewVisualFallback.TryEnter(room.Title);
-        if (secondVisual.Success)
-        {
-            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
-            return new(true, true, browser.Diagnostic + " → visualKakao=" + secondVisual.Diagnostic);
-        }
-
-        return new(true, false,
-            browser.Diagnostic + " → 카카오 전환 후 입장 실패 · preview=" + second.Diagnostic +
-            " · visualKakao=" + secondVisual.Diagnostic);
+        return new(lastPreview?.Attempted == true || lastVisual?.Attempted == true, false,
+            "preview=" + (lastPreview?.Diagnostic ?? "not-attempted") +
+            " · visualKakao=" + (lastVisual?.Diagnostic ?? "not-attempted"));
     }
 
     public static bool HasVisibleChatComposer(IntPtr ignored)
