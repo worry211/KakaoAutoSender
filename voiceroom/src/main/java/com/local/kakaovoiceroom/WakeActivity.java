@@ -112,10 +112,9 @@ public class WakeActivity extends Activity {
             return;
         }
 
-        String currentStatus = room.status == null ? "" : room.status;
-        boolean directAction = probe || manual || "NEW".equals(currentStatus) || "CHECK_DUE".equals(currentStatus);
-        if (!probe && !manual && wasInteractive && !directAction) {
-            room.status = currentStatus.isEmpty() ? "CHECK_DUE" : currentStatus;
+        // Unattended work must never steal the foreground from the user. Direct probe/manual
+        // checks are the only operations allowed to interrupt because the user explicitly asked.
+        if (!probe && !manual && wasInteractive) {
             room.stageStartedAt = 0L;
             room.lastError = "";
             room.nextCheckAt = System.currentTimeMillis() + USER_BUSY_RETRY_MS;
