@@ -29,12 +29,22 @@ public class VoiceRoomSpeakerRequestPolicyTest {
                 VoiceRoomSpeakerRequestPolicy.requestToggleState("스피커 요청 끄기"));
         assertEquals(VoiceRoomSpeakerRequestPolicy.ToggleState.ACCEPTING,
                 VoiceRoomSpeakerRequestPolicy.requestToggleState("스피커 신청 받지 않기"));
+        assertEquals(VoiceRoomSpeakerRequestPolicy.ToggleState.ACCEPTING,
+                VoiceRoomSpeakerRequestPolicy.requestToggleState("스피커 요청 차단하기"));
         assertEquals(VoiceRoomSpeakerRequestPolicy.ToggleState.BLOCKED,
                 VoiceRoomSpeakerRequestPolicy.requestToggleState("스피커 요청 켜기"));
         assertEquals(VoiceRoomSpeakerRequestPolicy.ToggleState.BLOCKED,
                 VoiceRoomSpeakerRequestPolicy.requestToggleState("스피커 요청 받기"));
+        assertEquals(VoiceRoomSpeakerRequestPolicy.ToggleState.BLOCKED,
+                VoiceRoomSpeakerRequestPolicy.requestToggleState("스피커 요청 허용하기"));
+
+        // State/prose labels alone never authorize a toggle click.
         assertEquals(VoiceRoomSpeakerRequestPolicy.ToggleState.UNKNOWN,
                 VoiceRoomSpeakerRequestPolicy.requestToggleState("스피커 요청"));
+        assertEquals(VoiceRoomSpeakerRequestPolicy.ToggleState.UNKNOWN,
+                VoiceRoomSpeakerRequestPolicy.requestToggleState("스피커 요청 차단"));
+        assertEquals(VoiceRoomSpeakerRequestPolicy.ToggleState.UNKNOWN,
+                VoiceRoomSpeakerRequestPolicy.requestToggleState("스피커 요청 허용"));
     }
 
     @Test public void onlyAcceptingStateRequestsAProtectiveToggle() {
