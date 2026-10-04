@@ -15,15 +15,14 @@ import android.view.accessibility.AccessibilityNodeInfo;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 public class VoiceRoomAccessibilityService extends AccessibilityService {
     private static final String KAKAO_PACKAGE = "com.kakao.talk";
     private static final long JOB_TIMEOUT_MS = VoiceRoomStore.PENDING_TIMEOUT_MS;
     private static final long STEP_DEBOUNCE_MS = 300L;
     private static final long FOLLOW_UP_MS = 700L;
+    private static final long MANUAL_FOREGROUND_LOST_GRACE_MS = 5_000L;
 
     private static final List<String> ROOM_READY_TERMS = Arrays.asList(
             "메시지 입력", "메시지를 입력", "메시지 입력하기", "채팅 입력", "메시지 보내기");
@@ -135,8 +134,15 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         try {
             CharSequence rootPackage = root.getPackageName();
             if (rootPackage == null || !KAKAO_PACKAGE.contentEquals(rootPackage)) {
-                if (stageExpired(room, now)) fail(room, stageError(room.status, "카카오톡이 전경이 아님"));
-                else scheduleFollowUp();
+                if ((manual || probe) && pendingAt > 0L
+                        && now - pendingAt >= MANUAL_FOREGROUND_LOST_GRACE_MS) {
+                    fail(room, manual ? "실제 점검이 중단됨 · 카카오톡 화면을 벗어남"
+                            : "안전 점검이 중단됨 · 카카오톡 화면을 벗어남");
+                } else if (stageExpired(room, now)) {
+                    fail(room, stageError(room.status, "카카오톡이 전경이 아님"));
+                } else {
+                    scheduleFollowUp();
+                }
                 return;
             }
 
@@ -258,28 +264,30 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                 }
 
                 AccessibilityNodeInfo nameInput = findCreateNameInput(root);
-                if (nameInput != null) {
-                    String desired = KakaoUiPolicy.voiceRoomName(room.title);
-                    String current = value(nameInput.getText());
-                    if (!desired.equals(current)) {
-                        if (setText(nameInput, desired)) {
-                            VoiceRoomStore.setLastStatus(this,
-                                    room.title + " · 보이스룸 이름 입력 완료 · 생성 버튼 활성 대기");
-                        }
-                        scheduleFollowUp();
-                        return;
-                    }
+                if (nameInput == null) {
+                    VoiceRoomStore.setLastStatus(this,
+                            room.title + " · 생성 입력칸 탐색 중");
+                    scheduleFollowUp();
+                    return;
+                }
 
-                    if (clickAnyExact(root, CREATE_SUBMIT_TERMS)) {
-                        transition(room, "CREATING_CONFIRMING",
-                                room.title + " · 만들기 실행 후 활성 확인 중");
+                String desired = KakaoUiPolicy.voiceRoomName(room.title);
+                String current = value(nameInput.getText());
+                if (!desired.equals(current)) {
+                    if (setTextRobust(nameInput, desired)) {
+                        VoiceRoomStore.setLastStatus(this,
+                                room.title + " · 보이스룸 이름 입력 요청 완료 · UI 반영 확인 중");
                     }
                     scheduleFollowUp();
                     return;
                 }
 
-                if (clickAnyExact(root, CONFIRM_TERMS)) {
-                    transition(room, "CREATING_CONFIRMING", room.title + " · 생성 확인 후 활성 대기");
+                if (clickAnyExact(root, CREATE_SUBMIT_TERMS)) {
+                    transition(room, "CREATING_CONFIRMING",
+                            room.title + " · 만들기 실행 후 활성 확인 중");
+                } else {
+                    VoiceRoomStore.setLastStatus(this,
+                            room.title + " · 이름 확인 완료 · 만들기 버튼 활성 대기");
                 }
                 scheduleFollowUp();
                 return;
@@ -318,7 +326,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         if (s.contains("OPENING_KAKAO") || s.contains("OPENING_ROOM")) return 25_000L;
         if (s.contains("ROOM_VERIFIED") || s.contains("ROOM_MENU")) return 15_000L;
         if (s.contains("VOICE_MENU")) return 18_000L;
-        if (s.contains("CREATING")) return 25_000L;
+        if (s.contains("CREATING")) return 30_000L;
         return 18_000L;
     }
 
@@ -329,7 +337,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         else if (s.contains("OPENING_ROOM")) base = "방 선택 후 채팅 화면 진입을 확인하지 못함";
         else if (s.contains("ROOM_VERIFIED") || s.contains("ROOM_MENU")) base = "하단 + 메뉴에서 보이스룸 항목을 찾지 못함";
         else if (s.contains("VOICE_MENU")) base = "보이스룸 화면에서 활성/생성 상태를 확인하지 못함";
-        else if (s.contains("CREATING")) base = "보이스룸 생성 폼 처리 또는 활성 확인에 실패함";
+        else if (s.contains("CREATING")) base = "보이스룸 이름 입력/생성 또는 활성 확인에 실패함";
         else base = "카카오톡 화면 인식 제한시간 초과";
         return base + " · " + detail;
     }
@@ -344,28 +352,38 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     private boolean hasCreateForm(AccessibilityNodeInfo root) {
         return findCreateNameInput(root) != null
                 && containsAny(root, CREATE_STRONG_TERMS)
-                && findExactAny(root, new HashSet<>(CREATE_SUBMIT_TERMS)) != null;
+                && findExactAny(root, CREATE_SUBMIT_TERMS) != null;
     }
 
     private AccessibilityNodeInfo findCreateNameInput(AccessibilityNodeInfo root) {
+        if (root == null) return null;
         Rect rootBounds = new Rect();
         root.getBoundsInScreen(rootBounds);
         int width = Math.max(1, rootBounds.width());
         int height = Math.max(1, rootBounds.height());
+
+        AccessibilityNodeInfo focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+        if (isLikelyCreateInput(focused, rootBounds, width, height)) return focused;
+
         AccessibilityNodeInfo best = null;
         long bestScore = Long.MIN_VALUE;
-
         for (AccessibilityNodeInfo node : findAllNodes(root)) {
-            CharSequence className = node.getClassName();
-            if (className == null || !className.toString().contains("EditText")) continue;
-            if (!node.isVisibleToUser() || !node.isEditable()) continue;
+            if (!isLikelyCreateInput(node, rootBounds, width, height)) continue;
             Rect b = new Rect();
             node.getBoundsInScreen(b);
-            if (b.isEmpty()) continue;
             int cy = b.centerY() - rootBounds.top;
-            if (cy < (int) (height * 0.25) || cy > (int) (height * 0.75)) continue;
-            if (b.width() < (int) (width * 0.45)) continue;
-            long score = (long) b.width() * 10L - Math.abs(cy - (long) (height * 0.45));
+            CharSequence className = node.getClassName();
+            boolean editClass = className != null && className.toString().contains("EditText");
+            boolean setText = supportsAction(node, AccessibilityNodeInfo.ACTION_SET_TEXT);
+            int maxLength = node.getMaxTextLength();
+
+            long score = (long) b.width() * 10L
+                    - Math.abs(cy - (long) (height * 0.43));
+            if (node.isFocused()) score += 20_000_000L;
+            if (maxLength == 30) score += 15_000_000L;
+            if (setText) score += 8_000_000L;
+            if (node.isEditable()) score += 5_000_000L;
+            if (editClass) score += 3_000_000L;
             if (score > bestScore) {
                 bestScore = score;
                 best = node;
@@ -374,13 +392,64 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         return best;
     }
 
-    private boolean setText(AccessibilityNodeInfo node, String text) {
-        if (node == null || !node.isEditable()) return false;
+    private boolean isLikelyCreateInput(
+            AccessibilityNodeInfo node, Rect rootBounds, int width, int height) {
+        if (node == null || !node.isVisibleToUser()) return false;
+        CharSequence className = node.getClassName();
+        boolean editClass = className != null && className.toString().contains("EditText");
+        boolean canSetText = supportsAction(node, AccessibilityNodeInfo.ACTION_SET_TEXT);
+        boolean inputCapable = editClass || node.isEditable() || canSetText || node.isFocused();
+        if (!inputCapable) return false;
+
+        Rect b = new Rect();
+        node.getBoundsInScreen(b);
+        if (b.isEmpty()) return false;
+        int cy = b.centerY() - rootBounds.top;
+        if (cy < (int) (height * 0.24) || cy > (int) (height * 0.72)) return false;
+        if (b.width() < (int) (width * 0.35)) return false;
+        return b.height() <= (int) (height * 0.25);
+    }
+
+    private boolean setTextRobust(AccessibilityNodeInfo node, String text) {
+        if (node == null) return false;
+        node.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+        if (performSetText(node, text)) return true;
+        node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        if (performSetText(node, text)) return true;
+
+        AccessibilityNodeInfo parent = node.getParent();
+        for (int i = 0; i < 3 && parent != null; i++) {
+            parent.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+            if (performSetText(parent, text)) return true;
+            parent = parent.getParent();
+        }
+
+        for (AccessibilityNodeInfo child : findAllNodes(node)) {
+            if (child == node) continue;
+            child.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+            if (performSetText(child, text)) return true;
+        }
+        return false;
+    }
+
+    private boolean performSetText(AccessibilityNodeInfo node, String text) {
+        if (node == null) return false;
+        if (!node.isEditable() && !supportsAction(node, AccessibilityNodeInfo.ACTION_SET_TEXT)) return false;
         Bundle args = new Bundle();
         args.putCharSequence(
                 AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
                 text == null ? "" : text);
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+    }
+
+    private boolean supportsAction(AccessibilityNodeInfo node, int actionId) {
+        if (node == null) return false;
+        List<AccessibilityNodeInfo.AccessibilityAction> actions = node.getActionList();
+        if (actions == null) return false;
+        for (AccessibilityNodeInfo.AccessibilityAction action : actions) {
+            if (action != null && action.getId() == actionId) return true;
+        }
+        return false;
     }
 
     private void finishProbe(VoiceRoomStore.Room room, String message) {
@@ -450,10 +519,10 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         handler.postDelayed(followUpRunnable, FOLLOW_UP_MS);
     }
 
-    /** Click only a bottom-left composer/add control, never the top-right room menu. */
     private boolean clickComposerAction(AccessibilityNodeInfo root) {
         AccessibilityNodeInfo best = bestComposerControl(root, true);
-        return best != null && best.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        return best != null && best.isEnabled()
+                && best.performAction(AccessibilityNodeInfo.ACTION_CLICK);
     }
 
     private AccessibilityNodeInfo bestComposerControl(AccessibilityNodeInfo root, boolean allowGeometryFallback) {
@@ -467,7 +536,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         List<AccessibilityNodeInfo> semantic = findAllContains(root, COMPOSER_ACTION_TERMS);
         for (AccessibilityNodeInfo candidate : semantic) {
             AccessibilityNodeInfo clickable = clickableAncestor(candidate);
-            if (clickable == null || !clickable.isVisibleToUser()) continue;
+            if (clickable == null || !clickable.isVisibleToUser() || !clickable.isEnabled()) continue;
             long score = composerScore(rootBounds, clickable, width, height);
             if (score > bestScore) {
                 bestScore = score;
@@ -477,7 +546,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         if (best != null || !allowGeometryFallback) return best;
 
         for (AccessibilityNodeInfo node : findAllNodes(root)) {
-            if (!node.isClickable() || !node.isVisibleToUser()) continue;
+            if (!node.isClickable() || !node.isVisibleToUser() || !node.isEnabled()) continue;
             long score = composerScore(rootBounds, node, width, height);
             if (score > bestScore) {
                 bestScore = score;
@@ -549,7 +618,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
             String desc = value(node.getContentDescription());
             if (!matchesAny(text, desc, terms, exact)) continue;
             AccessibilityNodeInfo clickable = clickableAncestor(node);
-            if (clickable == null || !clickable.isVisibleToUser()) continue;
+            if (clickable == null || !clickable.isVisibleToUser() || !clickable.isEnabled()) continue;
             Rect b = new Rect();
             clickable.getBoundsInScreen(b);
             if (b.isEmpty()) continue;
@@ -576,7 +645,8 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
 
     private boolean clickNodeOrParent(AccessibilityNodeInfo node) {
         AccessibilityNodeInfo target = clickableAncestor(node);
-        return target != null && target.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        return target != null && target.isEnabled()
+                && target.performAction(AccessibilityNodeInfo.ACTION_CLICK);
     }
 
     private AccessibilityNodeInfo clickableAncestor(AccessibilityNodeInfo node) {
@@ -595,6 +665,9 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     }
 
     private String diagnosticSummary(AccessibilityNodeInfo root, VoiceRoomStore.Room room) {
+        AccessibilityNodeInfo createInput = findCreateNameInput(root);
+        AccessibilityNodeInfo submit = findExactAny(root, CREATE_SUBMIT_TERMS);
+        AccessibilityNodeInfo clickableSubmit = bestClickableMatching(root, CREATE_SUBMIT_TERMS, true);
         return "pkg=kakao"
                 + " · title=" + containsRoomTitle(root, room.title)
                 + " · input=" + hasComposerInput(root)
@@ -603,6 +676,9 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                 + " · voice=" + containsAny(root, VOICE_TERMS)
                 + " · create=" + (containsAny(root, CREATE_STRONG_TERMS) || containsAny(root, CREATE_WEAK_TERMS))
                 + " · form=" + hasCreateForm(root)
+                + " · nameInput=" + (createInput != null)
+                + " · submit=" + (submit != null)
+                + " · submitReady=" + (clickableSubmit != null)
                 + " · active=" + isActiveVoiceRoom(root)
                 + " · entry=" + VoiceRoomStore.pendingEntry(this);
     }
@@ -633,17 +709,14 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         return null;
     }
 
-    private static AccessibilityNodeInfo findExactAny(AccessibilityNodeInfo root, Set<String> terms) {
-        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
-        queue.add(root);
-        while (!queue.isEmpty()) {
-            AccessibilityNodeInfo node = queue.removeFirst();
+    private static AccessibilityNodeInfo findExactAny(
+            AccessibilityNodeInfo root, List<String> terms) {
+        if (root == null) return null;
+        for (AccessibilityNodeInfo node : findAllNodes(root)) {
             String text = value(node.getText());
             String desc = value(node.getContentDescription());
-            if (terms.contains(text) || terms.contains(desc)) return node;
-            for (int i = 0; i < node.getChildCount(); i++) {
-                AccessibilityNodeInfo child = node.getChild(i);
-                if (child != null) queue.addLast(child);
+            for (String term : terms) {
+                if (term.equals(text) || term.equals(desc)) return node;
             }
         }
         return null;
