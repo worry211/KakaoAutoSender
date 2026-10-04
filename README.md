@@ -24,18 +24,21 @@ KakaoAutoSender is a local Android automation app that reuses KakaoTalk's Androi
 - Global start/stop, 1-minute+ intervals, fixed daily times, daily limit or unlimited mode.
 - Exact-alarm support, reboot recovery and confirmed conversation routing.
 
-## PC VoiceRoom Manager (experimental v0.1)
+## PC VoiceRoom Manager (experimental v0.2)
 `desktop/` contains a Windows + ADB manager for the separate VoiceRoom lifecycle use case.
 
+- GUI-first operation; no Kakao chat commands are required.
+- Add/edit/delete multiple Open Chat rooms from the program window.
+- Shows per-room running state, remaining estimate, next verification and failures.
 - Designed for a dedicated Android emulator/device while the PC monitor is off.
-- Manages multiple Open Chat rooms independently.
 - Mutes the dedicated Android audio streams.
 - Near the 48-hour lifetime, verifies the real KakaoTalk UI state before reopening.
 - Serializes multiple due rooms and persists lifecycle/retry state.
-- Saves screenshot + UI XML diagnostics on failures.
+- Saves screenshot + UI XML diagnostics on failures or manual capture.
+- Provides one-room live probe and ADB device check before unattended start.
 - Uses room-specific UI selectors so KakaoTalk wording changes can be calibrated without rewriting the scheduler.
 
-See `desktop/README.md`. The desktop module is intentionally fail-closed: live KakaoTalk UI selectors must be verified on the target emulator before unattended use. It does not claim or attempt to reverse-engineer Kakao ranking, anti-abuse, or moderation systems.
+Start with `desktop/start_voiceroom_manager.bat`. See `desktop/README.md` for the live calibration flow. The desktop module is intentionally fail-closed: live KakaoTalk UI selectors must be verified on the target emulator before unattended use.
 
 ## Important platform limitations
 KakaoTalk does not expose a supported public API for arbitrary Open Chat posting or VoiceRoom lifecycle automation. KakaoTalk/Android UI changes can invalidate automation, so unattended operation should only be enabled after a live selector probe succeeds on the exact emulator/KakaoTalk version. The project does not attempt to bypass platform rate limits or moderation.
