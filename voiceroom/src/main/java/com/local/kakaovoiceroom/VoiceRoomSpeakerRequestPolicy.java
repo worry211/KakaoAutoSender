@@ -37,7 +37,8 @@ final class VoiceRoomSpeakerRequestPolicy {
         if (s.isEmpty()) return false;
         return containsAny(s,
                 "스피커 요청 수락", "스피커 요청 승인", "스피커 신청 수락", "스피커 신청 승인",
-                "스피커로 참여", "스피커로 전환", "스피커 승격", "요청 수락", "요청 승인")
+                "스피커로 전환", "스피커 승격", "요청 수락", "요청 승인")
+                || "스피커로 참여".equals(s)
                 || "수락".equals(s) || "승인".equals(s);
     }
 
