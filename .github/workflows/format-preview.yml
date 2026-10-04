@@ -1,0 +1,28 @@
+name: Format preview
+on:
+  push:
+    branches: [feat/seller-ux-quality-v2-1]
+permissions:
+  contents: read
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npx prettier --write src/admin.ts src/commands.ts src/discord.ts test/seller-ux.test.ts
+        working-directory: backend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prettier-preview
+          path: |
+            backend/src/admin.ts
+            backend/src/commands.ts
+            backend/src/discord.ts
+            backend/test/seller-ux.test.ts
