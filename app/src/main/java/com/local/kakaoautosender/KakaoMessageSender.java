@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -23,9 +24,7 @@ final class KakaoMessageSender {
             return false;
         }
         if (media == null || !media.hasImage()) {
-            boolean ok = KakaoNotificationListener.sendToRoom(context, room, message);
-            lastError = ok ? "" : KakaoNotificationListener.lastSendError();
-            return ok;
+            return sendTextOnly(context, room, message);
         }
 
         if (!media.mime.toLowerCase(Locale.ROOT).startsWith("image/") || media.mime.contains("*")) {
@@ -43,24 +42,7 @@ final class KakaoMessageSender {
 
         KakaoNotificationListener.requestRefresh();
         KakaoNotificationListener.ReplyTarget target = findTarget(requested);
-        if (target == null || !target.verified) {
-            lastError = "확인된 실시간 답장 세션 없음 · 대상 방 알림을 다시 연결해줘";
-            return false;
-        }
-        if (!same(requested, target.label)) {
-            lastError = "안전 차단: 선택 방과 검증 세션 이름이 다름";
-            return false;
-        }
-
-        String mapped = Prefs.aliasForIdentity(context, target.stableIdentityKeys);
-        if (mapped != null && !same(mapped, requested)) {
-            lastError = "안전 차단: 저장된 방 식별자 충돌 감지";
-            return false;
-        }
-        if (target.remoteInputs.length == 0 || target.pendingIntent == null) {
-            lastError = "카카오 답장 입력 정보가 없음";
-            return false;
-        }
+        if (!validTarget(context, requested, target)) return false;
 
         Uri uri;
         try {
@@ -92,18 +74,20 @@ final class KakaoMessageSender {
             return false;
         }
 
+        RemoteInput[] textInputs = freeFormInputs(target.remoteInputs);
+        if (!message.trim().isEmpty() && textInputs.length == 0) {
+            lastError = "현재 카카오톡 알림 답장 방식에서는 이 방에 텍스트 자동전송을 지원하지 않습니다.";
+            return false;
+        }
+
         try {
             Intent fillIn = new Intent();
-            Bundle textResults = new Bundle();
             if (!message.trim().isEmpty()) {
-                for (RemoteInput input : target.remoteInputs) {
-                    if (input != null && input.getAllowFreeFormInput()) {
-                        textResults.putCharSequence(input.getResultKey(), message);
-                    }
+                Bundle textResults = new Bundle();
+                for (RemoteInput input : textInputs) {
+                    textResults.putCharSequence(input.getResultKey(), message);
                 }
-                if (!textResults.isEmpty()) {
-                    RemoteInput.addResultsToIntent(target.remoteInputs, fillIn, textResults);
-                }
+                RemoteInput.addResultsToIntent(textInputs, fillIn, textResults);
             }
 
             Map<String, Uri> data = new HashMap<>();
@@ -113,7 +97,10 @@ final class KakaoMessageSender {
             context.grantUriPermission(KakaoNotificationListener.KAKAO_PACKAGE, uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION);
             synchronized (DeliveryGate.LOCK) {
-                if (!DeliveryGate.allowed(context)) { lastError = "전송 중단 · 라이선스 또는 자동전송 상태를 확인하세요."; return false; }
+                if (!DeliveryGate.allowed(context)) {
+                    lastError = "전송 중단 · 라이선스 또는 자동전송 상태를 확인하세요.";
+                    return false;
+                }
                 target.pendingIntent.send(context, 0, fillIn);
             }
             lastError = "";
@@ -130,11 +117,88 @@ final class KakaoMessageSender {
         }
     }
 
+    private static boolean sendTextOnly(Context context, String room, String message) {
+        lastError = "";
+        String requested = room == null ? "" : room.trim();
+        if (requested.isEmpty()) {
+            lastError = "대상 방이 비어 있음";
+            return false;
+        }
+        if (message == null || message.trim().isEmpty()) {
+            lastError = "보낼 메시지가 비어 있음";
+            return false;
+        }
+
+        KakaoNotificationListener.requestRefresh();
+        KakaoNotificationListener.ReplyTarget target = findTarget(requested);
+        if (!validTarget(context, requested, target)) return false;
+
+        RemoteInput[] textInputs = freeFormInputs(target.remoteInputs);
+        if (textInputs.length == 0) {
+            lastError = "현재 카카오톡 알림 답장 방식에서는 이 방에 텍스트 자동전송을 지원하지 않습니다.";
+            return false;
+        }
+
+        try {
+            Bundle results = new Bundle();
+            for (RemoteInput input : textInputs) {
+                results.putCharSequence(input.getResultKey(), message);
+            }
+            Intent fillIn = new Intent();
+            RemoteInput.addResultsToIntent(textInputs, fillIn, results);
+            synchronized (DeliveryGate.LOCK) {
+                if (!DeliveryGate.allowed(context)) {
+                    lastError = "전송 중단 · 라이선스 또는 자동전송 상태를 확인하세요.";
+                    return false;
+                }
+                target.pendingIntent.send(context, 0, fillIn);
+            }
+            lastError = "";
+            return true;
+        } catch (PendingIntent.CanceledException e) {
+            lastError = "카카오 답장 세션 만료됨 · 새 알림에서 다시 연결 필요";
+            return false;
+        } catch (Throwable t) {
+            lastError = "전송 오류: " + t.getClass().getSimpleName();
+            return false;
+        }
+    }
+
+    private static boolean validTarget(
+            Context context, String requested, KakaoNotificationListener.ReplyTarget target) {
+        if (target == null || !target.verified) {
+            lastError = "확인된 실시간 답장 세션 없음 · 대상 방 알림을 다시 연결해줘";
+            return false;
+        }
+        if (!same(requested, target.label)) {
+            lastError = "안전 차단: 선택 방과 검증 세션 이름이 다름";
+            return false;
+        }
+        String mapped = Prefs.aliasForIdentity(context, target.stableIdentityKeys);
+        if (mapped != null && !same(mapped, requested)) {
+            lastError = "안전 차단: 저장된 방 식별자 충돌 감지";
+            return false;
+        }
+        if (target.remoteInputs.length == 0 || target.pendingIntent == null) {
+            lastError = "카카오 답장 입력 정보가 없음";
+            return false;
+        }
+        return true;
+    }
+
+    static RemoteInput[] freeFormInputs(RemoteInput[] inputs) {
+        if (inputs == null || inputs.length == 0) return new RemoteInput[0];
+        ArrayList<RemoteInput> result = new ArrayList<>();
+        for (RemoteInput input : inputs) {
+            if (input != null && input.getAllowFreeFormInput()) result.add(input);
+        }
+        return result.toArray(new RemoteInput[0]);
+    }
+
     static String lastError() {
         return lastError == null ? "" : lastError;
     }
 
-    @SuppressWarnings("unchecked")
     private static KakaoNotificationListener.ReplyTarget findTarget(String room) {
         return KakaoNotificationListener.findTarget(room);
     }
