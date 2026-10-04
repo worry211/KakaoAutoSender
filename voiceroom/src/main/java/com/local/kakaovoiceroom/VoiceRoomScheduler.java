@@ -18,16 +18,21 @@ final class VoiceRoomScheduler {
     static void scheduleNext(Context context) {
         long now = System.currentTimeMillis();
         boolean managerActive = VoiceRoomStore.managerActive(context);
-        VoiceRoomStore.Room room = managerActive
-                ? VoiceRoomStore.earliestDue(context, now)
-                : VoiceRoomStore.manualCheckDue(context, now);
+
+        // An explicit live check always wins over unattended scheduled work. This keeps the
+        // room the user just selected deterministic even while the long-running manager is ON.
+        VoiceRoomStore.Room manualRoom = VoiceRoomStore.manualCheckDue(context, now);
+        boolean manual = manualRoom != null;
+        VoiceRoomStore.Room room = manual ? manualRoom
+                : (managerActive ? VoiceRoomStore.earliestDue(context, now) : null);
+
         if (room == null) {
             cancel(context);
             return;
         }
-        boolean manual = !managerActive && "CHECK_DUE".equals(room.status);
+
         long at = room.nextCheckAt <= 0L
-                ? now + 5_000L
+                ? now + 2_000L
                 : Math.max(now + 2_000L, room.nextCheckAt);
         AlarmManager alarm = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (alarm == null) return;
