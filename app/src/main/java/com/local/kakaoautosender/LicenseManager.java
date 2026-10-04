@@ -9,6 +9,7 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.Settings;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -26,6 +27,9 @@ final class LicenseManager {
   private static final java.util.concurrent.locks.ReentrantLock REQUEST_LOCK =
       new java.util.concurrent.locks.ReentrantLock();
   private static final ThreadLocal<Long> DEADLINE = new ThreadLocal<>();
+  private static final long FOREGROUND_DEADLINE_MS = 12_000L;
+  private static final int CONNECT_TIMEOUT_MS = 3_000;
+  private static final int READ_TIMEOUT_MS = 3_500;
 
   interface Callback {
     void done(Verification v);
@@ -139,26 +143,31 @@ final class LicenseManager {
     NETWORK.execute(
         () -> {
           Verification v;
+          DEADLINE.set(SystemClock.elapsedRealtime() + FOREGROUND_DEADLINE_MS);
           try {
             JSONObject b =
                 body()
                     .put("key", key.trim().toUpperCase(java.util.Locale.ROOT))
                     .put("public_key", InstallIdentity.publicKey());
-            JSONObject r = request(app, "/api/v1/activate", b, "");
+            JSONObject r;
+            try {
+              // Activation itself is sent once. If the response is lost after the server consumed the
+              // one-time key, recover() resolves the ambiguity without consuming the key twice.
+              r = request(app, "/api/v1/activate", b, "");
+            } catch (IOException uncertainActivation) {
+              r = retryRecover(app, 2);
+            }
             if ("ACTIVE".equals(r.optString("state"))) {
               accept(app, r);
               v = verifyStored(app);
             } else {
-              v =
-                  new Verification(
-                      false,
-                      r.optString("state", "INVALID"),
-                      EntitlementPolicy.message(r.optString("state")),
-                      "",
-                      0);
+              String state = r.optString("state", "INVALID");
+              v = new Verification(false, state, EntitlementPolicy.message(state), "", 0);
             }
           } catch (Exception e) {
-            v = new Verification(false, "NETWORK", EntitlementPolicy.message("NETWORK"), "", 0);
+            v = networkFailure(app, e);
+          } finally {
+            DEADLINE.remove();
           }
           final Verification result = v;
           MAIN.post(() -> callback.done(result));
@@ -170,15 +179,9 @@ final class LicenseManager {
       throw new IllegalStateException("Network entitlement checks require worker thread");
     boolean acquired = false;
     try {
-      // A queued foreground request must not hold an alarm receiver indefinitely.
-      acquired = REQUEST_LOCK.tryLock(250, java.util.concurrent.TimeUnit.MILLISECONDS);
-      if (!acquired) {
-        Verification cached = verifyStored(c);
-        if (!cached.valid && "ACTIVE".equals(p(c).getString("state", "")))
-          lockout(c, cached.state, "");
-        return cached;
-      }
-      DEADLINE.set(SystemClock.elapsedRealtime() + 4500L);
+      acquired = REQUEST_LOCK.tryLock(750, java.util.concurrent.TimeUnit.MILLISECONDS);
+      if (!acquired) return verifyStored(c);
+      DEADLINE.set(SystemClock.elapsedRealtime() + FOREGROUND_DEADLINE_MS);
       return validateInternal(c);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -195,29 +198,102 @@ final class LicenseManager {
     try {
       String[] tokens = InstallIdentity.tokens(c);
       JSONObject r;
-      if (tokens[0].isEmpty()) r = recover(c);
-      else {
-        r = request(c, "/api/v1/heartbeat", body(), tokens[0]);
-        if ("ACCESS_EXPIRED".equals(r.optString("state")))
-          r = request(c, "/api/v1/session/refresh", body(), tokens[1]);
-        if ("INVALID".equals(r.optString("state"))) r = recover(c);
+      if (tokens[0].isEmpty()) {
+        r = retryRecover(c, 2);
+      } else {
+        r = retryRequest(c, "/api/v1/heartbeat", body(), tokens[0], 2);
+        if ("ACCESS_EXPIRED".equals(r.optString("state"))) {
+          try {
+            r = request(c, "/api/v1/session/refresh", body(), tokens[1]);
+          } catch (IOException refreshResponseLost) {
+            // Refresh rotation may already have committed. Recover by installation key instead of
+            // replaying an old refresh token.
+            r = retryRecover(c, 2);
+          }
+        }
+        if ("INVALID".equals(r.optString("state"))) r = retryRecover(c, 2);
       }
       String state = r.getString("state");
       if ("ACTIVE".equals(state)) {
         accept(c, r);
         return verifyStored(c);
       }
-      if (isTemporary(state)) throw new java.io.IOException("temporary");
+      if (isTemporary(state)) throw new IOException("temporary:" + state);
       lockout(c, state, r.optString("message", ""));
       return verifyStored(c);
     } catch (Exception e) {
-      p(c).edit().putString("last_error", "NETWORK").apply();
-      Verification cached = verifyStored(c);
-      if (cached.valid) return cached;
-      // Network failure never erases authoritative SUSPENDED/REVOKED/etc.
-      if ("ACTIVE".equals(p(c).getString("state", ""))) lockout(c, cached.state, "");
-      return verifyStored(c);
+      return networkFailure(c, e);
     }
+  }
+
+  private static Verification networkFailure(Context c, Exception error) {
+    String detail = networkErrorCode(error);
+    p(c).edit().putString("last_error", detail).apply();
+    Verification cached = verifyStored(c);
+    if (cached.valid) return cached;
+
+    String storedState = p(c).getString("state", "INVALID");
+    if ("ACTIVE".equals(storedState)) {
+      // Fail closed without destroying the last authoritative ACTIVE state or encrypted session.
+      // A later successful heartbeat/recover can restore access without forcing reactivation.
+      DeliveryGate.stop(c);
+      Prefs.setStatus(c, "라이선스 서버 연결 대기 · 자동전송 안전 중지");
+      return new Verification(
+          false,
+          "NETWORK",
+          EntitlementPolicy.message("NETWORK"),
+          p(c).getString("license_id", ""),
+          p(c).getLong("expiry", 0));
+    }
+    return cached;
+  }
+
+  private static String networkErrorCode(Exception e) {
+    if (e == null) return "NETWORK";
+    String message = e.getMessage();
+    if (message == null || message.trim().isEmpty()) return "NETWORK";
+    String clean = message.replace('\n', ' ').replace('\r', ' ').trim();
+    if (clean.length() > 48) clean = clean.substring(0, 48);
+    return "NETWORK:" + clean;
+  }
+
+  private static JSONObject retryRecover(Context c, int attempts) throws Exception {
+    Exception last = null;
+    for (int i = 0; i < attempts; i++) {
+      try {
+        return recover(c);
+      } catch (Exception e) {
+        last = e;
+        if (!canRetry() || i + 1 >= attempts) throw e;
+        pauseBeforeRetry(i);
+      }
+    }
+    throw last == null ? new IOException("recover") : last;
+  }
+
+  private static JSONObject retryRequest(
+      Context c, String path, JSONObject b, String token, int attempts) throws Exception {
+    Exception last = null;
+    for (int i = 0; i < attempts; i++) {
+      try {
+        return request(c, path, b, token);
+      } catch (Exception e) {
+        last = e;
+        if (!canRetry() || i + 1 >= attempts) throw e;
+        pauseBeforeRetry(i);
+      }
+    }
+    throw last == null ? new IOException("request") : last;
+  }
+
+  private static boolean canRetry() {
+    Long deadline = DEADLINE.get();
+    return deadline == null || deadline - SystemClock.elapsedRealtime() > 1200L;
+  }
+
+  private static void pauseBeforeRetry(int attempt) throws InterruptedException {
+    SystemClock.sleep(180L + attempt * 220L);
+    if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
   }
 
   private static JSONObject recover(Context c) throws Exception {
@@ -245,7 +321,7 @@ final class LicenseManager {
       Context c, String path, JSONObject b, String token, boolean retryClock) throws Exception {
     String base = BuildConfig.API_BASE_URL;
     if (!base.startsWith("https://") || base.endsWith("/"))
-      throw new java.io.IOException("endpoint");
+      throw new IOException("endpoint");
     String raw = b.toString(), ts = Long.toString(estimatedServerTime(c));
     String nonce = UUID.randomUUID().toString().replace("-", "");
     String canonical =
@@ -260,15 +336,18 @@ final class LicenseManager {
             + "\n"
             + InstallIdentity.sha(token);
     HttpsURLConnection conn = (HttpsURLConnection) new URL(base + path).openConnection();
-    long remaining = DEADLINE.get() == null ? 4500 : DEADLINE.get() - SystemClock.elapsedRealtime();
-    if (remaining < 100) throw new java.io.IOException("deadline");
-    int timeout = (int) Math.max(50, Math.min(1500, remaining / 2));
-    conn.setConnectTimeout(timeout);
-    conn.setReadTimeout(timeout);
+    long remaining = DEADLINE.get() == null ? FOREGROUND_DEADLINE_MS
+        : DEADLINE.get() - SystemClock.elapsedRealtime();
+    if (remaining < 150) throw new IOException("deadline");
+    int connectTimeout = (int) Math.max(150, Math.min(CONNECT_TIMEOUT_MS, remaining / 2));
+    int readTimeout = (int) Math.max(150, Math.min(READ_TIMEOUT_MS, remaining - connectTimeout));
+    conn.setConnectTimeout(connectTimeout);
+    conn.setReadTimeout(readTimeout);
     conn.setInstanceFollowRedirects(false);
     conn.setRequestMethod("POST");
     conn.setDoOutput(true);
     conn.setRequestProperty("Content-Type", "application/json");
+    conn.setRequestProperty("Accept", "application/json");
     conn.setRequestProperty("X-Install-Time", ts);
     conn.setRequestProperty("X-Install-Nonce", nonce);
     conn.setRequestProperty("X-Install-Signature", InstallIdentity.sign(canonical));
@@ -280,16 +359,16 @@ final class LicenseManager {
         out.write(bytes);
       }
       int status = conn.getResponseCode();
-      if (status >= 500 || status == 429) throw new java.io.IOException("server");
-      if (status >= 300 && status < 400) throw new java.io.IOException("redirect");
+      if (status >= 500) throw new IOException("server:" + status);
+      if (status >= 300 && status < 400) throw new IOException("redirect");
       InputStream stream = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
-      if (stream == null) throw new java.io.IOException("body");
+      if (stream == null) throw new IOException("body");
       ByteArrayOutputStream out = new ByteArrayOutputStream();
       try (InputStream in = stream) {
         byte[] chunk = new byte[1024];
         int n;
         while ((n = in.read(chunk)) != -1) {
-          if (out.size() + n > 16384) throw new java.io.IOException("body_size");
+          if (out.size() + n > 16384) throw new IOException("body_size");
           out.write(chunk, 0, n);
         }
       }
@@ -327,7 +406,7 @@ final class LicenseManager {
         .putLong("latest_version", r.optLong("latest_version", BuildConfig.VERSION_CODE))
         .putString("download_url", r.optString("download_url", ""))
         .putString("last_error", "")
-        .commit()) throw new java.io.IOException("storage");
+        .commit()) throw new IOException("storage");
     c.sendBroadcast(
         new Intent(KakaoNotificationListener.ACTION_SESSIONS_UPDATED)
             .setPackage(c.getPackageName()));
