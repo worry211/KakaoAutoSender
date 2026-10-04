@@ -147,7 +147,11 @@ public class MainActivity extends Activity {
         tools2.addView(kakao, kakaoLp);
         root.addView(tools2, top(7));
 
-        TextView note = text("방마다 안전 점검/실제 점검을 한 번 통과시키면 이후에는 전체 시작만 켜두면 돼. 실제 점검은 즉시 실행되며 예약 알람을 기다리지 않아. 방 이름이나 링크를 바꾸면 해당 방 검증은 자동으로 다시 필요해져.", 11, false);
+        Button screenOffTest = compactButton("20초 화면 OFF 자동점검 테스트", Color.rgb(52, 80, 122));
+        screenOffTest.setOnClickListener(v -> scheduleQuickAutoTest());
+        root.addView(screenOffTest, top(7));
+
+        TextView note = text("‘관리 OFF’는 보이스룸 종료가 아니라 48시간 자동 재점검/재개설만 끈 상태야. 실제 점검은 보룸 활성 확인과 함께 가능한 경우 카카오 내부 마이크·스피커를 안전 상태로 맞춰.", 11, false);
         note.setTextColor(Color.rgb(132, 138, 150));
         root.addView(note, top(14));
 
@@ -165,11 +169,29 @@ public class MainActivity extends Activity {
         boolean kakao = getPackageManager().getLaunchIntentForPackage("com.kakao.talk") != null;
         List<VoiceRoomStore.Room> rooms = VoiceRoomStore.list(this);
 
-        masterStatus.setText(active ? "● 보이스룸 자동관리 실행 중" : "● 보이스룸 자동관리 중지됨");
-        masterStatus.setTextColor(active ? Color.rgb(93, 224, 148) : Color.rgb(218, 221, 227));
+        int liveCount = 0;
+        int audioProtected = 0;
+        for (VoiceRoomStore.Room room : rooms) {
+            if (!room.liveCheckPassed) continue;
+            liveCount += 1;
+            if (room.micMuted && room.speakerMuted) audioProtected += 1;
+        }
+
+        if (active) {
+            masterStatus.setText("● 보이스룸 자동관리 실행 중");
+            masterStatus.setTextColor(Color.rgb(93, 224, 148));
+        } else if (liveCount > 0) {
+            masterStatus.setText("● 보이스룸 " + liveCount + "개 활성 · 자동관리 꺼짐");
+            masterStatus.setTextColor(Color.rgb(222, 190, 98));
+        } else {
+            masterStatus.setText("● 보이스룸 자동관리 중지됨");
+            masterStatus.setTextColor(Color.rgb(218, 221, 227));
+        }
+
+        String audioSummary = liveCount <= 0 ? "" : "  ·  오디오 보호 " + audioProtected + "/" + liveCount;
         systemStatus.setText("접근성 " + (accessibility ? "정상" : "설정 필요")
                 + "  ·  카카오톡 " + (kakao ? "확인" : "미설치")
-                + "  ·  알람 " + (exact ? "정확" : "근사"));
+                + "  ·  알람 " + (exact ? "정확" : "근사") + audioSummary);
         startButton.setEnabled(!active);
         stopButton.setEnabled(active);
 
@@ -199,7 +221,7 @@ public class MainActivity extends Activity {
         topRow.setOrientation(LinearLayout.HORIZONTAL);
         topRow.setGravity(Gravity.CENTER_VERTICAL);
         topRow.addView(text(room.title, 17, true), weight());
-        TextView badge = pill(room.enabled ? "ON" : "OFF",
+        TextView badge = pill(room.enabled ? "관리 ON" : "관리 OFF",
                 room.enabled ? Color.rgb(40, 122, 81) : Color.rgb(78, 82, 92));
         topRow.addView(badge);
         card.addView(topRow);
@@ -211,11 +233,26 @@ public class MainActivity extends Activity {
         String verification = "검증  "
                 + (room.safeProbePassed ? "안전 ✓" : "안전 필요")
                 + "  ·  "
-                + (room.liveCheckPassed ? "실제 ✓" : "실제 필요");
+                + (room.liveCheckPassed ? "실제 활성 ✓" : "실제 필요");
         TextView verified = text(verification, 11, true);
         verified.setTextColor(room.liveCheckPassed
                 ? Color.rgb(102, 205, 145) : Color.rgb(198, 171, 104));
         card.addView(verified, top(5));
+
+        if (room.liveCheckPassed) {
+            String audio = "오디오  마이크 " + (room.micMuted ? "✓" : "확인 필요")
+                    + "  ·  스피커 " + (room.speakerMuted ? "✓" : "확인 필요");
+            TextView audioView = text(audio, 11, true);
+            audioView.setTextColor(room.micMuted && room.speakerMuted
+                    ? Color.rgb(102, 205, 145) : Color.rgb(222, 190, 98));
+            card.addView(audioView, top(5));
+        }
+
+        if (room.liveCheckPassed && !room.enabled) {
+            TextView warning = text("보이스룸은 켜져 있지만 48시간 자동 재개설은 꺼져 있어.", 10, false);
+            warning.setTextColor(Color.rgb(222, 190, 98));
+            card.addView(warning, top(5));
+        }
 
         if (room.nextCheckAt > 0L && room.liveCheckPassed) {
             TextView next = text("다음 확인  " + date(room.nextCheckAt), 11, false);
@@ -238,7 +275,7 @@ public class MainActivity extends Activity {
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
 
-        Button toggle = compactButton(room.enabled ? "중지" : "사용", Color.rgb(65, 69, 80));
+        Button toggle = compactButton(room.enabled ? "관리 끄기" : "관리 켜기", Color.rgb(65, 69, 80));
         toggle.setOnClickListener(v -> {
             VoiceRoomStore.Room current = VoiceRoomStore.get(this, room.id);
             if (current == null) return;
@@ -248,6 +285,9 @@ public class MainActivity extends Activity {
             }
             VoiceRoomStore.update(this, current);
             VoiceRoomScheduler.scheduleNext(this);
+            toast(current.enabled
+                    ? "이 방의 자동 재점검/재개설을 사용해."
+                    : "보룸은 유지하고 자동 재개설만 껐어.");
             refreshUi();
         });
         actions.addView(toggle, weight());
@@ -261,6 +301,7 @@ public class MainActivity extends Activity {
 
         String liveLabel;
         if ("MANUAL_RUNNING".equals(room.status)) liveLabel = "점검 중…";
+        else if (room.liveCheckPassed && (!room.micMuted || !room.speakerMuted)) liveLabel = "오디오 확인";
         else liveLabel = room.liveCheckPassed ? "실제 ✓" : "실제 점검";
         Button check = compactButton(liveLabel, Color.rgb(58, 91, 151));
         check.setEnabled(!VoiceRoomStore.hasFreshPending(this));
@@ -369,7 +410,7 @@ public class MainActivity extends Activity {
 
         new AlertDialog.Builder(this)
                 .setTitle("실제 보이스룸 점검")
-                .setMessage("선택한 ‘" + room.title + "’ 방을 지금 즉시 확인해. 보이스룸이 없으면 방 이름을 보이스룸 이름으로 자동 입력하고 실제로 새 보이스룸을 만들어. 전체 자동관리 ON/OFF 상태는 바꾸지 않아. 계속할까?")
+                .setMessage("‘" + room.title + "’ 방을 지금 즉시 확인해. 보이스룸이 없으면 새로 만들고, 이미 켜져 있으면 실제 활성 상태를 확인해. 이어서 카카오 내부 마이크·스피커를 안전 상태로 맞출 수 있는지도 확인해. 전체 자동관리 ON/OFF는 바꾸지 않아.")
                 .setNegativeButton("취소", null)
                 .setPositiveButton("지금 실행", (d, w) -> startManualLiveCheck(room))
                 .show();
@@ -488,6 +529,9 @@ public class MainActivity extends Activity {
                         current.stageStartedAt = 0L;
                         current.lastError = "";
                         current.lastDiagnostic = "";
+                        current.micMuted = false;
+                        current.speakerMuted = false;
+                        current.audioCheckedAt = 0L;
                     }
                     VoiceRoomStore.update(this, current);
                 }
@@ -520,6 +564,7 @@ public class MainActivity extends Activity {
 
         List<VoiceRoomStore.Room> rooms = VoiceRoomStore.list(this);
         boolean anyEnabled = false;
+        boolean audioNeedsAttention = false;
         StringBuilder unverified = new StringBuilder();
         for (VoiceRoomStore.Room room : rooms) {
             if (!room.enabled) continue;
@@ -527,16 +572,18 @@ public class MainActivity extends Activity {
             if (!room.liveCheckPassed) {
                 if (unverified.length() > 0) unverified.append(", ");
                 unverified.append(room.title);
+            } else if (!room.micMuted || !room.speakerMuted) {
+                audioNeedsAttention = true;
             }
         }
         if (!anyEnabled) {
-            toast("자동관리할 방을 먼저 추가하거나 사용으로 켜줘.");
+            toast("자동관리할 방을 먼저 추가하거나 관리 ON으로 켜줘.");
             return;
         }
         if (unverified.length() > 0) {
             new AlertDialog.Builder(this)
                     .setTitle("실제 점검이 먼저 필요해")
-                    .setMessage("다음 ON 방은 아직 실제 생성/활성 검증을 통과하지 않았어:\n\n"
+                    .setMessage("다음 관리 ON 방은 아직 실제 생성/활성 검증을 통과하지 않았어:\n\n"
                             + unverified + "\n\n각 방의 ‘실제 점검’을 1회 성공시킨 뒤 전체 시작을 눌러줘.")
                     .setPositiveButton("확인", null)
                     .show();
@@ -552,7 +599,9 @@ public class MainActivity extends Activity {
             }
         }
         VoiceRoomStore.setManagerActive(this, true);
-        VoiceRoomStore.setLastStatus(this, "검증된 방 보이스룸 자동관리 시작");
+        VoiceRoomStore.setLastStatus(this, audioNeedsAttention
+                ? "자동관리 시작 · 일부 방 오디오 보호 상태는 다음 점검에서 재확인"
+                : "검증된 방 보이스룸 자동관리 시작");
         VoiceRoomScheduler.scheduleNext(this);
         refreshUi();
     }
@@ -561,7 +610,36 @@ public class MainActivity extends Activity {
         VoiceRoomStore.setManagerActive(this, false);
         VoiceRoomStore.clearPending(this);
         VoiceRoomScheduler.cancel(this);
-        VoiceRoomStore.setLastStatus(this, "보이스룸 자동관리 중단");
+        VoiceRoomStore.setLastStatus(this, "보이스룸 자동관리 중단 · 현재 보룸 자체는 종료하지 않음");
+        refreshUi();
+    }
+
+    private void scheduleQuickAutoTest() {
+        if (!VoiceRoomStore.managerActive(this)) {
+            toast("먼저 관리할 방을 관리 ON으로 두고 ‘전체 시작’을 켜줘.");
+            return;
+        }
+        if (VoiceRoomStore.hasFreshPending(this)) {
+            toast("현재 작업이 끝난 뒤 테스트해줘.");
+            return;
+        }
+        VoiceRoomStore.Room target = null;
+        for (VoiceRoomStore.Room room : VoiceRoomStore.list(this)) {
+            if (room.enabled && room.liveCheckPassed) {
+                target = room;
+                break;
+            }
+        }
+        if (target == null) {
+            toast("관리 ON + 실제 활성 ✓ 방이 필요해.");
+            return;
+        }
+        target.nextCheckAt = System.currentTimeMillis() + 20_000L;
+        VoiceRoomStore.update(this, target);
+        VoiceRoomStore.setLastStatus(this,
+                target.title + " · 20초 후 화면 OFF 자동점검 예약 · 지금 화면을 꺼도 돼");
+        VoiceRoomScheduler.scheduleNext(this);
+        toast("20초 안에 화면을 꺼둬. 자동으로 깨워 점검하는지 확인해.");
         refreshUi();
     }
 
@@ -655,8 +733,10 @@ public class MainActivity extends Activity {
     private String statusLabel(String status) {
         if (status == null) return "대기";
         switch (status) {
-            case "ACTIVE": return "실행 중";
-            case "ACTIVE_UNKNOWN_START": return "실행 중 · 시작시간 확인 중";
+            case "ACTIVE": return "보룸 활성";
+            case "ACTIVE_UNKNOWN_START": return "보룸 활성 · 시작시간 확인 중";
+            case "AUDIO_GUARD_CREATED":
+            case "AUDIO_GUARD_EXISTING": return "보룸 활성 · 오디오 보호 확인 중";
             case "CREATING": return "재개설 준비 중";
             case "CREATING_NAMED": return "이름 입력 완료 · 생성 중";
             case "CREATING_CONFIRMING": return "생성 확인 중";
