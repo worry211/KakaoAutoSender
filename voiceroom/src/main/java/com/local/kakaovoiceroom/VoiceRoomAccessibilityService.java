@@ -79,7 +79,9 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         if (event == null || event.getPackageName() == null) return;
         if (!KAKAO_PACKAGE.contentEquals(event.getPackageName())) return;
         if (VoiceRoomStore.pendingRoomId(this).isEmpty()) return;
-        if (!VoiceRoomStore.managerActive(this) && !VoiceRoomStore.isProbePending(this)) return;
+        if (!VoiceRoomStore.managerActive(this)
+                && !VoiceRoomStore.isProbePending(this)
+                && !VoiceRoomStore.isManualPending(this)) return;
         long now = System.currentTimeMillis();
         if (now - lastStepAt < STEP_DEBOUNCE_MS) return;
         lastStepAt = now;
@@ -103,9 +105,10 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
         scheduleWatchdog(roomId);
 
         boolean probe = VoiceRoomStore.isProbePending(this);
+        boolean manual = VoiceRoomStore.isManualPending(this);
         VoiceRoomStore.Room room = VoiceRoomStore.get(this, roomId);
-        if (room == null || (!room.enabled && !probe)
-                || (!VoiceRoomStore.managerActive(this) && !probe)) {
+        if (room == null || (!room.enabled && !probe && !manual)
+                || (!VoiceRoomStore.managerActive(this) && !probe && !manual)) {
             finishPending();
             return;
         }
@@ -341,7 +344,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
     private boolean hasCreateForm(AccessibilityNodeInfo root) {
         return findCreateNameInput(root) != null
                 && containsAny(root, CREATE_STRONG_TERMS)
-                && bestClickableMatching(root, CREATE_SUBMIT_TERMS, true) != null;
+                && findExactAny(root, new HashSet<>(CREATE_SUBMIT_TERMS)) != null;
     }
 
     private AccessibilityNodeInfo findCreateNameInput(AccessibilityNodeInfo root) {
@@ -406,14 +409,16 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
 
     private void fail(VoiceRoomStore.Room room, String error) {
         boolean probe = VoiceRoomStore.isProbePending(this);
+        boolean manual = VoiceRoomStore.isManualPending(this);
         room.stageStartedAt = 0L;
+        room.lastError = error;
         if (probe) {
             room.status = "PROBE_ERROR";
-            room.lastError = error;
+        } else if (manual) {
+            room.status = "MANUAL_ERROR";
         } else {
             room.failures += 1;
             room.status = "ERROR";
-            room.lastError = error;
             room.nextCheckAt = System.currentTimeMillis() + KakaoUiPolicy.retryDelayMs(room.failures);
         }
         VoiceRoomStore.update(this, room);
