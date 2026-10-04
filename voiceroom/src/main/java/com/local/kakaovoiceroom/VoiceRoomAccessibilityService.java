@@ -36,7 +36,6 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
             "보이스 룸 만들기", "보이스 룸 시작");
     private static final List<String> CREATE_WEAK_TERMS = Arrays.asList("시작하기");
     private static final List<String> CREATE_SUBMIT_TERMS = Arrays.asList("만들기");
-    private static final List<String> CONFIRM_TERMS = Arrays.asList("시작", "만들기", "확인");
     private static final List<String> STRONG_ACTIVE_TERMS = Arrays.asList(
             "보이스룸 종료", "보이스룸 나가기", "보이스 룸 종료", "보이스 룸 나가기");
     private static final List<String> SPEAKER_TERMS = Arrays.asList(
@@ -163,8 +162,9 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
             boolean voiceMenu = "VOICE_MENU".equals(status)
                     || "PROBE_VOICE_MENU".equals(status);
             boolean creating = "CREATING".equals(status);
+            boolean creatingNamed = "CREATING_NAMED".equals(status);
             boolean confirming = "CREATING_CONFIRMING".equals(status);
-            boolean modalProgress = roomMenu || voiceMenu || creating || confirming;
+            boolean modalProgress = roomMenu || voiceMenu || creating || creatingNamed || confirming;
 
             if (stageExpired(room, now)) {
                 fail(room, stageError(status, "단계 진행 없음"));
@@ -249,9 +249,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
                     boolean clicked = strongCreate
                             ? clickAny(root, CREATE_STRONG_TERMS)
                             : clickAny(root, CREATE_WEAK_TERMS);
-                    if (clicked) {
-                        transition(room, "CREATING", room.title + " · 보이스룸 생성 단계");
-                    }
+                    if (clicked) transition(room, "CREATING", room.title + " · 보이스룸 생성 단계");
                 }
                 scheduleFollowUp();
                 return;
@@ -265,29 +263,41 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
 
                 AccessibilityNodeInfo nameInput = findCreateNameInput(root);
                 if (nameInput == null) {
-                    VoiceRoomStore.setLastStatus(this,
-                            room.title + " · 생성 입력칸 탐색 중");
+                    VoiceRoomStore.setLastStatus(this, room.title + " · 생성 입력칸 탐색 중");
                     scheduleFollowUp();
                     return;
                 }
 
                 String desired = KakaoUiPolicy.voiceRoomName(room.title);
                 String current = value(nameInput.getText());
-                if (!desired.equals(current)) {
-                    if (setTextRobust(nameInput, desired)) {
-                        VoiceRoomStore.setLastStatus(this,
-                                room.title + " · 보이스룸 이름 입력 요청 완료 · UI 반영 확인 중");
-                    }
+                if (desired.equals(current)) {
+                    transition(room, "CREATING_NAMED",
+                            room.title + " · 보이스룸 이름 확인 완료 · 만들기 버튼 대기");
                     scheduleFollowUp();
                     return;
                 }
 
+                if (setTextRobust(nameInput, desired)) {
+                    transition(room, "CREATING_NAMED",
+                            room.title + " · 보이스룸 이름 입력 요청 완료 · 만들기 버튼 대기");
+                } else {
+                    VoiceRoomStore.setLastStatus(this, room.title + " · 입력칸 확인됨 · 이름 입력 재시도 중");
+                }
+                scheduleFollowUp();
+                return;
+            }
+
+            if (creatingNamed) {
+                if (isActiveVoiceRoom(root)) {
+                    markActive(room, now);
+                    return;
+                }
                 if (clickAnyExact(root, CREATE_SUBMIT_TERMS)) {
                     transition(room, "CREATING_CONFIRMING",
                             room.title + " · 만들기 실행 후 활성 확인 중");
                 } else {
                     VoiceRoomStore.setLastStatus(this,
-                            room.title + " · 이름 확인 완료 · 만들기 버튼 활성 대기");
+                            room.title + " · 이름 입력 처리됨 · 만들기 버튼 활성 대기");
                 }
                 scheduleFollowUp();
                 return;
@@ -464,6 +474,7 @@ public class VoiceRoomAccessibilityService extends AccessibilityService {
 
     private void markActive(VoiceRoomStore.Room room, long now) {
         boolean createdByUs = "CREATING".equals(room.status)
+                || "CREATING_NAMED".equals(room.status)
                 || "CREATING_CONFIRMING".equals(room.status);
         if (createdByUs) room.startedAt = now;
         room.failures = 0;
