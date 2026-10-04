@@ -12,8 +12,7 @@ jobs:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/commercial-release.jks
+      ANDROID_KEYSTORE_PATH: /tmp/kakaomacro-commercial-release.jks
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,7 +35,7 @@ jobs:
       - name: Decode stable signing key
         shell: bash
         run: |
-          for field in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD ANDROID_API_BASE_URL; do
+          for field in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_API_BASE_URL; do
             test -n "${!field}" || { echo "Missing production setting: $field"; exit 1; }
           done
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"

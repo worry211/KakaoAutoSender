@@ -25,6 +25,7 @@ final class InstallIdentity {
   }
 
   static synchronized String publicKey() throws Exception {
+    AppIntegrity.requireAuthentic();
     KeyStore ks = store();
     if (!ks.containsAlias(ID)) {
       KeyPairGenerator gen = KeyPairGenerator.getInstance("EC", "AndroidKeyStore");
@@ -40,6 +41,7 @@ final class InstallIdentity {
   }
 
   static String sign(String value) throws Exception {
+    AppIntegrity.requireAuthentic();
     publicKey();
     Signature s = Signature.getInstance("SHA256withECDSA");
     s.initSign((java.security.PrivateKey) store().getKey(ID, null));
@@ -72,6 +74,7 @@ final class InstallIdentity {
   }
 
   private static SecretKey vault() throws Exception {
+    AppIntegrity.requireAuthentic();
     KeyStore ks = store();
     if (!ks.containsAlias(VAULT)) {
       KeyGenerator g = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
@@ -88,6 +91,8 @@ final class InstallIdentity {
   }
 
   static void saveTokens(Context c, String access, String refresh) throws Exception {
+    AppIntegrity.initialize(c);
+    AppIntegrity.requireAuthentic();
     Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
     cipher.init(Cipher.ENCRYPT_MODE, vault());
     byte[] encrypted = cipher.doFinal((access + "\n" + refresh).getBytes(StandardCharsets.UTF_8));
@@ -99,6 +104,8 @@ final class InstallIdentity {
 
   static String[] tokens(Context c) {
     try {
+      AppIntegrity.initialize(c);
+      AppIntegrity.requireAuthentic();
       String value = c.getSharedPreferences("entitlement_v2", 0).getString("tokens", "");
       String[] parts = value.split("\\.");
       if (parts.length != 2) return new String[] {"", ""};

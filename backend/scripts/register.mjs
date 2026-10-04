@@ -1,38 +1,84 @@
-// Run locally: Node strips no TS here; wrangler can bundle the shared definition.
-import { execFileSync } from "node:child_process";
-import { readFileSync, unlinkSync } from "node:fs";
+// Register seller-only Discord application commands to exactly one administration guild.
+import { build } from "esbuild";
+import { unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-const root = fileURLToPath(new URL("../", import.meta.url));
-execFileSync(
-  process.platform === "win32" ? "npx.cmd" : "npx",
-  [
-    "esbuild",
-    "src/commands.ts",
-    "--bundle",
-    "--format=esm",
-    "--platform=node",
-    "--outfile=.commands.mjs",
-  ],
-  { cwd: root, stdio: "inherit", shell: process.platform === "win32" },
-);
-const { commands } = await import(new URL("../.commands.mjs", import.meta.url));
-unlinkSync(new URL("../.commands.mjs", import.meta.url));
-const { DISCORD_APPLICATION_ID, DISCORD_BOT_TOKEN } = process.env;
+
+const ADMIN_GUILD_ID = "1550530984783646835";
+const bundleUrl = new URL("../.commands.mjs", import.meta.url);
+
+await build({
+  entryPoints: [fileURLToPath(new URL("../src/commands.ts", import.meta.url))],
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  outfile: fileURLToPath(bundleUrl),
+  logLevel: "info",
+});
+
+const { commands } = await import(bundleUrl.href + `?t=${Date.now()}`);
+unlinkSync(bundleUrl);
+
+const { DISCORD_APPLICATION_ID, DISCORD_BOT_TOKEN, DISCORD_GUILD_ID } =
+  process.env;
+
 if (!DISCORD_APPLICATION_ID || !DISCORD_BOT_TOKEN)
   throw new Error("Set DISCORD_APPLICATION_ID and DISCORD_BOT_TOKEN locally.");
-const response = await fetch(
-  `https://discord.com/api/v10/applications/${DISCORD_APPLICATION_ID}/commands`,
-  {
+
+if (!DISCORD_GUILD_ID || DISCORD_GUILD_ID !== ADMIN_GUILD_ID)
+  throw new Error(
+    `DISCORD_GUILD_ID must be the dedicated seller guild (${ADMIN_GUILD_ID}). Global registration is disabled.`,
+  );
+
+const headers = {
+  Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
+  "Content-Type": "application/json",
+};
+
+async function put(path, body) {
+  const response = await fetch(`https://discord.com/api/v10${path}`, {
     method: "PUT",
-    headers: {
-      Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(commands),
-  },
+    headers,
+    body: JSON.stringify(body),
+  });
+  const raw = await response.text();
+  if (!response.ok)
+    throw new Error(
+      `Discord registration failed: HTTP ${response.status} ${raw}`,
+    );
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error("Discord returned a non-JSON registration response.");
+  }
+}
+
+const registered = await put(
+  `/applications/${DISCORD_APPLICATION_ID}/guilds/${DISCORD_GUILD_ID}/commands`,
+  commands,
 );
-if (!response.ok)
-  throw new Error(`Registration failed: HTTP ${response.status}`);
+
+const command = (name) => registered.find((c) => c.name === name);
+const subcommands = (name) =>
+  (command(name)?.options ?? []).filter((o) => o.type === 1).map((o) => o.name);
+const license = subcommands("license");
+const system = subcommands("system");
+
+if (!license.includes("help") || !system.includes("help")) {
+  throw new Error(
+    `Discord accepted the request but verification failed. license=[${license.join(", ")}], system=[${system.join(", ")}]`,
+  );
+}
+
+// Remove any stale global copies so seller commands are not advertised outside the admin guild.
+const global = await put(
+  `/applications/${DISCORD_APPLICATION_ID}/commands`,
+  [],
+);
+if (!Array.isArray(global) || global.length !== 0)
+  throw new Error("Failed to clear stale global commands.");
+
 console.log(
-  "Registered /license and /system. Enable command access for allowed sellers in Discord Integrations.",
+  `Registered and verified /license and /system (guild ${DISCORD_GUILD_ID}); global command copies cleared.`,
 );
+console.log(`/license: ${license.join(", ")}`);
+console.log(`/system: ${system.join(", ")}`);

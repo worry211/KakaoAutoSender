@@ -10,13 +10,15 @@ android {
         applicationId 'com.local.kakaoautosender'
         minSdk 26
         targetSdk 35
-        versionCode 20
-        versionName '2.0.0'
+        versionCode 23
+        versionName '2.1.2'
         def apiUrl = System.getenv('ANDROID_API_BASE_URL') ?: 'https://license.invalid'
         if (!(apiUrl ==~ /https:\/\/[A-Za-z0-9.-]+(:[0-9]+)?/)) {
             throw new GradleException('ANDROID_API_BASE_URL must be an HTTPS origin without a trailing slash')
         }
         buildConfigField 'String', 'API_BASE_URL', '"' + apiUrl + '"'
+        // Public fingerprint of the stable commercial signing certificate. This is not a secret.
+        buildConfigField 'String', 'EXPECTED_RELEASE_CERT_SHA256', '"7fbfc166fa8a8cc397e17d13ca912f52c37776f3a5f6267261c626ced88ef2d5"'
     }
 
     buildFeatures {
@@ -31,7 +33,10 @@ android {
                 storeFile file(ksPath)
                 storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
                 keyAlias System.getenv('ANDROID_KEY_ALIAS')
-                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+                // The stable commercial keystore uses the same password for the
+                // keystore and its private key entry. Keep CI aligned with that
+                // fixed signing asset instead of maintaining a second password.
+                keyPassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
             }
         }
     }
@@ -54,7 +59,7 @@ android {
 tasks.register('validateReleaseConfiguration') {
     doLast {
         ['ANDROID_API_BASE_URL', 'ANDROID_KEYSTORE_PATH', 'ANDROID_KEYSTORE_PASSWORD',
-         'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD'].each { name ->
+         'ANDROID_KEY_ALIAS'].each { name ->
             if (!System.getenv(name)?.trim()) throw new GradleException('Missing release variable: ' + name)
         }
         if (System.getenv('ANDROID_API_BASE_URL').contains('.invalid')) throw new GradleException('Configure the production API origin')

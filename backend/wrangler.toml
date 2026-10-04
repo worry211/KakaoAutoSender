@@ -6,7 +6,7 @@ workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "kakaomacro-license"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "f206d422-c1be-4c7f-931f-23aa9e5c3c5d"
 migrations_dir = "migrations"
 
 [triggers]
