@@ -109,7 +109,7 @@ public class LicenseActivity extends Activity {
     }
 
     private void openApp() {
-        Intent i = new Intent(this, MainActivityV4.class);
+        Intent i = new Intent(this, HomeActivity.class);
         startActivity(i);
         finish();
     }
