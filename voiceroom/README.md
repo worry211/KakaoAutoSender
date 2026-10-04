@@ -11,7 +11,7 @@
 
 KakaoAutoSender의 launcher/UI/preferences/notification listener/application ID와 공유하지 않는다. 두 앱은 같은 휴대폰에 동시에 설치할 수 있다.
 
-## Account/security model
+## Account model
 
 이 앱은 Kakao ID, 비밀번호, 세션 토큰, 쿠키를 입력받거나 저장하지 않는다. 같은 휴대폰의 공식 KakaoTalk 앱에 이미 로그인된 본인 계정을 사용한다.
 
@@ -28,7 +28,7 @@ KakaoAutoSender의 launcher/UI/preferences/notification listener/application ID�
 9. 모든 ON 방이 `실제 ✓`일 때만 `전체 시작`이 허용된다.
 10. 이후 자동관리는 검증 완료된 방만 직렬(single-flight) 처리한다.
 
-### v0.4.0 -> v0.4.1 trust migration
+### v0.4.0 -> v0.4.1 migration
 
 v0.4.0 실기에서 실제 VoiceRoom이 생성되지 않았는데 `실제 ✓`가 저장되는 오탐이 확인됐다. v0.4.1 첫 실행 시 저장된 v0.4.0 live 검증/시작시간/다음 점검시간을 무효화하고 자동관리를 중지한다. 기존 비파괴 안전 점검 결과는 유지할 수 있지만, v0.4.1 실제 점검을 다시 통과해야 자동관리를 시작할 수 있다.
 
@@ -56,11 +56,11 @@ v0.4.0 실기에서 실제 VoiceRoom이 생성되지 않았는데 `실제 ✓`�
 
 PR CI validates backend plus KakaoAutoSender and VoiceRoom Manager unit tests, lint, debug APKs, and minified release smoke builds. Production VoiceRoom distribution uses `.github/workflows/voiceroom-release.yml` with protected signing secrets, signature verification, and SHA-256 generation.
 
-## Live-device gates before merge/release claim
+## Live-device gates
 
 1. v0.4.1 live `실제 점검`: name injection -> `만들기` -> real VoiceRoom -> strong active proof x2 -> persisted 48h baseline
 2. screen-off unattended wake/recreation on target Samsung firmware
 3. current Kakao in-room speaker/audio control behavior
 4. one-account/device multi-VoiceRoom concurrency behavior
 
-Do not claim those runtime-only gates as verified until they pass on the target phone.
+Runtime-only gates remain pending until they pass on the target phone.
