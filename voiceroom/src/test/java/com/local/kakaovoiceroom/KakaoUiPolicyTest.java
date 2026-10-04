@@ -25,25 +25,30 @@ public class KakaoUiPolicyTest {
         assertTrue(KakaoUiPolicy.roomTitleMatches("거래방", "거래방"));
         assertFalse(KakaoUiPolicy.roomTitleMatches("거래방", "다른 거래방 23"));
         assertFalse(KakaoUiPolicy.roomTitleMatches("1", "11"));
+        assertFalse(KakaoUiPolicy.roomTitleMatches("1", "1 공지"));
     }
 
     @Test
-    public void voiceRoomNameIsNeverBlankAndFitsKakaoLimit() {
+    public void voiceRoomNameIsNeverBlankAndFitsKakaoLimitByCodePoint() {
         assertEquals("보이스룸", KakaoUiPolicy.voiceRoomName("   "));
         assertEquals("1", KakaoUiPolicy.voiceRoomName("1"));
         String result = KakaoUiPolicy.voiceRoomName("12345678901234567890123456789012345");
         assertEquals(30, result.codePointCount(0, result.length()));
+
+        String emojiResult = KakaoUiPolicy.voiceRoomName("가나다라마바사아자차카타파하ABCDEFGHIJKLMNO😀😀😀😀😀");
+        assertTrue(emojiResult.codePointCount(0, emojiResult.length()) <= 30);
+        if (!emojiResult.isEmpty()) {
+            assertFalse(Character.isHighSurrogate(emojiResult.charAt(emojiResult.length() - 1)));
+        }
     }
 
     @Test
-    public void retryBackoffIsBoundedAndIncreasing() {
-        long one = KakaoUiPolicy.retryDelayMs(1);
-        long two = KakaoUiPolicy.retryDelayMs(2);
-        long five = KakaoUiPolicy.retryDelayMs(5);
-        long huge = KakaoUiPolicy.retryDelayMs(100);
-        assertTrue(one > 0L);
-        assertTrue(two >= one);
-        assertTrue(five >= two);
-        assertEquals(huge, KakaoUiPolicy.retryDelayMs(999));
+    public void retryBackoffIsProgressiveAndCapped() {
+        assertEquals(60_000L, KakaoUiPolicy.retryDelayMs(1));
+        assertEquals(180_000L, KakaoUiPolicy.retryDelayMs(2));
+        assertEquals(600_000L, KakaoUiPolicy.retryDelayMs(3));
+        assertEquals(1_800_000L, KakaoUiPolicy.retryDelayMs(4));
+        assertEquals(3_600_000L, KakaoUiPolicy.retryDelayMs(5));
+        assertEquals(3_600_000L, KakaoUiPolicy.retryDelayMs(100));
     }
 }
