@@ -153,9 +153,6 @@ public class WakeActivity extends Activity {
         if (!probe && !manual) room.nextCheckAt = now + VoiceRoomStore.PENDING_TIMEOUT_MS + 5_000L;
         VoiceRoomStore.update(this, room);
 
-        if (manual && !VoiceRoomStore.managerActive(this)) {
-            VoiceRoomStore.setManagerActive(this, true);
-        }
         VoiceRoomStore.setPending(this, room.id,
                 probe ? VoiceRoomStore.MODE_PROBE
                         : (manual ? VoiceRoomStore.MODE_MANUAL : VoiceRoomStore.MODE_AUTO),
