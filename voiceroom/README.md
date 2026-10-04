@@ -13,26 +13,32 @@ It does not share the KakaoAutoSender launcher, UI, preferences, notification-li
 
 The app never asks for a Kakao ID, password, session token, or cookie. It operates only with the account already logged into the official KakaoTalk app on the same phone.
 
-## Current v0.2 scope
+## v0.3 reliability scope
 
 - multiple Open Chat room configs with per-room ON/OFF
 - manager start/stop and persisted lifecycle state
-- separate non-destructive `안전 점검` path: verifies the exact room, opens the room menu/VoiceRoom UI, and stops before pressing the create button
+- separate non-destructive `안전 점검` path: verifies the target room, opens the bottom-left composer `+`, enters the VoiceRoom UI, and stops before pressing a create button
 - explicit warning before `실제 점검`, because it may create a VoiceRoom when none is active
-- strict state-gated UI path: exact room verification -> room menu -> VoiceRoom menu -> create/confirm
-- stronger active-room detection; generic role text alone is not enough to declare a VoiceRoom active
+- strict package gate: delayed Accessibility callbacks never inspect or click a non-Kakao window
+- step de-duplication and one-shot follow-up scheduling so a room/link is not repeatedly clicked
+- Kakao title normalization for Accessibility labels that merge the room title with a participant count (for example `게임방 386`, or `1 1` for a room named `1`)
+- stored `open.kakao.com` links are used as an additional room-entry proof while title matching remains strict for chat-list fallback
+- bottom-left composer action is selected by screen region so the top-right room menu is not mistaken for the VoiceRoom entry path
+- stage-gated flow: target room -> bottom `+` -> VoiceRoom -> create -> confirm -> active verification
+- stage-level timeout diagnostics instead of one generic 60-second failure
+- privacy-preserving diagnostics store booleans such as title/input/open-chat/add/voice/create/active, not chat message text
+- progressive retry backoff for unattended failures: 1m -> 3m -> 10m -> 30m -> 1h
 - 48-hour scheduling with a 5-minute pre-expiry check window and real-UI polling near expiry
 - newly created VoiceRooms always reset their own start baseline
-- Accessibility follow-up stepping so the flow does not depend on every Kakao screen transition emitting a usable event
 - pending-job watchdog and stale-job recovery so a killed/no-event run cannot leave the manager stuck forever
-- scheduled screen wake attempt, secure-lock retry instead of lock-screen bypass
-- temporary global media-volume mute during unattended automatic work, with the prior volume restored on success, failure, stop, stale-job recovery, reboot/update recovery
-- reboot/update schedule recovery
+- reboot/update recovery of an interrupted task
+- scheduled screen wake attempt; secure lock screens are retried, never bypassed
+- temporary global media-volume mute during unattended automatic work, with the prior volume restored on success/failure/stop/recovery
 - exact-alarm and battery/accessibility setup shortcuts
-- unit tests for unknown-start, pre-expiry, final-window and overdue-active scheduling behavior
+- unit tests for title matching, retry policy, unknown-start, pre-expiry, final-window and overdue-active scheduling behavior
 
 ## Important validation gate
 
 KakaoTalk does not provide a public VoiceRoom automation API. Actual labels and accessibility nodes can change by KakaoTalk version/device. Before unattended use, validate one target room on the exact phone and KakaoTalk build with `안전 점검`, then run one explicitly confirmed live check.
 
-The media mute is intentionally global and temporary rather than an unsupported per-app routing trick. The final screen-off wake flow and actual Kakao VoiceRoom sound behavior still need live-device validation before silent unattended operation is declared ready.
+The media mute is intentionally global and temporary rather than an unsupported per-app routing trick. Whether Kakao continues playing VoiceRoom audio after creation, the exact screen-off wake behavior, and any additional confirmation screen still require live-device validation before silent unattended operation is declared ready.
