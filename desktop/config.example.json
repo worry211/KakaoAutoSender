@@ -1,0 +1,21 @@
+{
+  "adb_path": "adb",
+  "device_serial": "",
+  "kakao_package": "com.kakao.talk",
+  "poll_seconds": 15,
+  "room_gap_seconds": 8,
+  "mute_audio": true,
+  "keep_device_awake": true,
+  "rooms": [
+    {
+      "id": "room-a",
+      "title": "여기에 실제 오픈채팅방 이름",
+      "room_url": "",
+      "enabled": true,
+      "reopen_after_seconds": 172800,
+      "precheck_seconds": 300,
+      "unknown_active_probe_seconds": 300,
+      "selectors": {}
+    }
+  ]
+}
