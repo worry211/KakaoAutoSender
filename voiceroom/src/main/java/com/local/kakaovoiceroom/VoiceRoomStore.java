@@ -16,9 +16,12 @@ final class VoiceRoomStore {
     static final long PRECHECK_MS = 5L * 60L * 1000L;
     static final long UNKNOWN_ACTIVE_RECHECK_MS = 30L * 60L * 1000L;
     static final long ERROR_RETRY_MS = 5L * 60L * 1000L;
-    static final long PENDING_TIMEOUT_MS = 75L * 1000L;
+    static final long PENDING_TIMEOUT_MS = 90L * 1000L;
     static final String MODE_AUTO = "AUTO";
     static final String MODE_PROBE = "PROBE";
+    static final String ENTRY_UNKNOWN = "UNKNOWN";
+    static final String ENTRY_DEEPLINK = "DEEPLINK";
+    static final String ENTRY_LAUNCHER = "LAUNCHER";
 
     private static final String PREFS = "voiceroom_manager";
     private static final String KEY_ROOMS = "rooms_json";
@@ -26,6 +29,7 @@ final class VoiceRoomStore {
     private static final String KEY_PENDING_ROOM = "pending_room";
     private static final String KEY_PENDING_AT = "pending_at";
     private static final String KEY_PENDING_MODE = "pending_mode";
+    private static final String KEY_PENDING_ENTRY = "pending_entry";
     private static final String KEY_LAST_STATUS = "last_status";
 
     private VoiceRoomStore() {}
@@ -40,6 +44,8 @@ final class VoiceRoomStore {
         int failures;
         String status;
         String lastError;
+        long stageStartedAt;
+        String lastDiagnostic;
 
         Room copy() {
             Room r = new Room();
@@ -52,6 +58,8 @@ final class VoiceRoomStore {
             r.failures = failures;
             r.status = status;
             r.lastError = lastError;
+            r.stageStartedAt = stageStartedAt;
+            r.lastDiagnostic = lastDiagnostic;
             return r;
         }
     }
@@ -93,6 +101,8 @@ final class VoiceRoomStore {
         room.failures = 0;
         room.status = "NEW";
         room.lastError = "";
+        room.stageStartedAt = 0L;
+        room.lastDiagnostic = "";
         List<Room> rooms = list(context);
         rooms.add(room);
         save(context, rooms);
@@ -140,15 +150,25 @@ final class VoiceRoomStore {
     }
 
     static void setPending(Context context, String roomId) {
-        setPending(context, roomId, MODE_AUTO);
+        setPending(context, roomId, MODE_AUTO, ENTRY_UNKNOWN);
     }
 
     static void setPending(Context context, String roomId, String mode) {
+        setPending(context, roomId, mode, ENTRY_UNKNOWN);
+    }
+
+    static void setPending(Context context, String roomId, String mode, String entry) {
         p(context).edit()
                 .putString(KEY_PENDING_ROOM, roomId == null ? "" : roomId)
                 .putLong(KEY_PENDING_AT, System.currentTimeMillis())
                 .putString(KEY_PENDING_MODE, MODE_PROBE.equals(mode) ? MODE_PROBE : MODE_AUTO)
+                .putString(KEY_PENDING_ENTRY, normalizeEntry(entry))
                 .apply();
+    }
+
+    static void updatePendingEntry(Context context, String entry) {
+        if (pendingRoomId(context).isEmpty()) return;
+        p(context).edit().putString(KEY_PENDING_ENTRY, normalizeEntry(entry)).apply();
     }
 
     static String pendingRoomId(Context context) {
@@ -163,6 +183,15 @@ final class VoiceRoomStore {
     static String pendingMode(Context context) {
         String value = p(context).getString(KEY_PENDING_MODE, MODE_AUTO);
         return MODE_PROBE.equals(value) ? MODE_PROBE : MODE_AUTO;
+    }
+
+    static String pendingEntry(Context context) {
+        String value = p(context).getString(KEY_PENDING_ENTRY, ENTRY_UNKNOWN);
+        return normalizeEntry(value);
+    }
+
+    static boolean pendingEnteredByLink(Context context) {
+        return ENTRY_DEEPLINK.equals(pendingEntry(context));
     }
 
     static boolean isProbePending(Context context) {
@@ -181,6 +210,7 @@ final class VoiceRoomStore {
                 .remove(KEY_PENDING_ROOM)
                 .remove(KEY_PENDING_AT)
                 .remove(KEY_PENDING_MODE)
+                .remove(KEY_PENDING_ENTRY)
                 .apply();
         AudioGuard.restore(context);
     }
@@ -212,6 +242,8 @@ final class VoiceRoomStore {
             o.put("failures", r.failures);
             o.put("status", safe(r.status));
             o.put("lastError", safe(r.lastError));
+            o.put("stageStartedAt", r.stageStartedAt);
+            o.put("lastDiagnostic", safe(r.lastDiagnostic));
         } catch (Exception ignored) {}
         return o;
     }
@@ -227,7 +259,15 @@ final class VoiceRoomStore {
         r.failures = Math.max(0, o.optInt("failures", 0));
         r.status = o.optString("status", "NEW");
         r.lastError = o.optString("lastError", "");
+        r.stageStartedAt = Math.max(0L, o.optLong("stageStartedAt", 0L));
+        r.lastDiagnostic = o.optString("lastDiagnostic", "");
         return r;
+    }
+
+    private static String normalizeEntry(String entry) {
+        if (ENTRY_DEEPLINK.equals(entry)) return ENTRY_DEEPLINK;
+        if (ENTRY_LAUNCHER.equals(entry)) return ENTRY_LAUNCHER;
+        return ENTRY_UNKNOWN;
     }
 
     private static String safe(String s) { return s == null ? "" : s; }
