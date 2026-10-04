@@ -15,6 +15,7 @@ public class BootReceiver extends BroadcastReceiver {
         boolean alarmAccess = AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED.equals(action);
         if (!boot && !updated && !alarmAccess) return;
 
+        AudioGuard.recoverIfStale(context);
         if (boot || updated) recoverInterruptedPending(context, boot ? "재부팅" : "앱 업데이트");
 
         if (!VoiceRoomStore.managerActive(context)) {
