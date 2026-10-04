@@ -4,7 +4,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
 {
     private readonly StateStore _store;
     private readonly KakaoPcAutomation _kakao;
-    private readonly KakaoRoomNavigator _navigator = new();
+    private readonly KakaoWin32Navigator _win32 = new();
     private readonly SemaphoreSlim _singleFlight = new(1, 1);
     private readonly Timer _timer;
     private DesktopState _state;
@@ -47,11 +47,16 @@ public sealed class VoiceRoomCoordinator : IDisposable
     {
         var enabled = _state.Rooms.Where(r => r.Enabled).ToList();
         if (enabled.Count == 0) throw new InvalidOperationException("관리 ON 방이 없어.");
+
+        var missingLinks = enabled.Where(r => !OpenChatLinkRegistry.IsSupported(r.OpenChatUrl)).Select(r => r.Title).ToList();
+        if (missingLinks.Count > 0)
+            throw new InvalidOperationException("오픈채팅 링크 등록이 먼저 필요해: " + string.Join(", ", missingLinks));
+
         var unverified = enabled.Where(r => !r.LiveVerified).Select(r => r.Title).ToList();
         if (unverified.Count > 0) throw new InvalidOperationException("실제 점검이 먼저 필요해: " + string.Join(", ", unverified));
         _state.ManagerActive = true;
         PowerPolicy.SetKeepSystemAwake(true);
-        _state.LastStatus = "Windows 보이스룸 자동관리 시작 · PC 절전만 방지, 모니터 OFF 허용";
+        _state.LastStatus = "Windows 보이스룸 자동관리 시작 · 링크 우선 진입 · PC 절전만 방지, 모니터 OFF 허용";
         var now = DateTimeOffset.Now;
         foreach (var room in enabled)
             room.NextCheckAt ??= now.AddSeconds(3);
@@ -139,6 +144,9 @@ public sealed class VoiceRoomCoordinator : IDisposable
         if (DesktopSession.IsLocked())
             return new(false, "Windows 잠금 상태 · 정상 잠금 해제 후 다시 시도");
 
+        if (!OpenChatLinkRegistry.IsSupported(room.OpenChatUrl))
+            return new(false, "오픈채팅 링크 미등록 · 링크 설정에서 https://open.kakao.com/o/... 링크를 등록해");
+
         var launch = _kakao.EnsureKakaoRunning();
         if (!launch.Success) return launch;
         Thread.Sleep(450);
@@ -147,17 +155,14 @@ public sealed class VoiceRoomCoordinator : IDisposable
         if (link.Success)
             return new(true, link.Diagnostic);
 
-        var navigation = _navigator.OpenRoom(room.Title);
+        // Some Windows/browser configurations open the web landing page but do not hand off
+        // to KakaoTalk. In that case use the verified Win32 HWND search path, never the old
+        // empty-UIA room navigator.
+        var navigation = _win32.OpenRoom(room.Title);
         if (!navigation.Success)
-        {
-            var prefix = link.Attempted ? link.Diagnostic + " → " : "";
-            return new(false, "방 진입 실패 · " + prefix + navigation.Diagnostic);
-        }
+            return new(false, "방 진입 실패 · " + link.Diagnostic + " → Win32 fallback 실패 · " + navigation.Diagnostic);
 
-        var fallback = link.Attempted
-            ? link.Diagnostic + " → Win32 검색 fallback 성공 · " + navigation.Diagnostic
-            : navigation.Diagnostic;
-        return new(true, fallback);
+        return new(true, link.Diagnostic + " → Win32 검색 fallback 성공 · " + navigation.Diagnostic);
     }
 
     private void ApplyResult(RoomState room, KakaoPcAutomation.Result result, bool manual)
