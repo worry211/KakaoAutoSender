@@ -62,6 +62,15 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                     skippedForLimit = true;
                 } else {
                     attempted = true;
+
+                    // Advance the persisted schedule before touching Kakao. If Android kills
+                    // this process after the reply is accepted but before our success bookkeeping,
+                    // the same due item will not immediately be sent a second time on restart.
+                    long reservedNext = MultiRoomStore.computeNextAt(profile, System.currentTimeMillis());
+                    MultiRoomStore.Profile reserved = profile.copy();
+                    reserved.nextAt = reservedNext;
+                    MultiRoomStore.upsert(app, reserved);
+
                     for (int i = 0; i < 3 && !sent; i++) {
                         if (!Prefs.p(app).getBoolean(Prefs.KEY_ACTIVE, false)) break;
                         sent = KakaoNotificationListener.sendToRoom(app, profile.room, profile.message);
@@ -77,15 +86,14 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                         }
                     }
 
-                    long next = MultiRoomStore.computeNextAt(profile, System.currentTimeMillis());
                     if (sent) {
-                        MultiRoomStore.markSuccess(app, profile.room, next,
+                        MultiRoomStore.markSuccess(app, profile.room, reservedNext,
                                 "자동전송 성공: " + visibleName);
                     } else {
                         String recovery = KakaoNotificationListener.hasStoredBinding(app, profile.room)
                                 ? "자동복구 정보 있음 · 같은 방 새 알림 대기"
                                 : "새 알림에서 이 방을 다시 연결 필요";
-                        MultiRoomStore.markFailure(app, profile.room, next,
+                        MultiRoomStore.markFailure(app, profile.room, reservedNext,
                                 "자동전송 실패: " + visibleName + " · " + failureReason + " · " + recovery);
                     }
                 }
