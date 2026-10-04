@@ -16,6 +16,13 @@ public class BootReceiver extends BroadcastReceiver {
         Prefs.ensureLabelSchema(context);
         MultiRoomStore.ensureMigrated(context);
 
+        if (!LicenseManager.isUsable(context)) {
+            Prefs.p(context).edit().putBoolean(Prefs.KEY_ACTIVE, false).apply();
+            SendScheduler.cancel(context);
+            Prefs.setStatus(context, "라이선스 인증 필요 · 재부팅 후 자동전송 복구 안 함");
+            return;
+        }
+
         if (Prefs.p(context).getBoolean(Prefs.KEY_ACTIVE, false)) {
             MultiRoomStore.repairNextTimesAfterRestore(context);
             SendScheduler.scheduleNext(context);
