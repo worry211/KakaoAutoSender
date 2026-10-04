@@ -80,12 +80,9 @@ internal static class KakaoOpenChatEntry
         DesktopSession.ActivateWindow(main);
         Thread.Sleep(180);
 
-        if (HasVisibleChatComposer(main))
-        {
-            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
-            return new(true, true, "카카오 메인창에 이미 실제 채팅 입력창이 확인됨");
-        }
-
+        // Never accept an already-visible composer as proof by itself: the user may have had a
+        // different room open before this link was launched. We only mark the room after an
+        // explicit OpenChat cover action has been found and invoked.
         var semantic = FindSemanticEntry(main, out var semanticDiag);
         if (semantic is not null)
         {
