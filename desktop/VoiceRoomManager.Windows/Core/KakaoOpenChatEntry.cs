@@ -1,8 +1,8 @@
 namespace VoiceRoomManager.Windows.Core;
 
 /// <summary>
-/// Compatibility facade for older call sites. Entry is now a two-stage verified bridge:
-/// Kakao preview first, then browser OpenChat landing visual fallback, then Kakao preview again.
+/// Unified OpenChat entry bridge. It first tries semantic/Win32 Kakao entry, then the verified
+/// Kakao-yellow visual fallback, then the browser landing visual fallback and repeats Kakao entry.
 /// </summary>
 internal static class KakaoOpenChatEntry
 {
@@ -17,13 +17,20 @@ internal static class KakaoOpenChatEntry
             return new(preview.Attempted, true, preview.Diagnostic);
         }
 
+        var kakaoVisual = KakaoPreviewVisualFallback.TryEnter(room.Title);
+        if (kakaoVisual.Success)
+        {
+            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
+            return new(true, true, "visualKakao=" + kakaoVisual.Diagnostic);
+        }
+
         var browser = BrowserOpenChatVisualBridge.TryInvokeJoin();
         if (!browser.Clicked)
-            return new(preview.Attempted || browser.Attempted, false,
-                "preview=" + preview.Diagnostic + " · browser=" + browser.Diagnostic);
+            return new(preview.Attempted || kakaoVisual.Attempted || browser.Attempted, false,
+                "preview=" + preview.Diagnostic + " · visualKakao=" + kakaoVisual.Diagnostic + " · browser=" + browser.Diagnostic);
 
-        // Give the browser -> Kakao handoff enough time to materialize the Kakao preview surface.
         Thread.Sleep(900);
+
         var second = KakaoOpenChatPreviewBridge.TryEnter(room.Title);
         if (second.Success)
         {
@@ -31,8 +38,16 @@ internal static class KakaoOpenChatEntry
             return new(true, true, browser.Diagnostic + " → " + second.Diagnostic);
         }
 
+        var secondVisual = KakaoPreviewVisualFallback.TryEnter(room.Title);
+        if (secondVisual.Success)
+        {
+            OpenChatLinkRegistry.MarkVerifiedEntry(room.Title);
+            return new(true, true, browser.Diagnostic + " → visualKakao=" + secondVisual.Diagnostic);
+        }
+
         return new(true, false,
-            browser.Diagnostic + " → 카카오 전환 후 입장 실패 · " + second.Diagnostic);
+            browser.Diagnostic + " → 카카오 전환 후 입장 실패 · preview=" + second.Diagnostic +
+            " · visualKakao=" + secondVisual.Diagnostic);
     }
 
     public static bool HasVisibleChatComposer(IntPtr ignored)
