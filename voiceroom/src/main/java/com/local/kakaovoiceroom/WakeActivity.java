@@ -37,7 +37,8 @@ public class WakeActivity extends Activity {
 
         String roomId = source == null ? "" : source.getStringExtra(VoiceRoomScheduler.EXTRA_ROOM_ID);
         VoiceRoomStore.Room room = VoiceRoomStore.get(this, roomId);
-        if (room == null || (!room.enabled && !probe && !manual)) {
+        if (room == null || (!room.enabled && !probe && !manual)
+                || (!probe && !manual && !room.liveCheckPassed)) {
             VoiceRoomStore.clearPending(this);
             AudioGuard.restore(this);
             VoiceRoomScheduler.scheduleNext(this);
@@ -69,21 +70,17 @@ public class WakeActivity extends Activity {
                 if (staleProbe) {
                     stale.status = "PROBE_ERROR";
                     stale.lastError = "안전 인식 점검이 응답 없이 종료됨";
-                    VoiceRoomStore.update(this, stale);
-                    VoiceRoomStore.setLastStatus(this, stale.title + " · 안전 인식 점검 실패");
                 } else if (staleManual) {
                     stale.status = "MANUAL_ERROR";
                     stale.lastError = "실제 점검이 응답 없이 종료됨";
-                    VoiceRoomStore.update(this, stale);
-                    VoiceRoomStore.setLastStatus(this, stale.title + " · 실제 점검 실패");
                 } else {
                     stale.failures += 1;
                     stale.status = "ERROR";
                     stale.lastError = "이전 자동화 작업이 응답 없이 종료됨";
                     stale.nextCheckAt = System.currentTimeMillis() + KakaoUiPolicy.retryDelayMs(stale.failures);
-                    VoiceRoomStore.update(this, stale);
-                    VoiceRoomStore.setLastStatus(this, stale.title + " · 이전 작업 복구 후 재시도 예정");
                 }
+                VoiceRoomStore.update(this, stale);
+                VoiceRoomStore.setLastStatus(this, stale.title + " · 중단된 이전 작업 정리");
             }
             VoiceRoomScheduler.scheduleNext(this);
             if (!probe && !manual) {
@@ -116,8 +113,8 @@ public class WakeActivity extends Activity {
         }
 
         String currentStatus = room.status == null ? "" : room.status;
-        boolean directAction = manual || "NEW".equals(currentStatus) || "CHECK_DUE".equals(currentStatus);
-        if (!probe && wasInteractive && !directAction) {
+        boolean directAction = probe || manual || "NEW".equals(currentStatus) || "CHECK_DUE".equals(currentStatus);
+        if (!probe && !manual && wasInteractive && !directAction) {
             room.status = currentStatus.isEmpty() ? "CHECK_DUE" : currentStatus;
             room.stageStartedAt = 0L;
             room.lastError = "";
