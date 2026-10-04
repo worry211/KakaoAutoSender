@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 
+import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
@@ -50,6 +51,23 @@ final class KakaoMessageSender {
             if (!"content".equals(uri.getScheme())) throw new IllegalArgumentException("SAF content URI required");
         } catch (Throwable t) {
             lastError = "선택한 사진 주소가 유효하지 않음";
+            return false;
+        }
+
+        // Fail closed before invoking Kakao. A persisted URI may point to a deleted/moved file or
+        // may have lost its SAF grant after provider changes. Never report success or fall back to
+        // text-only when the configured image cannot actually be opened now.
+        try (android.os.ParcelFileDescriptor descriptor =
+                     context.getContentResolver().openFileDescriptor(uri, "r")) {
+            if (descriptor == null) throw new FileNotFoundException("photo unavailable");
+        } catch (SecurityException e) {
+            lastError = "사진 읽기 권한이 만료되었습니다. 사진을 다시 선택해 주세요.";
+            return false;
+        } catch (FileNotFoundException e) {
+            lastError = "선택한 사진을 찾을 수 없습니다. 삭제·이동 여부를 확인하고 다시 선택해 주세요.";
+            return false;
+        } catch (Throwable t) {
+            lastError = "선택한 사진을 읽을 수 없습니다. 사진을 다시 선택해 주세요.";
             return false;
         }
 
