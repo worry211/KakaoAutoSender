@@ -6,6 +6,11 @@ using Microsoft.Win32;
 
 namespace VoiceRoomManager.Windows.Core;
 
+/// <summary>
+/// KakaoTalk Windows automation.
+/// Room navigation is Win32-HWND-first because current Kakao main UI can expose an empty UIA tree.
+/// VoiceRoom controls still prefer semantic UI Automation and fail closed when Kakao does not expose them.
+/// </summary>
 public sealed class KakaoPcAutomation
 {
     private static readonly string[] KakaoCandidates =
@@ -14,6 +19,8 @@ public sealed class KakaoPcAutomation
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Kakao", "KakaoTalk", "KakaoTalk.exe"),
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Kakao", "KakaoTalk", "KakaoTalk.exe")
     ];
+
+    private readonly KakaoWin32Navigator _win32 = new();
 
     public sealed record Result(
         bool Success,
@@ -47,74 +54,83 @@ public sealed class KakaoPcAutomation
     public Result SafeProbe(RoomState room)
     {
         if (DesktopSession.IsLocked()) return new(false, "Windows가 잠겨 있어 UI 자동화를 대기함");
-        var surfaces = GetKakaoSurfaces(activateMain: true, out var error);
-        var main = PrimarySurface(surfaces);
-        if (main is null) return new(false, error);
-        if (!OpenRoom(main, room.Title, out var roomDiag)) return new(false, "방 진입 실패 · " + roomDiag);
-        Thread.Sleep(700);
-        surfaces = GetKakaoSurfaces(activateMain: false, out error);
-        if (surfaces.Count == 0) return new(false, error);
 
-        if (HasStrongActiveProof(surfaces)) return new(true, "기존 보이스룸 활성 화면 확인", true);
+        var nav = _win32.OpenRoom(room.Title);
+        if (!nav.Success) return new(false, "방 진입 실패 · " + nav.Diagnostic);
+        Thread.Sleep(650);
+
+        var surfaces = GetKakaoSurfaces(activateMain: false, out var error);
+        if (surfaces.Count == 0) return new(false, error + " · " + _win32.DiagnosticSnapshot());
+
+        if (HasStrongActiveProof(surfaces))
+            return new(true, "기존 보이스룸 활성 화면 확인 · " + nav.Diagnostic, true);
+
         var voice = FindClickableByNames(surfaces, "보이스룸", "보이스룸 시작", "보이스룸 만들기");
-        if (voice is null) return new(false, "현재 PC 카카오 UI에서 보이스룸 버튼을 찾지 못함");
-        return new(true, "방/보이스룸 컨트롤 인식 성공 · 생성은 하지 않음");
+        if (voice is null)
+            return new(false, "방 진입은 Win32로 검증 성공했지만 보이스룸 컨트롤이 UIA에 노출되지 않음 · " + _win32.DiagnosticSnapshot());
+
+        return new(true, "방 진입/보이스룸 컨트롤 인식 성공 · 생성은 하지 않음");
     }
 
     public Result EnsureVoiceRoom(RoomState room)
     {
         if (DesktopSession.IsLocked()) return new(false, "Windows가 잠겨 있어 자동화를 대기함");
-        var surfaces = GetKakaoSurfaces(activateMain: true, out var error);
-        var main = PrimarySurface(surfaces);
-        if (main is null) return new(false, error);
-        if (!OpenRoom(main, room.Title, out var roomDiag)) return new(false, "방 진입 실패 · " + roomDiag);
-        Thread.Sleep(700);
-        surfaces = GetKakaoSurfaces(activateMain: false, out error);
-        if (surfaces.Count == 0) return new(false, error);
+
+        var nav = _win32.OpenRoom(room.Title);
+        if (!nav.Success) return new(false, "방 진입 실패 · " + nav.Diagnostic);
+        Thread.Sleep(650);
+
+        var surfaces = GetKakaoSurfaces(activateMain: false, out var error);
+        if (surfaces.Count == 0) return new(false, error + " · " + _win32.DiagnosticSnapshot());
 
         if (HasStrongActiveProof(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
 
         var voice = FindClickableByNames(surfaces, "보이스룸", "보이스룸 시작", "보이스룸 만들기");
-        if (voice is null || !Invoke(voice)) return new(false, "보이스룸 메뉴 진입 실패");
-        Thread.Sleep(700);
+        if (voice is null)
+            return new(false, "방 진입은 성공했지만 보이스룸 메뉴가 UIA에 노출되지 않음 · " + _win32.DiagnosticSnapshot());
+        if (!Invoke(voice)) return new(false, "보이스룸 메뉴 호출 실패");
+        Thread.Sleep(650);
 
         surfaces = GetKakaoSurfaces(activateMain: false, out error);
         if (surfaces.Count == 0) return new(false, error);
         if (HasStrongActiveProof(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
 
+        // Some builds expose a first VoiceRoom menu item and then a separate create dialog.
         if (FindByNameContains(surfaces, "보이스룸 만들기") is null)
         {
             var createMenu = FindClickableByNames(surfaces, "보이스룸 만들기", "만들기");
             if (createMenu is not null && Invoke(createMenu))
             {
-                Thread.Sleep(600);
+                Thread.Sleep(550);
                 surfaces = GetKakaoSurfaces(activateMain: false, out error);
                 if (surfaces.Count == 0) return new(false, error);
             }
         }
 
-        var edit = FindEditable(surfaces);
-        if (edit is null) return new(false, "보이스룸 이름 입력칸을 찾지 못함");
+        var edit = FindBestEditable(surfaces);
+        if (edit is null) return new(false, "보이스룸 이름 입력칸을 찾지 못함 · " + SurfaceDiagnostic(surfaces));
         var voiceName = TruncateCodePoints(room.Title.Trim().Length == 0 ? "보이스룸" : room.Title.Trim(), 30);
         if (!SetValue(edit, voiceName)) return new(false, "보이스룸 이름 입력 실패");
-        Thread.Sleep(350);
+        Thread.Sleep(320);
 
         surfaces = GetKakaoSurfaces(activateMain: false, out error);
-        var create = FindClickableByNames(surfaces, "만들기", "보이스룸 만들기");
-        if (create is null || !Invoke(create)) return new(false, "활성화된 만들기 버튼을 찾지 못함");
+        var create = FindClickableExact(surfaces, "만들기", "보이스룸 만들기")
+            ?? FindClickableByNames(surfaces, "만들기", "보이스룸 만들기");
+        if (create is null || !Invoke(create)) return new(false, "활성화된 만들기 버튼을 찾지 못함 · " + SurfaceDiagnostic(surfaces));
 
-        for (var i = 0; i < 12; i++)
+        for (var i = 0; i < 14; i++)
         {
-            Thread.Sleep(500);
+            Thread.Sleep(450);
             surfaces = GetKakaoSurfaces(activateMain: false, out _);
             if (!HasStrongActiveProof(surfaces)) continue;
-            Thread.Sleep(350);
+            Thread.Sleep(300);
             surfaces = GetKakaoSurfaces(activateMain: false, out _);
             if (!HasStrongActiveProof(surfaces)) continue;
             var protectedResult = ProtectAudio(surfaces, "보이스룸 생성/활성 확인");
             return protectedResult with { Created = true };
         }
-        return new(false, "만들기 이후 보이스룸 활성 증거를 확인하지 못함");
+
+        return new(false, "만들기 이후 보이스룸 활성 증거를 2회 확인하지 못함 · " + SurfaceDiagnostic(surfaces));
     }
 
     public Result RuntimeGuard(RoomState room)
@@ -123,7 +139,7 @@ public sealed class KakaoPcAutomation
         var surfaces = GetKakaoSurfaces(activateMain: false, out var error);
         if (surfaces.Count == 0) return new(false, error);
 
-        var scoped = surfaces.Where(root => WindowContainsRoom(root, room.Title) || HasStrongActiveProof([root])).ToList();
+        var scoped = surfaces.Where(root => RootLooksLikeRoom(root, room.Title) || HasStrongActiveProof(root)).ToList();
         if (scoped.Count == 0) return new(false, "관리 보이스룸 화면이 아님");
 
         foreach (var root in scoped)
@@ -156,7 +172,7 @@ public sealed class KakaoPcAutomation
         var micOnAction = FindClickableExact(roots, "마이크 켜기", "마이크 음소거 해제");
         if (micOffAction is not null)
         {
-            if (Invoke(micOffAction)) { repaired = true; micMuted = true; Thread.Sleep(180); }
+            if (Invoke(micOffAction)) { repaired = true; micMuted = true; Thread.Sleep(160); }
         }
         else if (micOnAction is not null) micMuted = true;
 
@@ -164,7 +180,7 @@ public sealed class KakaoPcAutomation
         var speakerOnAction = FindClickableExact(roots, "스피커 켜기", "스피커 음소거 해제", "소리 켜기");
         if (speakerOffAction is not null)
         {
-            if (Invoke(speakerOffAction)) { repaired = true; speakerMuted = true; Thread.Sleep(180); }
+            if (Invoke(speakerOffAction)) { repaired = true; speakerMuted = true; Thread.Sleep(160); }
         }
         else if (speakerOnAction is not null) speakerMuted = true;
 
@@ -204,7 +220,7 @@ public sealed class KakaoPcAutomation
             if (mainProcess is not null)
             {
                 DesktopSession.ActivateWindow(mainProcess.MainWindowHandle);
-                Thread.Sleep(120);
+                Thread.Sleep(100);
             }
         }
 
@@ -215,7 +231,8 @@ public sealed class KakaoPcAutomation
             {
                 var condition = new PropertyCondition(AutomationElement.ProcessIdProperty, process.Id);
                 var topLevels = AutomationElement.RootElement.FindAll(TreeScope.Children, condition);
-                foreach (AutomationElement top in topLevels) roots.Add(top);
+                foreach (AutomationElement top in topLevels)
+                    if (!roots.Any(r => SameRuntimeId(r, top))) roots.Add(top);
             }
             catch { }
 
@@ -234,88 +251,10 @@ public sealed class KakaoPcAutomation
         return roots;
     }
 
-    private static AutomationElement? PrimarySurface(IReadOnlyCollection<AutomationElement> roots)
-    {
-        AutomationElement? best = null;
-        double bestArea = -1;
-        foreach (var root in roots)
-        {
-            try
-            {
-                var b = root.Current.BoundingRectangle;
-                var area = Math.Max(0, b.Width) * Math.Max(0, b.Height);
-                if (area > bestArea) { bestArea = area; best = root; }
-            }
-            catch { }
-        }
-        return best ?? roots.FirstOrDefault();
-    }
-
     private static bool SameRuntimeId(AutomationElement a, AutomationElement b)
     {
-        try
-        {
-            var x = a.GetRuntimeId();
-            var y = b.GetRuntimeId();
-            return x.SequenceEqual(y);
-        }
+        try { return a.GetRuntimeId().SequenceEqual(b.GetRuntimeId()); }
         catch { return false; }
-    }
-
-    private static bool OpenRoom(AutomationElement root, string title, out string diagnostic)
-    {
-        diagnostic = "";
-        if (WindowContainsRoom(root, title) && FindByNameContains(root, "메시지", "채팅 입력") is not null)
-        {
-            diagnostic = "이미 대상 방";
-            return true;
-        }
-
-        var matches = Elements(root)
-            .Where(e => RoomTitleMatches(title, SafeName(e)))
-            .Select(e => new { Clickable = ClickableAncestor(e), Score = RoomCandidateScore(e) })
-            .Where(x => x.Clickable is not null)
-            .OrderByDescending(x => x.Score)
-            .ToList();
-        if (matches.Count == 0)
-        {
-            diagnostic = "방 제목 UI를 찾지 못함";
-            return false;
-        }
-        if (!Invoke(matches[0].Clickable!))
-        {
-            diagnostic = "방 제목은 찾았지만 클릭하지 못함";
-            return false;
-        }
-        diagnostic = "방 제목 UI 클릭";
-        return true;
-    }
-
-    private static int RoomCandidateScore(AutomationElement e)
-    {
-        try
-        {
-            var type = e.Current.ControlType;
-            if (type == ControlType.ListItem) return 100;
-            if (type == ControlType.Button) return 80;
-            if (type == ControlType.Text) return 40;
-        }
-        catch { }
-        return 10;
-    }
-
-    private static bool WindowContainsRoom(AutomationElement root, string title) =>
-        Elements(root).Any(e => RoomTitleMatches(title, SafeName(e)));
-
-    private static bool RoomTitleMatches(string expected, string visible)
-    {
-        var want = Normalize(expected);
-        var got = Normalize(visible);
-        if (want.Length == 0 || got.Length == 0) return false;
-        if (string.Equals(want, got, StringComparison.Ordinal)) return true;
-        if (!got.StartsWith(want + " ", StringComparison.Ordinal)) return false;
-        var suffix = got[want.Length..].Trim().Replace(",", "");
-        return suffix.Length > 0 && suffix.All(char.IsDigit);
     }
 
     private static bool HasStrongActiveProof(IReadOnlyCollection<AutomationElement> roots) => roots.Any(HasStrongActiveProof);
@@ -329,19 +268,40 @@ public sealed class KakaoPcAutomation
         return hasAudio && hasVoice;
     }
 
-    private static AutomationElement? FindEditable(IEnumerable<AutomationElement> roots)
+    private static bool RootLooksLikeRoom(AutomationElement root, string title)
     {
+        var wanted = Normalize(title);
+        try
+        {
+            var rootName = Normalize(root.Current.Name);
+            if (rootName == wanted) return true;
+        }
+        catch { }
+        return Elements(root).Any(e => Normalize(SafeName(e)) == wanted);
+    }
+
+    private static AutomationElement? FindBestEditable(IEnumerable<AutomationElement> roots)
+    {
+        AutomationElement? best = null;
+        var bestScore = int.MinValue;
         foreach (var root in roots)
         foreach (var e in Elements(root))
         {
             try
             {
                 if (e.Current.ControlType != ControlType.Edit || !e.Current.IsEnabled) continue;
-                if (e.TryGetCurrentPattern(ValuePattern.Pattern, out _)) return e;
+                if (!e.TryGetCurrentPattern(ValuePattern.Pattern, out _)) continue;
+                var name = Normalize(SafeName(e));
+                var score = 0;
+                if (name.Contains("보이스룸", StringComparison.Ordinal)) score += 100;
+                if (name.Contains("이름", StringComparison.Ordinal)) score += 80;
+                var b = e.Current.BoundingRectangle;
+                if (!b.IsEmpty && b.Width > 100 && b.Height > 20) score += 20;
+                if (score > bestScore) { best = e; bestScore = score; }
             }
             catch { }
         }
-        return null;
+        return best;
     }
 
     private static AutomationElement? FindClickableByNames(IEnumerable<AutomationElement> roots, params string[] names)
@@ -356,12 +316,12 @@ public sealed class KakaoPcAutomation
 
     private static AutomationElement? FindClickableByNames(AutomationElement root, params string[] names)
     {
+        var normalized = names.Select(Normalize).ToArray();
         foreach (var e in Elements(root))
         {
             var name = Normalize(SafeName(e));
             if (name.Length == 0) continue;
-            if (!names.Any(n => string.Equals(name, Normalize(n), StringComparison.Ordinal)
-                || name.Contains(Normalize(n), StringComparison.Ordinal))) continue;
+            if (!normalized.Any(n => name == n || name.Contains(n, StringComparison.Ordinal))) continue;
             var clickable = ClickableAncestor(e);
             if (clickable is not null) return clickable;
         }
@@ -385,7 +345,7 @@ public sealed class KakaoPcAutomation
 
     private static AutomationElement? FindExplicitRejectNear(AutomationElement context)
     {
-        var root = context;
+        AutomationElement? root = context;
         for (var level = 0; level < 5 && root is not null; level++)
         {
             var reject = FindClickableExact([root], "거절", "거부", "스피커 요청 거절", "스피커 요청 거부",
@@ -409,11 +369,12 @@ public sealed class KakaoPcAutomation
 
     private static AutomationElement? FindByNameContains(AutomationElement root, params string[] terms)
     {
+        var normalized = terms.Select(Normalize).ToArray();
         foreach (var e in Elements(root))
         {
             var name = Normalize(SafeName(e));
             if (name.Length == 0) continue;
-            if (terms.Any(t => name.Contains(Normalize(t), StringComparison.Ordinal))) return e;
+            if (normalized.Any(t => name.Contains(t, StringComparison.Ordinal))) return e;
         }
         return null;
     }
@@ -428,8 +389,8 @@ public sealed class KakaoPcAutomation
 
     private static AutomationElement? ClickableAncestor(AutomationElement element)
     {
-        var current = element;
-        for (var i = 0; i < 6 && current is not null; i++)
+        AutomationElement? current = element;
+        for (var i = 0; i < 7 && current is not null; i++)
         {
             try
             {
@@ -474,10 +435,21 @@ public sealed class KakaoPcAutomation
 
     private static string SafeName(AutomationElement e)
     {
-        try { return e.Current.Name ?? ""; } catch { return ""; }
+        try { return e.Current.Name ?? ""; }
+        catch { return ""; }
     }
 
-    private static string Normalize(string? value) => string.Join(' ', (value ?? "").Replace('\u00A0', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    private static string SurfaceDiagnostic(IEnumerable<AutomationElement> roots)
+    {
+        var all = roots.SelectMany(root => new[] { root }.Concat(Elements(root))).ToList();
+        var buttons = all.Count(e => { try { return e.Current.ControlType == ControlType.Button; } catch { return false; } });
+        var edits = all.Count(e => { try { return e.Current.ControlType == ControlType.Edit; } catch { return false; } });
+        var names = all.Select(SafeName).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Take(8).ToArray();
+        return $"uiaRoots={roots.Count()} buttons={buttons} edits={edits} names={string.Join('|', names)}";
+    }
+
+    private static string Normalize(string? value) =>
+        string.Join(' ', (value ?? "").Replace('\u00A0', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries));
 
     private static string TruncateCodePoints(string value, int max)
     {
