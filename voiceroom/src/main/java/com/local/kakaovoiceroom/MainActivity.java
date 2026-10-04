@@ -151,7 +151,7 @@ public class MainActivity extends Activity {
         screenOffTest.setOnClickListener(v -> scheduleQuickAutoTest());
         root.addView(screenOffTest, top(7));
 
-        TextView note = text("‘관리 OFF’는 보이스룸 종료가 아니라 48시간 자동 재점검/재개설만 끈 상태야. 실제 점검은 보룸 활성 확인과 함께 가능한 경우 카카오 내부 마이크·스피커를 안전 상태로 맞춰.", 11, false);
+        TextView note = text("‘관리 OFF’는 보이스룸 종료가 아니라 48시간 자동 재점검/재개설만 끈 상태야. 전체 시작 중에는 마이크·스피커 무음 상태를 보호하고, 카카오가 명확한 스피커 요청 차단 토글을 보여주면 자동으로 끄며, 들어온 스피커 요청은 ‘거절/거부’가 확실할 때만 자동 거절해.", 11, false);
         note.setTextColor(Color.rgb(132, 138, 150));
         root.addView(note, top(14));
 
@@ -178,7 +178,7 @@ public class MainActivity extends Activity {
         }
 
         if (active) {
-            masterStatus.setText("● 보이스룸 자동관리 실행 중");
+            masterStatus.setText("● 보이스룸 자동관리 실행 중 · 요청 보호 ON");
             masterStatus.setTextColor(Color.rgb(93, 224, 148));
         } else if (liveCount > 0) {
             masterStatus.setText("● 보이스룸 " + liveCount + "개 활성 · 자동관리 꺼짐");
@@ -189,9 +189,10 @@ public class MainActivity extends Activity {
         }
 
         String audioSummary = liveCount <= 0 ? "" : "  ·  오디오 보호 " + audioProtected + "/" + liveCount;
+        String requestSummary = active ? "  ·  스피커 요청 자동거절" : "";
         systemStatus.setText("접근성 " + (accessibility ? "정상" : "설정 필요")
                 + "  ·  카카오톡 " + (kakao ? "확인" : "미설치")
-                + "  ·  알람 " + (exact ? "정확" : "근사") + audioSummary);
+                + "  ·  알람 " + (exact ? "정확" : "근사") + audioSummary + requestSummary);
         startButton.setEnabled(!active);
         stopButton.setEnabled(active);
 
@@ -209,8 +210,13 @@ public class MainActivity extends Activity {
 
         String last = VoiceRoomStore.lastStatus(this);
         String busy = VoiceRoomStore.pendingRoomId(this).isEmpty() ? "" : " · 작업 처리 중";
+        int rejected = VoiceRoomRuntimeGuard.rejectedCount(this);
+        int requestBlocks = VoiceRoomRuntimeGuard.requestToggleDisableCount(this);
+        int audioFixes = VoiceRoomRuntimeGuard.passiveAudioFixCount(this);
+        String guard = "\n런타임 보호  요청거절 " + rejected + "회 · 요청차단 " + requestBlocks
+                + "회 · 오디오 재보호 " + audioFixes + "회";
         footerStatus.setText("v" + BuildConfig.VERSION_NAME + " · 등록 " + rooms.size() + "개" + busy
-                + (last.isEmpty() ? "" : "\n최근  " + last));
+                + guard + (last.isEmpty() ? "" : "\n최근  " + last));
     }
 
     private View roomCard(VoiceRoomStore.Room room) {
@@ -246,6 +252,13 @@ public class MainActivity extends Activity {
             audioView.setTextColor(room.micMuted && room.speakerMuted
                     ? Color.rgb(102, 205, 145) : Color.rgb(222, 190, 98));
             card.addView(audioView, top(5));
+
+            TextView requestGuard = text("스피커 요청  "
+                    + (VoiceRoomStore.managerActive(this) && room.enabled
+                    ? "자동 차단/거절 보호 중" : "전체 시작 시 자동 보호"), 11, true);
+            requestGuard.setTextColor(VoiceRoomStore.managerActive(this) && room.enabled
+                    ? Color.rgb(102, 205, 145) : Color.rgb(155, 161, 173));
+            card.addView(requestGuard, top(5));
         }
 
         if (room.liveCheckPassed && !room.enabled) {
@@ -286,8 +299,8 @@ public class MainActivity extends Activity {
             VoiceRoomStore.update(this, current);
             VoiceRoomScheduler.scheduleNext(this);
             toast(current.enabled
-                    ? "이 방의 자동 재점검/재개설을 사용해."
-                    : "보룸은 유지하고 자동 재개설만 껐어.");
+                    ? "이 방의 자동 재점검/재개설과 스피커 요청 보호를 사용해."
+                    : "보룸은 유지하고 자동 재개설/요청 보호만 껐어.");
             refreshUi();
         });
         actions.addView(toggle, weight());
@@ -600,8 +613,8 @@ public class MainActivity extends Activity {
         }
         VoiceRoomStore.setManagerActive(this, true);
         VoiceRoomStore.setLastStatus(this, audioNeedsAttention
-                ? "자동관리 시작 · 일부 방 오디오 보호 상태는 다음 점검에서 재확인"
-                : "검증된 방 보이스룸 자동관리 시작");
+                ? "자동관리/스피커 요청 보호 시작 · 일부 방 오디오 상태는 다음 점검에서 재확인"
+                : "검증된 방 자동관리 시작 · 스피커 요청 자동 차단/거절 보호 활성");
         VoiceRoomScheduler.scheduleNext(this);
         refreshUi();
     }
@@ -610,7 +623,8 @@ public class MainActivity extends Activity {
         VoiceRoomStore.setManagerActive(this, false);
         VoiceRoomStore.clearPending(this);
         VoiceRoomScheduler.cancel(this);
-        VoiceRoomStore.setLastStatus(this, "보이스룸 자동관리 중단 · 현재 보룸 자체는 종료하지 않음");
+        VoiceRoomStore.setLastStatus(this,
+                "보이스룸 자동관리/스피커 요청 보호 중단 · 현재 보룸 자체는 종료하지 않음");
         refreshUi();
     }
 
