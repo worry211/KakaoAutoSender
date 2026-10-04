@@ -12,21 +12,30 @@ import org.robolectric.annotation.Config;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 35)
 public class LaunchSmokeTest {
+  private <T extends Activity> T setup(Class<T> type) {
+    try {
+      return Robolectric.buildActivity(type).setup().get();
+    } catch (Throwable t) {
+      t.printStackTrace(System.err);
+      throw t;
+    }
+  }
+
   @Test
   public void licenseActivityBuildsAndResumesWithoutCrash() {
-    Activity activity = Robolectric.buildActivity(LicenseActivity.class).setup().get();
+    Activity activity = setup(LicenseActivity.class);
     assertNotNull(activity.getWindow().getDecorView());
   }
 
   @Test
   public void integrityGateBuildsWithoutCrashInDebug() {
-    Activity activity = Robolectric.buildActivity(IntegrityGateActivity.class).setup().get();
+    Activity activity = setup(IntegrityGateActivity.class);
     assertNotNull(activity);
   }
 
   @Test
   public void dashboardBuildsAndResumesWithoutCrash() {
-    Activity activity = Robolectric.buildActivity(MainActivityV4.class).setup().get();
+    Activity activity = setup(MainActivityV4.class);
     assertNotNull(activity.getWindow().getDecorView());
   }
 
@@ -41,7 +50,12 @@ public class LaunchSmokeTest {
 
     android.content.Intent intent = new android.content.Intent(context, RoomEditorActivity.class);
     intent.putExtra(RoomEditorActivity.EXTRA_ROOM, "route-smoke");
-    Activity activity = Robolectric.buildActivity(RoomEditorActivity.class, intent).setup().get();
-    assertNotNull(activity.getWindow().getDecorView());
+    try {
+      Activity activity = Robolectric.buildActivity(RoomEditorActivity.class, intent).setup().get();
+      assertNotNull(activity.getWindow().getDecorView());
+    } catch (Throwable t) {
+      t.printStackTrace(System.err);
+      throw t;
+    }
   }
 }
