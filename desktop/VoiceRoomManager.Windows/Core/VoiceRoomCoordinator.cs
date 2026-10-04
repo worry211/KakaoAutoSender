@@ -15,6 +15,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
         _store = store;
         _kakao = kakao;
         _state = _store.Load();
+        PowerPolicy.SetKeepSystemAwake(_state.ManagerActive);
         _timer = new Timer(async _ => await TickAsync(), null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(5));
     }
 
@@ -42,7 +43,8 @@ public sealed class VoiceRoomCoordinator : IDisposable
         var unverified = enabled.Where(r => !r.LiveVerified).Select(r => r.Title).ToList();
         if (unverified.Count > 0) throw new InvalidOperationException("실제 점검이 먼저 필요해: " + string.Join(", ", unverified));
         _state.ManagerActive = true;
-        _state.LastStatus = "Windows 보이스룸 자동관리 시작";
+        PowerPolicy.SetKeepSystemAwake(true);
+        _state.LastStatus = "Windows 보이스룸 자동관리 시작 · PC 절전만 방지, 모니터 OFF 허용";
         var now = DateTimeOffset.Now;
         foreach (var room in enabled)
             room.NextCheckAt ??= now.AddSeconds(3);
@@ -53,6 +55,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
     public void StopAll()
     {
         _state.ManagerActive = false;
+        PowerPolicy.SetKeepSystemAwake(false);
         _state.LastStatus = "자동관리 중지 · 현재 보이스룸 자체는 종료하지 않음";
         Save();
         StateChanged?.Invoke();
@@ -85,6 +88,16 @@ public sealed class VoiceRoomCoordinator : IDisposable
                     StateChanged?.Invoke();
                     return;
                 }
+
+                var launch = _kakao.EnsureKakaoRunning();
+                if (!launch.Success)
+                {
+                    ApplyResult(due, launch, manual: false);
+                    Save();
+                    StateChanged?.Invoke();
+                    return;
+                }
+                await Task.Delay(800);
 
                 var result = _kakao.EnsureVoiceRoom(due);
                 ApplyResult(due, result, manual: false);
@@ -121,7 +134,6 @@ public sealed class VoiceRoomCoordinator : IDisposable
         {
             _singleFlight.Release();
         }
-        await Task.CompletedTask;
     }
 
     private void ApplyResult(RoomState room, KakaoPcAutomation.Result result, bool manual)
@@ -131,15 +143,34 @@ public sealed class VoiceRoomCoordinator : IDisposable
         if (result.Success && result.Active)
         {
             room.LiveVerified = true;
-            room.Status = "ACTIVE";
             room.LastError = "";
             room.Failures = 0;
-            if (result.Created || room.StartedAt is null) room.StartedAt = now;
-            room.NextCheckAt = NextActiveCheck(room.StartedAt.Value, now);
+            if (result.Created)
+            {
+                room.StartedAt = now;
+                room.Status = "ACTIVE";
+                room.NextCheckAt = NextActiveCheck(now, now);
+            }
+            else if (room.StartedAt is not null)
+            {
+                room.Status = "ACTIVE";
+                room.NextCheckAt = NextActiveCheck(room.StartedAt.Value, now);
+            }
+            else
+            {
+                // Existing room was discovered after this manager started. Never invent a fresh
+                // 48-hour baseline: poll the real Kakao UI until a recreation gives us proof.
+                room.Status = "ACTIVE_UNKNOWN_START";
+                room.NextCheckAt = now.AddMinutes(10);
+            }
             room.MicMuted = result.MicMuted;
             room.SpeakerMuted = result.SpeakerMuted;
             if (result.AudioRepaired) _state.AudioRepairs++;
-            _state.LastStatus = room.Title + (result.Created ? " · 새 보이스룸 생성/활성 확인" : " · 보이스룸 활성 확인");
+            _state.LastStatus = room.Title + (result.Created
+                ? " · 새 보이스룸 생성/활성 확인"
+                : room.StartedAt is null
+                    ? " · 기존 보이스룸 활성 확인 · 시작시각 미확인이라 10분 재점검"
+                    : " · 보이스룸 활성 확인");
             return;
         }
 
@@ -184,6 +215,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
 
     public void Dispose()
     {
+        PowerPolicy.SetKeepSystemAwake(false);
         _timer.Dispose();
         _singleFlight.Dispose();
     }
