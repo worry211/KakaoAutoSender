@@ -16,17 +16,11 @@ final class VoiceRoomScheduler {
     private VoiceRoomScheduler() {}
 
     static void scheduleNext(Context context) {
-        long now = System.currentTimeMillis();
-        boolean managerActive = VoiceRoomStore.managerActive(context);
-
-        // A direct user check always wins. Keeping exactly one outstanding alarm prevents a
-        // stale AUTO or MANUAL PendingIntent from waking Kakao again after priorities changed.
-        VoiceRoomStore.Room manualRoom = VoiceRoomStore.manualCheckDue(context, now);
-        boolean manual = manualRoom != null;
-        VoiceRoomStore.Room room = manual ? manualRoom
-                : (managerActive ? VoiceRoomStore.earliestDue(context, now) : null);
-
         cancel(context);
+        if (!VoiceRoomStore.managerActive(context)) return;
+
+        long now = System.currentTimeMillis();
+        VoiceRoomStore.Room room = VoiceRoomStore.earliestDue(context, now);
         if (room == null) return;
 
         long at = room.nextCheckAt <= 0L
@@ -35,7 +29,7 @@ final class VoiceRoomScheduler {
         AlarmManager alarm = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (alarm == null) return;
         PendingIntent pending = pendingIntent(
-                context, room.id, manual, PendingIntent.FLAG_UPDATE_CURRENT);
+                context, room.id, false, PendingIntent.FLAG_UPDATE_CURRENT);
         if (Build.VERSION.SDK_INT >= 31 && !alarm.canScheduleExactAlarms()) {
             alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending);
         } else {
@@ -45,7 +39,7 @@ final class VoiceRoomScheduler {
 
     static void scheduleRetry(Context context, String roomId, long delayMs) {
         VoiceRoomStore.Room room = VoiceRoomStore.get(context, roomId);
-        if (room == null) return;
+        if (room == null || !room.enabled || !room.liveCheckPassed) return;
         room.nextCheckAt = System.currentTimeMillis() + Math.max(30_000L, delayMs);
         VoiceRoomStore.update(context, room);
         scheduleNext(context);
@@ -55,15 +49,9 @@ final class VoiceRoomScheduler {
         AlarmManager alarm = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (alarm == null) return;
         PendingIntent automatic = pendingIntent(context, "", false, PendingIntent.FLAG_NO_CREATE);
-        if (automatic != null) {
-            alarm.cancel(automatic);
-            automatic.cancel();
-        }
-        PendingIntent manual = pendingIntent(context, "", true, PendingIntent.FLAG_NO_CREATE);
-        if (manual != null) {
-            alarm.cancel(manual);
-            manual.cancel();
-        }
+        if (automatic != null) alarm.cancel(automatic);
+        PendingIntent legacyManual = pendingIntent(context, "", true, PendingIntent.FLAG_NO_CREATE);
+        if (legacyManual != null) alarm.cancel(legacyManual);
     }
 
     static boolean canExact(Context context) {
