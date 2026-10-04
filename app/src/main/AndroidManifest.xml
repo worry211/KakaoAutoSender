@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <application
         android:allowBackup="false"
@@ -11,7 +12,7 @@
         android:usesCleartextTraffic="false">
 
         <activity
-            android:name=".MainActivityV3"
+            android:name=".MainActivityV4"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -19,13 +20,10 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".MainActivityV2"
-            android:exported="false" />
-
-        <activity
-            android:name=".MainActivity"
-            android:exported="false" />
+        <activity android:name=".RoomEditorActivity" android:exported="false" />
+        <activity android:name=".MainActivityV3" android:exported="false" />
+        <activity android:name=".MainActivityV2" android:exported="false" />
+        <activity android:name=".MainActivity" android:exported="false" />
 
         <service
             android:name=".KakaoNotificationListener"
@@ -37,9 +35,7 @@
             </intent-filter>
         </service>
 
-        <receiver
-            android:name=".SendAlarmReceiver"
-            android:exported="false" />
+        <receiver android:name=".SendAlarmReceiver" android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"
