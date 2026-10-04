@@ -40,9 +40,9 @@ final class EntitlementPolicy {
       case "MAINTENANCE":
         return "서비스 점검으로 자동전송이 일시 중지되었습니다.";
       case "NETWORK":
-        return "인터넷 연결을 확인한 뒤 다시 시도하세요.";
+        return "라이선스 서버 응답을 받지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요. 기존 인증 정보는 보존됩니다.";
       case "RATE_LIMITED":
-        return "잠시 후 다시 시도하세요.";
+        return "요청이 잠시 많습니다. 잠깐 후 다시 시도해 주세요.";
       case "ACTIVE":
         return "라이선스 정상";
       default:
