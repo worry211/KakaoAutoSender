@@ -170,11 +170,27 @@ public sealed class KakaoPcAutomation
             return new(true, "독립 채팅창 제목 완전일치 확인");
         }
 
-        if (OpenChatLinkRegistry.IsRecentlyVerifiedEntry(room.Title, TimeSpan.FromSeconds(25)) &&
-            KakaoSurfaceLocator.TryFindChatComposer(out var composer) && composer is not null)
+        if (OpenChatLinkRegistry.IsRecentlyVerifiedEntry(room.Title, TimeSpan.FromSeconds(25)))
         {
-            KakaoSurfaceLocator.Activate(composer.TopLevel);
-            return new(true, "최근 링크 진입 토큰 + 실제 채팅 composer 확인");
+            if (KakaoSurfaceLocator.TryFindChatComposer(out var composer) && composer is not null)
+            {
+                KakaoSurfaceLocator.Activate(composer.TopLevel);
+                return new(true, "최근 링크 진입 토큰 + 실제 채팅 composer 확인");
+            }
+
+            // Kakao 26.x can custom-render the entire chat surface without exposing a RICHEDIT/UIA
+            // composer. A title-scoped, short-lived token is issued only after the exact link/CTA
+            // transition was verified, so preserve that room session instead of falling back to the
+            // old search path and undoing a successful entry.
+            var visible = KakaoSurfaceLocator.VisibleSurfaces(minWidth: 180, minHeight: 120);
+            if (visible.Count > 0)
+            {
+                var main = KakaoSurfaceLocator.FindMainWindow();
+                var surface = visible.FirstOrDefault(x => x.Hwnd == main)
+                    ?? visible.OrderByDescending(x => x.Rect.Area).First();
+                KakaoSurfaceLocator.Activate(surface.TopLevel != IntPtr.Zero ? surface.TopLevel : surface.Hwnd);
+                return new(true, "최근 링크/CTA 검증 토큰 + Kakao custom-rendered 방 세션 재사용");
+            }
         }
 
         var nav = _win32.OpenRoom(room.Title);
