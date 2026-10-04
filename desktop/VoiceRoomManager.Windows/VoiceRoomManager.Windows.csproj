@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>VoiceRoomManager.Windows</AssemblyName>
     <RootNamespace>VoiceRoomManager.Windows</RootNamespace>
-    <Version>0.2.1</Version>
+    <Version>0.3.0</Version>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
