@@ -25,14 +25,6 @@ public class WakeActivity extends Activity {
         super.onCreate(savedInstanceState);
         boolean probe = getIntent() != null && getIntent().getBooleanExtra(EXTRA_PROBE, false);
         boolean wasInteractive = isDeviceInteractive();
-
-        if (Build.VERSION.SDK_INT >= 27) {
-            setTurnScreenOn(true);
-            setShowWhenLocked(false);
-        } else {
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
-        }
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         acquireWakeLock();
 
         if (!VoiceRoomStore.managerActive(this) && !probe) {
@@ -92,6 +84,8 @@ public class WakeActivity extends Activity {
             }
         }
 
+        // Check the lock state before turning the display on. This prevents a secure phone from
+        // flashing its screen every retry interval while unattended automation cannot proceed.
         KeyguardManager keyguard = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
         if (keyguard != null && keyguard.isDeviceLocked()) {
             room.status = probe ? "PROBE_ERROR" : "WAITING_UNLOCK";
@@ -125,7 +119,18 @@ public class WakeActivity extends Activity {
             return;
         }
 
+        prepareDisplayForAutomation();
         launchKakao(room, probe);
+    }
+
+    private void prepareDisplayForAutomation() {
+        if (Build.VERSION.SDK_INT >= 27) {
+            setTurnScreenOn(true);
+            setShowWhenLocked(false);
+        } else {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        }
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
     private void launchKakao(VoiceRoomStore.Room room, boolean probe) {
