@@ -3,6 +3,7 @@ package com.local.kakaoautosender;
 import android.animation.ObjectAnimator;
 import android.animation.StateListAnimator;
 import android.app.Activity;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.os.Build;
 import android.view.View;
@@ -10,7 +11,9 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsetsController;
 import android.widget.Button;
+import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import java.util.Collections;
@@ -21,6 +24,8 @@ import java.util.WeakHashMap;
 final class PremiumChrome {
   private static final int BG = Color.rgb(9, 11, 16);
   private static final int NAV = Color.rgb(8, 10, 14);
+  private static final int ACCENT = Color.rgb(110, 131, 255);
+  private static final int CONTROL_MUTED = Color.rgb(102, 113, 136);
   private static final Map<View, Boolean> POLISHED =
       Collections.synchronizedMap(new WeakHashMap<>());
 
@@ -37,7 +42,8 @@ final class PremiumChrome {
     }
     if (Build.VERSION.SDK_INT >= 30) {
       WindowInsetsController c = w.getInsetsController();
-      if (c != null) c.setSystemBarsAppearance(0, WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
+      if (c != null)
+        c.setSystemBarsAppearance(0, WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
     } else {
       w.getDecorView().setSystemUiVisibility(0);
     }
@@ -57,16 +63,29 @@ final class PremiumChrome {
         ((ScrollView) v).setFillViewport(true);
       }
       if (v instanceof TextView) ((TextView) v).setIncludeFontPadding(false);
+      if (v instanceof LinearLayout && v.getBackground() != null) {
+        v.setElevation(Math.max(v.getElevation(), dp(density, 1)));
+      }
       if (v instanceof EditText) {
         v.setElevation(dp(density, 1));
         ((EditText) v).setSelectAllOnFocus(false);
       }
+      if (v instanceof CompoundButton) polishCompound((CompoundButton) v);
       if (v instanceof Button) polishButton((Button) v, density);
     }
     if (v instanceof ViewGroup) {
       ViewGroup g = (ViewGroup) v;
       for (int i = 0; i < g.getChildCount(); i++) polishTree(g.getChildAt(i), density);
     }
+  }
+
+  private static void polishCompound(CompoundButton button) {
+    int[][] states = {
+      new int[] {android.R.attr.state_checked},
+      new int[] {-android.R.attr.state_checked}
+    };
+    button.setButtonTintList(new ColorStateList(states, new int[] {ACCENT, CONTROL_MUTED}));
+    button.setHapticFeedbackEnabled(true);
   }
 
   private static void polishButton(Button button, float density) {
