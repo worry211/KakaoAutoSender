@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -42,6 +43,7 @@ public partial class MainWindow : Window
     private bool _isShuttingDown;
     private string _roomSearch = "";
     private string _roomFilter = "ALL";
+    private string _roomSort = "STATUS";
     private bool _uiReady;
 
     public MainWindow()
@@ -66,11 +68,14 @@ public partial class MainWindow : Window
 
         _uiReady = true;
         RoomFilterBox.SelectedIndex = 0;
+        RoomSortBox.SelectedIndex = 0;
+        ApplyRoomSort();
 
         Loaded += async (_, _) => await InitializeAsync();
         Closed += (_, _) => Shutdown();
         if (_rooms.Count > 0) RoomList.SelectedIndex = 0;
         AppendLog("Windows 클라이언트 시작 · 자동전송은 명시적 시작 전까지 정지 상태");
+        if (!string.IsNullOrWhiteSpace(_store.RecoveryNotice)) AppendLog(_store.RecoveryNotice);
         UpdateSelectionUi();
         UpdateDashboard();
     }
@@ -769,24 +774,55 @@ public partial class MainWindow : Window
         AppendLog($"선택 {selected.Count}개 방 연결 상태 확인 완료");
     }
 
-    private void RemoveSelected_Click(object sender, RoutedEventArgs e)
+    private async void RemoveSelected_Click(object sender, RoutedEventArgs e)
     {
         var selected = SelectedRooms();
         if (selected.Count == 0) return;
+        var preview = string.Join(Environment.NewLine, selected.Take(4).Select(r => "• " + r.DisplayName));
+        if (selected.Count > 4) preview += $"{Environment.NewLine}외 {selected.Count - 4}개";
         var answer = MessageBox.Show(
-            $"선택한 {selected.Count}개 방 설정을 삭제할까요?\n실제 카카오톡 방은 삭제되지 않습니다.",
+            $"{preview}\n\n선택한 {selected.Count}개 방 설정을 삭제할까요?\n실제 카카오톡 방은 삭제되지 않으며 이 작업은 되돌릴 수 없습니다.",
             "KakaoMacro PC",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
         if (answer != MessageBoxResult.Yes) return;
-        foreach (var room in selected)
+
+        await _schedulerGate.WaitAsync(_shutdown.Token);
+        var runtime = selected.ToDictionary(r => r.Id, r => (r.Running, r.NextAt, r.LastStatus));
+        try
         {
-            room.Running = false;
-            _rooms.Remove(room);
+            foreach (var room in selected) { room.Running = false; room.NextAt = null; }
+            var removedIds = selected.Select(r => r.Id).ToHashSet();
+            var persisted = new AppSettings
+            {
+                SchemaVersion = 2,
+                Rooms = _rooms.Where(r => !removedIds.Contains(r.Id)).Select(CloneRoomForStorage).ToList(),
+            };
+            try
+            {
+                await Task.Run(() => _store.Save(persisted), _shutdown.Token);
+            }
+            catch (Exception ex)
+            {
+                foreach (var room in selected)
+                {
+                    if (!runtime.TryGetValue(room.Id, out var state)) continue;
+                    room.Running = state.Running;
+                    room.NextAt = state.NextAt;
+                    room.LastStatus = state.LastStatus;
+                }
+                AppendLog("선택 방 삭제 저장 실패 · " + ex.GetType().Name);
+                MessageBox.Show("삭제 정보를 안전하게 저장하지 못했습니다. 기존 방 설정은 유지했습니다.", "KakaoMacro PC", MessageBoxButton.OK, MessageBoxImage.Error);
+                RefreshRoomUi();
+                return;
+            }
+            foreach (var room in selected) _rooms.Remove(room);
+            _lastBulkUndo.Clear();
+            UndoBulkButton.IsEnabled = false;
+            RefreshRoomUi();
+            AppendLog($"선택 방 삭제 · {selected.Count}개 · 디스크 저장 확인 완료");
         }
-        QueueSaveSettings();
-        RefreshRoomUi();
-        AppendLog($"선택 방 삭제 · {selected.Count}개");
+        finally { _schedulerGate.Release(); }
     }
 
     private async void RoomSearch_TextChanged(object sender, TextChangedEventArgs e)
@@ -814,14 +850,35 @@ public partial class MainWindow : Window
         _roomFilter = RoomFilterBox.SelectedIndex switch
         {
             1 => "RUNNING",
-            2 => "ENABLED",
-            3 => "UNLINKED",
-            4 => "ATTENTION",
+            2 => "PAUSED",
+            3 => "ENABLED",
+            4 => "UNLINKED",
+            5 => "ATTENTION",
             _ => "ALL",
         };
         _roomView.Refresh();
         UpdateDashboard();
     }
+
+    private void RoomSortBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (RoomSortBox is null) return;
+        _roomSort = RoomSortBox.SelectedIndex switch { 1 => "NEXT", 2 => "NAME", _ => "STATUS" };
+        ApplyRoomSort();
+        _roomView.Refresh();
+    }
+
+    private void ApplyRoomSort()
+    {
+        if (_roomView is ListCollectionView listView) listView.CustomSort = new RoomOperationComparer(_roomSort);
+    }
+
+    private static bool NeedsAttention(RoomProfile room) =>
+        room.Enabled && (room.Binding is null || room.FailureStreak > 0
+            || room.LastStatus.Contains("필요", StringComparison.OrdinalIgnoreCase)
+            || room.LastStatus.Contains("실패", StringComparison.OrdinalIgnoreCase)
+            || room.LastStatus.Contains("차단", StringComparison.OrdinalIgnoreCase)
+            || room.LastStatus.Contains("중지", StringComparison.OrdinalIgnoreCase));
 
     private bool FilterRoom(object item)
     {
@@ -829,13 +886,10 @@ public partial class MainWindow : Window
         var matchesState = _roomFilter switch
         {
             "RUNNING" => room.Running,
+            "PAUSED" => room.Enabled && !room.Running,
             "ENABLED" => room.Enabled,
             "UNLINKED" => room.Binding is null,
-            "ATTENTION" => room.Enabled && (room.Binding is null || room.FailureStreak > 0
-                || room.LastStatus.Contains("필요", StringComparison.OrdinalIgnoreCase)
-                || room.LastStatus.Contains("실패", StringComparison.OrdinalIgnoreCase)
-                || room.LastStatus.Contains("차단", StringComparison.OrdinalIgnoreCase)
-                || room.LastStatus.Contains("중지", StringComparison.OrdinalIgnoreCase)),
+            "ATTENTION" => NeedsAttention(room),
             _ => true,
         };
         if (!matchesState) return false;
@@ -898,7 +952,8 @@ public partial class MainWindow : Window
     {
         if (SelectedCountText is null || BulkSelectedText is null) return;
         var count = SelectedRooms().Count;
-        SelectedCountText.Text = $"선택 {count}개 · Ctrl/Shift로 다중 선택";
+        var visible = RoomList?.Items.Count ?? 0;
+        SelectedCountText.Text = $"선택 {count}개 · 표시 {visible}/{_rooms.Count} · Ctrl/Shift 다중 선택";
         BulkSelectedText.Text = count == 0
             ? "왼쪽에서 여러 방을 선택하세요."
             : $"현재 {count}개 방 선택됨 · 체크한 항목만 변경됩니다.";
@@ -1039,6 +1094,43 @@ public partial class MainWindow : Window
         _saveDebounce?.Dispose();
         _searchDebounce?.Dispose();
         _shutdown.Dispose();
+    }
+
+    private sealed class RoomOperationComparer : IComparer
+    {
+        private readonly string _mode;
+        public RoomOperationComparer(string mode) => _mode = mode;
+
+        public int Compare(object? x, object? y)
+        {
+            if (ReferenceEquals(x, y)) return 0;
+            if (x is not RoomProfile a) return 1;
+            if (y is not RoomProfile b) return -1;
+            int result;
+            if (_mode == "NAME") result = StringComparer.CurrentCultureIgnoreCase.Compare(a.DisplayName, b.DisplayName);
+            else if (_mode == "NEXT")
+            {
+                if (a.NextAt is null && b.NextAt is not null) result = 1;
+                else if (a.NextAt is not null && b.NextAt is null) result = -1;
+                else result = Nullable.Compare(a.NextAt, b.NextAt);
+            }
+            else
+            {
+                result = StatusRank(a).CompareTo(StatusRank(b));
+                if (result == 0) result = Nullable.Compare(a.NextAt, b.NextAt);
+            }
+            if (result == 0) result = StringComparer.CurrentCultureIgnoreCase.Compare(a.DisplayName, b.DisplayName);
+            if (result == 0) result = a.Id.CompareTo(b.Id);
+            return result;
+        }
+
+        private static int StatusRank(RoomProfile room)
+        {
+            if (NeedsAttention(room)) return 0;
+            if (room.Running) return 1;
+            if (room.Enabled) return 2;
+            return 3;
+        }
     }
 
     private sealed record BulkEditSnapshot(string Message, ScheduleKind ScheduleKind, int IntervalMinutes, string DailyTimes, int DailyLimit, bool Enabled);
