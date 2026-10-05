@@ -30,6 +30,7 @@ internal sealed class SettingsStore
 
         if (TryLoad(SettingsPath, out var primary))
         {
+            SeedBackupFromValidPrimary();
             _lastSerialized = JsonSerializer.Serialize(primary, JsonOptions);
             return primary;
         }
@@ -75,6 +76,20 @@ internal sealed class SettingsStore
     }
 
     public void EnsureDirectory() => Directory.CreateDirectory(_directory);
+
+    private void SeedBackupFromValidPrimary()
+    {
+        try
+        {
+            if (File.Exists(BackupPath)) return;
+            Directory.CreateDirectory(_directory);
+            File.Copy(SettingsPath, BackupPath, false);
+        }
+        catch
+        {
+            // Startup must not fail only because the protective backup could not be seeded.
+        }
+    }
 
     private static bool TryLoad(string path, out AppSettings value)
     {
