@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="KakaoMacro PC" Width="1380" Height="900" MinWidth="1120" MinHeight="740"
         Background="{StaticResource Bg}" Foreground="{StaticResource Text}"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen" PreviewKeyDown="Window_PreviewKeyDown">
     <Grid Background="{StaticResource Bg}" Margin="22">
         <Grid.RowDefinitions>
             <RowDefinition Height="82"/>
@@ -190,7 +190,20 @@
                     <TabItem Header="방 설정">
                         <DockPanel LastChildFill="True">
                             <Border DockPanel.Dock="Bottom" Background="{StaticResource Panel}" BorderBrush="{StaticResource Border}"
-                                    BorderThickness="1,1,1,0" Padding="10,9" Margin="0,8,0,0" CornerRadius="10,10,0,0">
+                                    BorderThickness="1" Padding="10,9" Margin="0,8,0,0" CornerRadius="10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="EditorSaveStatusText"
+                                               Text="변경사항 자동 저장 · Ctrl+S 저장 · Ctrl+Enter 1회 전송"
+                                               Foreground="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button x:Name="SaveRoomButton" Content="설정 저장" Click="SaveRoom_Click"/>
+                                        <Button x:Name="TestSendButton" Style="{StaticResource PrimaryButton}" Content="이 방에 1회 전송" Click="TestSend_Click"/>
+                                    </StackPanel>
+                                </Grid>
                             </Border>
                             <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,0,8">
                                 <StackPanel Margin="2,2,8,12">
@@ -202,7 +215,7 @@
                                     <StackPanel>
                                         <TextBlock Text="기본 정보" FontSize="12" FontWeight="SemiBold" Foreground="#C8D0DC"/>
                                         <TextBlock Text="표시 이름" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,11,0,0"/>
-                                        <TextBox x:Name="DisplayNameBox" Margin="0,5,0,0"/>
+                                        <TextBox x:Name="DisplayNameBox" Margin="0,5,0,0" TextChanged="SingleEditor_Changed"/>
                                     </StackPanel>
                                 </Border>
 
@@ -211,7 +224,8 @@
                                         <TextBlock Text="메시지" FontSize="12" FontWeight="SemiBold" Foreground="#C8D0DC"/>
                                         <TextBlock Text="이 방에 자동으로 보낼 내용을 입력하세요." Foreground="{StaticResource Muted}" FontSize="11" Margin="0,4,0,0"/>
                                         <TextBox x:Name="MessageEditor" Height="132" AcceptsReturn="True" TextWrapping="Wrap"
-                                                 VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" Margin="0,9,0,0"/>
+                                                 VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" Margin="0,9,0,0"
+                                                 TextChanged="SingleEditor_Changed"/>
                                     </StackPanel>
                                 </Border>
 
@@ -233,13 +247,13 @@
                                             </StackPanel>
                                             <StackPanel Grid.Column="2">
                                                 <TextBlock Text="하루 최대 전송 · 0은 무제한" Foreground="{StaticResource Muted}" FontSize="11"/>
-                                                <TextBox x:Name="DailyLimitBox" Margin="0,5,0,0"/>
+                                                <TextBox x:Name="DailyLimitBox" Margin="0,5,0,0" TextChanged="SingleEditor_Changed"/>
                                             </StackPanel>
                                         </Grid>
 
                                         <StackPanel x:Name="IntervalPanel" Margin="0,11,0,0">
                                             <TextBlock Text="반복 간격 (분)" Foreground="{StaticResource Muted}" FontSize="11"/>
-                                            <TextBox x:Name="IntervalBox" Margin="0,5,0,0"/>
+                                            <TextBox x:Name="IntervalBox" Margin="0,5,0,0" TextChanged="SingleEditor_Changed"/>
                                             <WrapPanel Margin="0,7,0,0">
                                                 <Button Style="{StaticResource CompactButton}" Content="1분" Tag="1" Click="IntervalPreset_Click"/>
                                                 <Button Style="{StaticResource CompactButton}" Content="5분" Tag="5" Click="IntervalPreset_Click"/>
@@ -250,9 +264,10 @@
                                         </StackPanel>
                                         <StackPanel x:Name="TimesPanel" Margin="0,11,0,0" Visibility="Collapsed">
                                             <TextBlock Text="매일 전송 시각 · 예: 09:00, 13:30, 21:00" Foreground="{StaticResource Muted}" FontSize="11"/>
-                                            <TextBox x:Name="TimesBox" Margin="0,5,0,0"/>
+                                            <TextBox x:Name="TimesBox" Margin="0,5,0,0" TextChanged="SingleEditor_Changed"/>
                                         </StackPanel>
-                                        <CheckBox x:Name="EnabledCheck" Content="이 방 자동전송 사용" IsChecked="True" Margin="0,13,0,0"/>
+                                        <CheckBox x:Name="EnabledCheck" Content="이 방 자동전송 사용" IsChecked="True" Margin="0,13,0,0"
+                                                  Checked="SingleEditor_ToggleChanged" Unchecked="SingleEditor_ToggleChanged"/>
                                     </StackPanel>
                                 </Border>
 
@@ -265,10 +280,6 @@
                                     </StackPanel>
                                 </Border>
 
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                    <Button x:Name="SaveRoomButton" Content="설정 저장" Click="SaveRoom_Click"/>
-                                    <Button x:Name="TestSendButton" Style="{StaticResource PrimaryButton}" Content="이 방에 1회 전송" Click="TestSend_Click"/>
-                                </StackPanel>
                                 </StackPanel>
                             </ScrollViewer>
                         </DockPanel>

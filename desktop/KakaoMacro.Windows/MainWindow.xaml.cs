@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Interop;
+using System.Windows.Input;
 using KakaoMacro.Windows.Models;
 using KakaoMacro.Windows.Services;
 
@@ -35,6 +36,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource _dispatchFence = new();
     private CancellationTokenSource? _saveDebounce;
     private CancellationTokenSource? _searchDebounce;
+    private CancellationTokenSource? _editorSaveDebounce;
     private readonly Dictionary<Guid, BulkEditSnapshot> _lastBulkUndo = new();
     private Task? _heartbeatTask;
     private Task? _schedulerTask;
@@ -44,6 +46,9 @@ public partial class MainWindow : Window
     private string _roomFilter = "ALL";
     private string _roomSort = "STATUS";
     private bool _uiReady;
+    private bool _loadingSingleEditor;
+    private bool _editorDirty;
+    private Guid? _editingRoomId;
 
     public MainWindow()
     {
@@ -110,6 +115,21 @@ public partial class MainWindow : Window
             CaptureCurrentKakaoRoom();
         }
         return IntPtr.Zero;
+    }
+
+    private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
+        if (e.Key == Key.S)
+        {
+            e.Handled = true;
+            SaveRoom_Click(this, new RoutedEventArgs());
+        }
+        else if (e.Key == Key.Enter && SelectedRooms().Count == 1)
+        {
+            e.Handled = true;
+            TestSend_Click(this, new RoutedEventArgs());
+        }
     }
 
     private async void PairCurrent_Click(object sender, RoutedEventArgs e)
@@ -454,8 +474,11 @@ public partial class MainWindow : Window
     {
         if (SaveEditorToSelected(true))
         {
+            _editorSaveDebounce?.Cancel();
+            _editorDirty = false;
             QueueSaveSettings();
             RefreshRoomUi();
+            EditorSaveStatusText.Text = $"저장됨 · {DateTime.Now:HH:mm:ss}";
             AppendLog("선택 방 설정 저장");
         }
     }
@@ -468,7 +491,11 @@ public partial class MainWindow : Window
             if (showErrors) MessageBox.Show("개별 설정은 방 하나만 선택했을 때 수정할 수 있습니다.");
             return false;
         }
-        var room = selected[0];
+        return SaveEditorToRoom(selected[0], showErrors);
+    }
+
+    private bool SaveEditorToRoom(RoomProfile room, bool showErrors)
+    {
         if (!int.TryParse(IntervalBox.Text, out var interval) || interval is < 1 or > 10080)
         {
             if (showErrors) MessageBox.Show("반복 간격은 1~10080분으로 입력하세요.");
@@ -510,6 +537,7 @@ public partial class MainWindow : Window
 
     private void RoomList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        FlushEditorDraft();
         var selected = SelectedRooms();
         UpdateSelectionUi();
         if (selected.Count != 1)
@@ -518,11 +546,14 @@ public partial class MainWindow : Window
                 ? "방 하나를 선택하면 세부 설정을 편집할 수 있습니다."
                 : $"{selected.Count}개 방 선택됨 · 일괄 편집 탭을 사용하세요.";
             SetSingleEditorEnabled(false);
+            _editingRoomId = null;
+            _editorDirty = false;
             return;
         }
 
         var room = selected[0];
         SetSingleEditorEnabled(true);
+        _loadingSingleEditor = true;
         DisplayNameBox.Text = room.DisplayName;
         MessageEditor.Text = room.Message;
         ScheduleModeBox.SelectedIndex = room.ScheduleKind == ScheduleKind.FixedTimes ? 1 : 0;
@@ -534,6 +565,10 @@ public partial class MainWindow : Window
             ? "카카오톡 방 연결이 필요합니다."
             : $"카카오톡 방 연결됨 · {room.Binding.WindowTitle}";
         UpdateSchedulePanels();
+        _loadingSingleEditor = false;
+        _editingRoomId = room.Id;
+        _editorDirty = false;
+        EditorSaveStatusText.Text = "변경사항 자동 저장 · Ctrl+S 저장 · Ctrl+Enter 1회 전송";
     }
 
     private void SetSingleEditorEnabled(bool enabled)
@@ -547,9 +582,66 @@ public partial class MainWindow : Window
         EnabledCheck.IsEnabled = enabled;
         SaveRoomButton.IsEnabled = enabled;
         TestSendButton.IsEnabled = enabled;
+        IntervalPanel.IsEnabled = enabled;
+        TimesPanel.IsEnabled = enabled;
     }
 
-    private void ScheduleModeBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateSchedulePanels();
+    private void ScheduleModeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateSchedulePanels();
+        QueueEditorAutoSave();
+    }
+
+    private void SingleEditor_Changed(object sender, TextChangedEventArgs e) => QueueEditorAutoSave();
+    private void SingleEditor_ToggleChanged(object sender, RoutedEventArgs e) => QueueEditorAutoSave();
+
+    private void QueueEditorAutoSave()
+    {
+        if (!_uiReady || _loadingSingleEditor || _editingRoomId is null || _isShuttingDown) return;
+        _editorDirty = true;
+        if (EditorSaveStatusText is not null) EditorSaveStatusText.Text = "변경사항 저장 중…";
+        _editorSaveDebounce?.Cancel();
+        _editorSaveDebounce?.Dispose();
+        _editorSaveDebounce = new CancellationTokenSource();
+        var token = _editorSaveDebounce.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(500, token).ConfigureAwait(false);
+                if (token.IsCancellationRequested || _isShuttingDown) return;
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (_editingRoomId is not Guid id) return;
+                    var room = _rooms.FirstOrDefault(r => r.Id == id);
+                    if (room is null || !SaveEditorToRoom(room, false))
+                    {
+                        if (EditorSaveStatusText is not null) EditorSaveStatusText.Text = "입력값 확인 필요 · 유효한 값만 자동 저장됩니다";
+                        return;
+                    }
+                    _editorDirty = false;
+                    QueueSaveSettings();
+                    _roomView.Refresh();
+                    if (EditorSaveStatusText is not null) EditorSaveStatusText.Text = $"자동 저장됨 · {DateTime.Now:HH:mm:ss}";
+                });
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        });
+    }
+
+    private void FlushEditorDraft()
+    {
+        if (!_editorDirty || _loadingSingleEditor || _editingRoomId is not Guid id) return;
+        _editorSaveDebounce?.Cancel();
+        var room = _rooms.FirstOrDefault(r => r.Id == id);
+        if (room is not null && SaveEditorToRoom(room, false))
+        {
+            _editorDirty = false;
+            QueueSaveSettings();
+        }
+    }
 
     private void UpdateSchedulePanels()
     {
@@ -1076,6 +1168,8 @@ public partial class MainWindow : Window
         _isShuttingDown = true;
         _saveDebounce?.Cancel();
         _searchDebounce?.Cancel();
+        _editorSaveDebounce?.Cancel();
+        FlushEditorDraft();
         _dispatchFence.Cancel();
         foreach (var room in _rooms)
         {
@@ -1092,6 +1186,7 @@ public partial class MainWindow : Window
         _dispatchFence.Dispose();
         _saveDebounce?.Dispose();
         _searchDebounce?.Dispose();
+        _editorSaveDebounce?.Dispose();
         _shutdown.Dispose();
     }
 
@@ -1102,3 +1197,4 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
     [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 }
+
