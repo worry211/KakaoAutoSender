@@ -1,6 +1,6 @@
-# KakaoMacro PC — Windows v1.3.1 Candidate
+# KakaoMacro PC — Windows v1.4
 
-KakaoMacro PC is the Windows companion to the Android KakaoMacro product. It reuses the existing commercial entitlement service while using a Windows-only KakaoTalk desktop delivery adapter.
+KakaoMacro PC is the Windows companion to the Android KakaoMacro product. It reuses the commercial entitlement service while using a Windows-only KakaoTalk desktop delivery adapter.
 
 ## Safety model
 
@@ -14,7 +14,7 @@ This client intentionally does **not** search for a room name and click the firs
 
 Two separate open-chat windows can therefore remain distinct even when their visible titles are identical. VoiceRoom-open sends use the actual input-control UI thread for focus restoration instead of assuming it matches the top-level KakaoTalk window thread.
 
-## v1.3.1 operations and UX
+## v1.4 operations and reliability
 
 - Windows 10/11 WPF client
 - persistent non-exportable P-256 Windows CNG installation identity
@@ -22,28 +22,32 @@ Two separate open-chat windows can therefore remain distinct even when their vis
 - activation, same-install recovery, access heartbeat and refresh
 - license lease gate before every scheduled dispatch
 - commercial dark desktop UI with custom dark ComboBox/drop-down styling
-- multi-room profiles, search and filters
-- filters for all / running / paused / enabled / needs pairing / needs attention
-- sorting by status priority / next send / room name
+- multi-room profiles, search, state filters and sorting
 - interval schedules and fixed daily times
 - quick 1 / 5 / 10 / 30 / 60 minute interval presets
 - daily send limits
-- extended multi-select
-- selected start / stop / enable / disable / validate / delete
-- selected-room one-shot send with large-batch confirmation
-- bulk message / schedule / daily-limit / enabled-state editing
+- extended multi-select and bulk message / schedule / daily-limit / enabled-state editing
 - copy first-selected room settings to the rest
 - one-level latest bulk-change undo; restored rooms stay stopped until explicitly restarted
-- single-room save/test actions remain fixed at the bottom instead of disappearing below the editor scroll area
+- selected start / stop / enable / disable / validate / delete
+- selected-room one-shot send with large-batch confirmation
+- single-room editor valid auto-save with a fixed bottom save/test action bar
+- `Ctrl+S` explicit save and `Ctrl+Enter` one-shot send
 - system tray show / start / stop / exit
+- configurable X-button behavior: hide to tray or exit
+- every real exit path confirms when automation is still running
 - explicit global start / stop fence
 - no automatic sending after app restart
+- 15-second background binding-health checks
+- running rooms automatically stop if Kakao restart/stale HWND/title/focus identity makes the binding invalid
+- explicit whole-list and selected-room connection validation
 - Unicode/Korean text delivery using Windows `SendInput` without clipboard text leakage
 - user-activity guard for scheduled sends
 - debounced search and settings persistence
-- settings JSON/disk writes moved off the WPF UI thread
+- settings JSON/disk writes off the WPF UI thread
+- `settings.json.bak` last-known-good backup; corrupt primary settings are preserved for diagnostics and automatically restored when possible
 - low-overhead scheduler while preserving serialized Kakao dispatch and focus-safety delays
-- customer-facing UI no longer exposes raw HWND identifiers
+- customer-facing UI does not expose raw HWND identifiers
 - local-only room/message configuration; the license backend never receives room names or message bodies
 
 ## Deliberately locked
@@ -51,6 +55,18 @@ Two separate open-chat windows can therefore remain distinct even when their vis
 Photo automation is not silently downgraded to text-only. KakaoTalk PC attachment/confirmation UI needs physical compatibility testing before it can be enabled safely. A profile with a configured photo remains blocked until the photo adapter is validated.
 
 The current license database binds one redeem key to one installation public key. Android and Windows simultaneous use therefore needs separate entitlements until an explicit multi-seat/product entitlement model is introduced.
+
+## Local recovery files
+
+Runtime configuration lives under `%LOCALAPPDATA%\KakaoMacro\Windows`.
+
+- `settings.json` — current configuration
+- `settings.json.bak` — last-known-good backup
+- `settings.corrupt-YYYYMMDD-HHMMSS.json` — preserved damaged primary when automatic recovery is needed
+- `settings-recovery.log` — recovery events only; message contents are not uploaded anywhere
+- `crashes\` — local crash diagnostics
+
+Automatic recovery never restarts sending. Rooms still require explicit start after the app launches.
 
 ## Build
 
