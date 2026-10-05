@@ -1,0 +1,42 @@
+name: Android v2.3 large-list and bulk delete
+
+on:
+  push:
+    branches:
+      - feat/android-v2-3-bulk-performance-polish
+    paths:
+      - scripts/apply_android_v23_large_list_bulk_delete.py
+      - .github/workflows/android-v23-large-list-delete.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_API_BASE_URL: https://kakaomacro-license.ei3921163.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/android-v2-3-bulk-performance-polish
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Apply large-list and bulk-delete polish
+        run: python3 scripts/apply_android_v23_large_list_bulk_delete.py
+      - name: Test, lint and build
+        run: ANDROID_HOME=/usr/local/lib/android/sdk ANDROID_SDK_ROOT=/usr/local/lib/android/sdk gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --stacktrace
+      - name: Commit verified source
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/com/local/kakaoautosender/MainActivityV4.java \
+                  app/src/main/java/com/local/kakaoautosender/MultiRoomStore.java \
+                  app/src/test/java/com/local/kakaoautosender/MultiRoomBulkRemoveTest.java
+          git commit -m 'feat(android): page large room lists and add safe bulk delete'
+          git push origin HEAD:feat/android-v2-3-bulk-performance-polish
