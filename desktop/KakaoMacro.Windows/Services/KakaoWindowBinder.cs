@@ -39,11 +39,16 @@ internal sealed class KakaoWindowBinder
                 return FailCapture("메인 카카오톡 창이 아니라 별도로 열린 채팅방 창에서 연결해 주세요.");
 
             var info = new GUITHREADINFO { cbSize = Marshal.SizeOf<GUITHREADINFO>() };
-            if (!GetGUIThreadInfo(threadId, ref info))
+            // KakaoTalk can move the editor onto a different GUI thread when overlays
+            // such as VoiceRoom are active. idThread=0 asks for the actual foreground thread.
+            if (!GetGUIThreadInfo(0, ref info))
                 return FailCapture("카카오톡 입력 포커스를 확인하지 못했습니다.");
             var focus = info.hwndFocus == IntPtr.Zero ? top : info.hwndFocus;
             if (GetAncestor(focus, GA_ROOT) != top)
                 return FailCapture("채팅 입력창에 커서를 둔 뒤 다시 연결해 주세요.");
+            var focusThread = GetWindowThreadProcessId(focus, out var focusPid);
+            if (focusThread == 0 || focusPid != pid)
+                return FailCapture("채팅 입력 대상이 이 카카오톡 방에 속하는지 확인하지 못했습니다.");
 
             var binding = new KakaoBinding
             {
@@ -79,6 +84,9 @@ internal sealed class KakaoWindowBinder
         var threadId = GetWindowThreadProcessId(top, out var pid);
         if (threadId == 0 || pid != binding.ProcessId)
             return (false, "카카오톡 프로세스가 바뀌었습니다. 다시 연결해 주세요.");
+        var focusThread = GetWindowThreadProcessId(focus, out var focusPid);
+        if (focusThread == 0 || focusPid != binding.ProcessId)
+            return (false, "카카오톡 입력 대상이 바뀌었습니다. 다시 연결해 주세요.");
         try
         {
             using var process = Process.GetProcessById(binding.ProcessId);
@@ -125,29 +133,39 @@ internal sealed class KakaoWindowBinder
             var top = new IntPtr(binding!.WindowHandle);
             var focus = new IntPtr(binding.FocusHandle);
             var previous = GetForegroundWindow();
-            var targetThread = GetWindowThreadProcessId(top, out _);
+            var targetThread = GetWindowThreadProcessId(top, out var targetPid);
+            var focusThread = GetWindowThreadProcessId(focus, out var focusPid);
+            if (targetThread == 0 || focusThread == 0 ||
+                targetPid != (uint)binding.ProcessId || focusPid != (uint)binding.ProcessId)
+                return new SendResult(false, "카카오톡 입력 스레드가 바뀌었습니다. 방을 다시 연결해 주세요.", SendFailure.InvalidBinding);
+
             var currentThread = GetCurrentThreadId();
-            var attached = false;
+            var attachedTarget = false;
+            var attachedFocus = false;
             try
             {
+                if (currentThread != targetThread)
+                    attachedTarget = AttachThreadInput(currentThread, targetThread, true);
+                if (currentThread != focusThread && focusThread != targetThread)
+                    attachedFocus = AttachThreadInput(currentThread, focusThread, true);
+
                 BringWindowToTop(top);
                 SetForegroundWindow(top);
-                await Task.Delay(90, cancellationToken);
-                if (currentThread != targetThread)
-                    attached = AttachThreadInput(currentThread, targetThread, true);
+                await Task.Delay(110, cancellationToken);
                 SetFocus(focus);
+                await Task.Delay(55, cancellationToken);
             }
             finally
             {
-                if (attached) AttachThreadInput(currentThread, targetThread, false);
+                if (attachedFocus) AttachThreadInput(currentThread, focusThread, false);
+                if (attachedTarget) AttachThreadInput(currentThread, targetThread, false);
             }
 
-            await Task.Delay(60, cancellationToken);
             if (GetForegroundWindow() != top)
                 return new SendResult(false, "대상 카카오톡 창을 안전하게 활성화하지 못했습니다.", SendFailure.FocusFailed);
-            var info = new GUITHREADINFO { cbSize = Marshal.SizeOf<GUITHREADINFO>() };
-            if (!GetGUIThreadInfo(targetThread, ref info) || info.hwndFocus != focus)
-                return new SendResult(false, "저장된 채팅 입력 포커스를 복원하지 못했습니다.", SendFailure.FocusFailed);
+            var focusInfo = new GUITHREADINFO { cbSize = Marshal.SizeOf<GUITHREADINFO>() };
+            if (!GetGUIThreadInfo(focusThread, ref focusInfo) || !FocusMatches(focus, focusInfo.hwndFocus, top))
+                return new SendResult(false, "채팅 입력창 포커스를 복원하지 못했습니다. 입력칸을 다시 연결해 주세요.", SendFailure.FocusFailed);
 
             if (!SendVirtualChord(VK_CONTROL, VK_A) || !SendVirtualKey(VK_BACK))
                 return new SendResult(false, "카카오톡 입력창 초기화에 실패했습니다.", SendFailure.SendInputFailed);
@@ -200,6 +218,15 @@ internal sealed class KakaoWindowBinder
     {
         var sb = new StringBuilder(256);
         return GetClassName(hwnd, sb, sb.Capacity) > 0 ? sb.ToString() : "";
+    }
+
+    private static bool FocusMatches(IntPtr expected, IntPtr actual, IntPtr top)
+    {
+        if (actual == expected) return true;
+        if (actual == IntPtr.Zero || GetAncestor(actual, GA_ROOT) != top) return false;
+        // Some KakaoTalk builds focus a nested editor child while VoiceRoom is mounted.
+        // Accept only the already-paired editor subtree; never an arbitrary child in the room.
+        return IsChild(expected, actual) || IsChild(actual, expected);
     }
 
     private static uint MillisecondsSinceLastUserInput()
@@ -297,6 +324,7 @@ internal sealed class KakaoWindowBinder
     [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
     [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
     [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr hWnd);
