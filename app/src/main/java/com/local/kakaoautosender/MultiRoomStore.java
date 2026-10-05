@@ -235,6 +235,23 @@ final class MultiRoomStore {
         return changed;
     }
 
+    static synchronized int removeMany(Context context, List<String> rooms) {
+        if (rooms == null || rooms.isEmpty()) return 0;
+        ensureMigrated(context);
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        for (String room : rooms) {
+            String normalized = normalize(room);
+            if (!normalized.isEmpty()) targets.add(normalized);
+        }
+        if (targets.isEmpty()) return 0;
+        ArrayList<Profile> profiles = readRaw(context);
+        int before = profiles.size();
+        profiles.removeIf(profile -> targets.contains(normalize(profile.room)));
+        int removed = before - profiles.size();
+        if (removed > 0) writeRaw(context, profiles);
+        return removed;
+    }
+
     static synchronized boolean remove(Context context, String room) {
         if (room == null || room.trim().isEmpty()) return false;
         ensureMigrated(context);

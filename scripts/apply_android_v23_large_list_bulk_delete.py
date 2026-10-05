@@ -75,7 +75,7 @@ new_loop = '''            } else {
                 }
                 if (visibleRooms > rendered) {
                     int remaining = visibleRooms - rendered;
-                    Button more = secondaryButton("더 보기 · " + remaining + "개 남음");
+                    Button more = tertiaryButton("더 보기 · " + remaining + "개 남음");
                     more.setOnClickListener(v -> {
                         roomRenderLimit += ROOM_PAGE_SIZE;
                         invalidateRoomList();
