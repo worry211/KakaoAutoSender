@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private bool _isShuttingDown;
     private string _roomSearch = "";
     private string _roomFilter = "ALL";
+    private string _roomSort = "STATUS";
     private bool _uiReady;
 
     public MainWindow()
@@ -66,6 +67,8 @@ public partial class MainWindow : Window
 
         _uiReady = true;
         RoomFilterBox.SelectedIndex = 0;
+        RoomSortBox.SelectedIndex = 0;
+        ApplyRoomSort();
 
         Loaded += async (_, _) => await InitializeAsync();
         Closed += (_, _) => Shutdown();
@@ -435,6 +438,18 @@ public partial class MainWindow : Window
         RefreshRoomUi();
     }
 
+    private void IntervalPreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button button && int.TryParse(button.Tag?.ToString(), out var minutes))
+            IntervalBox.Text = minutes.ToString();
+    }
+
+    private void BulkIntervalPreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button button && int.TryParse(button.Tag?.ToString(), out var minutes))
+            BulkIntervalBox.Text = minutes.ToString();
+    }
+
     private void SaveRoom_Click(object sender, RoutedEventArgs e)
     {
         if (SaveEditorToSelected(true))
@@ -516,8 +531,8 @@ public partial class MainWindow : Window
         DailyLimitBox.Text = room.DailyLimit.ToString();
         EnabledCheck.IsChecked = room.Enabled;
         BoundRoomText.Text = room.Binding is null
-            ? "실제 카카오톡 방 · 연결 필요"
-            : $"실제 카카오톡 방 · {room.Binding.WindowTitle} · {room.BindingSummary}";
+            ? "카카오톡 방 연결이 필요합니다."
+            : $"카카오톡 방 연결됨 · {room.Binding.WindowTitle}";
         UpdateSchedulePanels();
     }
 
@@ -810,17 +825,55 @@ public partial class MainWindow : Window
 
     private void RoomFilterBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (RoomFilterBox is null) return;
+        if (RoomFilterBox is null || !_uiReady) return;
         _roomFilter = RoomFilterBox.SelectedIndex switch
         {
             1 => "RUNNING",
-            2 => "ENABLED",
-            3 => "UNLINKED",
-            4 => "ATTENTION",
+            2 => "PAUSED",
+            3 => "ENABLED",
+            4 => "UNLINKED",
+            5 => "ATTENTION",
             _ => "ALL",
         };
         _roomView.Refresh();
         UpdateDashboard();
+    }
+
+    private void RoomSortBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (RoomSortBox is null || !_uiReady) return;
+        _roomSort = RoomSortBox.SelectedIndex switch
+        {
+            1 => "NEXT",
+            2 => "NAME",
+            _ => "STATUS",
+        };
+        ApplyRoomSort();
+    }
+
+    private void ApplyRoomSort()
+    {
+        if (!_roomView.CanSort) return;
+        using (_roomView.DeferRefresh())
+        {
+            _roomView.SortDescriptions.Clear();
+            if (_roomSort == "NAME")
+            {
+                _roomView.SortDescriptions.Add(new SortDescription(nameof(RoomProfile.DisplayName), ListSortDirection.Ascending));
+                return;
+            }
+            if (_roomSort == "NEXT")
+            {
+                _roomView.SortDescriptions.Add(new SortDescription(nameof(RoomProfile.Running), ListSortDirection.Descending));
+                _roomView.SortDescriptions.Add(new SortDescription(nameof(RoomProfile.NextAt), ListSortDirection.Ascending));
+                _roomView.SortDescriptions.Add(new SortDescription(nameof(RoomProfile.DisplayName), ListSortDirection.Ascending));
+                return;
+            }
+            _roomView.SortDescriptions.Add(new SortDescription(nameof(RoomProfile.Running), ListSortDirection.Descending));
+            _roomView.SortDescriptions.Add(new SortDescription(nameof(RoomProfile.Enabled), ListSortDirection.Descending));
+            _roomView.SortDescriptions.Add(new SortDescription(nameof(RoomProfile.FailureStreak), ListSortDirection.Descending));
+            _roomView.SortDescriptions.Add(new SortDescription(nameof(RoomProfile.DisplayName), ListSortDirection.Ascending));
+        }
     }
 
     private bool FilterRoom(object item)
@@ -829,6 +882,7 @@ public partial class MainWindow : Window
         var matchesState = _roomFilter switch
         {
             "RUNNING" => room.Running,
+            "PAUSED" => room.Enabled && !room.Running,
             "ENABLED" => room.Enabled,
             "UNLINKED" => room.Binding is null,
             "ATTENTION" => room.Enabled && (room.Binding is null || room.FailureStreak > 0
@@ -915,7 +969,7 @@ public partial class MainWindow : Window
         var selected = RoomList?.SelectedItems.Count ?? 0;
         DashboardText.Text = $"방 {total}개 · 연결 {linked}개 · 사용 {enabled}개 · 실행 {running}개 · 선택 {selected}개";
         RuntimeStatusText.Text = _license.CanDispatch
-            ? $"라이선스 정상 · 실행 {running}개 · 저부하 1초 스케줄러 · 방 사이 최소 650ms"
+            ? $"라이선스 정상 · 실행 중인 방 {running}개 · 예약 전송 엔진 정상"
             : "라이선스 확인 전에는 예약 전송이 실행되지 않습니다.";
         _tray?.UpdateTooltip(running, total, _license.CanDispatch);
     }

@@ -44,7 +44,7 @@ public sealed class RoomProfile
     public DateTimeOffset? NextAt { get; set; }
 
     [JsonIgnore]
-    public string BindingSummary => Binding is null ? "연결 필요" : $"연결됨 · HWND {Binding.WindowHandle:X}";
+    public string BindingSummary => Binding is null ? "연결 필요" : "연결됨 · 카카오톡 방 확인됨";
 
     [JsonIgnore]
     public string ScheduleSummary => ScheduleKind == ScheduleKind.FixedTimes
