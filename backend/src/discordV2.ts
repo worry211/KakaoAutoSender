@@ -14,7 +14,11 @@ const COLORS = {
   gray: 0x747f8d,
 };
 
-const response = (content = "", embeds: any[] = [], components: any[] = []) => ({
+const response = (
+  content = "",
+  embeds: any[] = [],
+  components: any[] = [],
+) => ({
   content,
   embeds,
   components,
@@ -22,7 +26,9 @@ const response = (content = "", embeds: any[] = [], components: any[] = []) => (
 });
 
 const oneLine = (value: any, max = 180) => {
-  const text = String(value ?? "").replaceAll(/\s+/g, " ").trim();
+  const text = String(value ?? "")
+    .replaceAll(/\s+/g, " ")
+    .trim();
   if (!text) return "—";
   return text.length > max ? text.slice(0, max - 1) + "…" : text;
 };
@@ -41,7 +47,12 @@ const stateMeta = (state: any) => {
     REVOKED: { label: "🔴 취소", color: COLORS.red },
     DELETED: { label: "⚫ 삭제", color: COLORS.gray },
   };
-  return map[String(state)] ?? { label: String(state ?? "알 수 없음"), color: COLORS.gray };
+  return (
+    map[String(state)] ?? {
+      label: String(state ?? "알 수 없음"),
+      color: COLORS.gray,
+    }
+  );
 };
 
 const actionLabel = (action: any) => {
@@ -86,7 +97,9 @@ export function licenseTerm(license: any) {
   return `⚠️ 기본 ${durationText(license.duration_seconds)} · 만료일 확인 필요`;
 }
 
-const footer = (text: string) => ({ text: `KakaoMacro Seller Console · ${text}` });
+const footer = (text: string) => ({
+  text: `KakaoMacro Seller Console · ${text}`,
+});
 const stamp = () => new Date().toISOString();
 
 const button = (
@@ -109,7 +122,9 @@ function pager(command: Command | undefined, result: any) {
   } else if (command.group === "license" && command.action === "expiring") {
     prefix = `nav:exp:${Number(command.params.days ?? result.days ?? 7)}:`;
   } else if (command.group === "license" && command.action === "history") {
-    const target = String(result?.license_id ?? command.params["key-or-id"] ?? "");
+    const target = String(
+      result?.license_id ?? command.params["key-or-id"] ?? "",
+    );
     if (!/^LIC-[a-f0-9-]{36}$/i.test(target)) return [];
     prefix = `nav:hist:${target}:`;
   } else {
@@ -166,7 +181,11 @@ function listEmbed(result: any, command?: Command) {
     description: `${filter}\n페이지 **${Number(result.page) || 1}**${result.has_more ? " · 다음 페이지 있음" : ""}`,
     color: COLORS.blue,
     fields,
-    footer: footer(action === "search" ? "검색은 page 옵션으로 이동" : "버튼으로 페이지 이동 가능"),
+    footer: footer(
+      action === "search"
+        ? "검색은 page 옵션으로 이동"
+        : "버튼으로 페이지 이동 가능",
+    ),
     timestamp: stamp(),
   };
 }
@@ -192,12 +211,14 @@ export function renderDiscordPanel(result: any, command?: Command) {
           },
           {
             name: "🛠️ 상태 / 기간",
-            value: "`/license extend` 연장\n`/license suspend` 정지\n`/license resume` 해제",
+            value:
+              "`/license extend` 연장\n`/license suspend` 정지\n`/license resume` 해제",
             inline: true,
           },
           {
             name: "📱 기기 / 키",
-            value: "`/license reset-device` 기기 변경\n`/license replace-unused-key` 미사용 키 교체",
+            value:
+              "`/license reset-device` 기기 변경\n`/license replace-unused-key` 미사용 키 교체",
             inline: true,
           },
           {
@@ -207,7 +228,8 @@ export function renderDiscordPanel(result: any, command?: Command) {
           },
           {
             name: "🔐 운영 원칙",
-            value: "KM 키 원문은 발급/교체 순간에만 표시됩니다. 고객 기록에는 **LIC ID**를 사용하세요.",
+            value:
+              "KM 키 원문은 발급/교체 순간에만 표시됩니다. 고객 기록에는 **LIC ID**를 사용하세요.",
             inline: false,
           },
         ],
@@ -223,15 +245,21 @@ export function renderDiscordPanel(result: any, command?: Command) {
         description: "전체 고객에게 영향을 줄 수 있는 운영 명령어입니다.",
         color: COLORS.blue,
         fields: [
-          { name: "📊 상태", value: "`/system status` 운영 현황", inline: true },
+          {
+            name: "📊 상태",
+            value: "`/system status` 운영 현황",
+            inline: true,
+          },
           {
             name: "🧰 제어",
-            value: "`/system maintenance` 점검 모드\n`/system kill-switch` 긴급 중단",
+            value:
+              "`/system maintenance` 점검 모드\n`/system kill-switch` 긴급 중단",
             inline: true,
           },
           {
             name: "📦 버전",
-            value: "`/system min-version` 최소 버전\n`/system latest-version` 최신 버전",
+            value:
+              "`/system min-version` 최소 버전\n`/system latest-version` 최신 버전",
             inline: true,
           },
           {
@@ -253,7 +281,11 @@ export function renderDiscordPanel(result: any, command?: Command) {
           result.kill_switch || result.maintenance
             ? "⚠️ 현재 일부 또는 전체 자동전송이 제한된 상태입니다."
             : "✅ 서비스가 정상 운영 중입니다.",
-        color: result.kill_switch ? COLORS.red : result.maintenance ? COLORS.yellow : COLORS.green,
+        color: result.kill_switch
+          ? COLORS.red
+          : result.maintenance
+            ? COLORS.yellow
+            : COLORS.green,
         fields: [
           {
             name: "🛡️ 안전 상태",
@@ -289,7 +321,10 @@ export function renderDiscordPanel(result: any, command?: Command) {
   if (Array.isArray(result)) {
     const fields = result.map((license: Row, index: number) => ({
       name: `🔑 ${index + 1}. ${license.license_id}`,
-      value: [`**기간**  ${licenseTerm(license)}`, `**KM 키**  \`${license.key}\``].join("\n"),
+      value: [
+        `**기간**  ${licenseTerm(license)}`,
+        `**KM 키**  \`${license.key}\``,
+      ].join("\n"),
       inline: false,
     }));
     return response("", [
@@ -311,7 +346,11 @@ export function renderDiscordPanel(result: any, command?: Command) {
       inline: false,
     }));
     if (!fields.length)
-      fields.push({ name: "변경 이력 없음", value: "기록된 관리 작업이 없습니다.", inline: false });
+      fields.push({
+        name: "변경 이력 없음",
+        value: "기록된 관리 작업이 없습니다.",
+        inline: false,
+      });
     return response(
       "",
       [
@@ -337,7 +376,11 @@ export function renderDiscordPanel(result: any, command?: Command) {
       { name: "🗓️ 기간 / 만료", value: licenseTerm(result), inline: false },
       { name: "생성", value: discordDate(result.created_at), inline: true },
       { name: "활성화", value: discordDate(result.activated_at), inline: true },
-      { name: "최근 서버 확인", value: discordDate(result.last_seen_at), inline: true },
+      {
+        name: "최근 서버 확인",
+        value: discordDate(result.last_seen_at),
+        inline: true,
+      },
       {
         name: "📱 기기",
         value: `등록 **${result.device_bound ? "예" : "아니오"}**\n초기화 **${result.device_reset_count ?? 0}회**`,
@@ -419,7 +462,10 @@ export function renderDiscord(result: any, command?: Command) {
       [
         embed.title,
         embed.description,
-        ...(embed.fields ?? []).flatMap((field: any) => [field.name, field.value]),
+        ...(embed.fields ?? []).flatMap((field: any) => [
+          field.name,
+          field.value,
+        ]),
       ]
         .filter(Boolean)
         .join("\n"),
@@ -456,7 +502,9 @@ async function enrichResult(env: Env, result: any, command: Command) {
   )
     .bind(...list)
     .all<Row>();
-  const terms = new Map(rows.results.map((row) => [row.license_id, row.duration_seconds]));
+  const terms = new Map(
+    rows.results.map((row) => [row.license_id, row.duration_seconds]),
+  );
   if (Array.isArray(result?.licenses))
     result = {
       ...result,
@@ -478,7 +526,10 @@ function navCommand(custom: string): Command | null {
     return {
       group: "license",
       action: "list",
-      params: { page: Number(m[2]), ...(m[1] === "ALL" ? {} : { status: m[1] }) },
+      params: {
+        page: Number(m[2]),
+        ...(m[1] === "ALL" ? {} : { status: m[1] }),
+      },
     };
   m = custom.match(/^nav:exp:([1-9]\d?):([1-9]\d{0,5})$/);
   if (m && Number(m[1]) <= 90)
@@ -580,7 +631,8 @@ export async function executeDiscordV2(
         [
           {
             title: "⚠️ 최종 확인 필요",
-            description: "영향이 큰 작업입니다. 대상과 사유를 확인한 뒤 실행하세요.",
+            description:
+              "영향이 큰 작업입니다. 대상과 사유를 확인한 뒤 실행하세요.",
             color: COLORS.yellow,
             fields: [
               {
