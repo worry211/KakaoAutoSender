@@ -23,6 +23,13 @@ jobs:
           python-version: '3.12'
       - name: Apply v1.3.2 editor workflow polish
         run: python scripts/apply_windows_v132_editor_workflow.py
+      - name: Disambiguate WPF keyboard event type
+        shell: pwsh
+        run: |
+          $path = 'desktop/KakaoMacro.Windows/MainWindow.xaml.cs'
+          $text = Get-Content -Raw -Encoding UTF8 $path
+          $text = $text.Replace('private void Window_PreviewKeyDown(object sender, KeyEventArgs e)', 'private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)')
+          Set-Content -Path $path -Value $text -Encoding UTF8
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
