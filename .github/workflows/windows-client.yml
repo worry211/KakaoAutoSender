@@ -27,10 +27,20 @@ jobs:
       - name: Release build with warnings as errors
         run: dotnet build desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --no-restore -warnaserror
       - name: Publish self-contained x64
-        run: dotnet publish desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o desktop/artifacts/win-x64
+        run: dotnet publish desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o desktop/artifacts/win-x64
+      - name: Prepare sale executable
+        shell: pwsh
+        run: |
+          $source = 'desktop/artifacts/win-x64/KakaoMacro.Windows.exe'
+          $target = 'desktop/artifacts/KakaoMacro-PC-v1.4.0.exe'
+          if (-not (Test-Path $source)) { throw "Published executable not found: $source" }
+          Copy-Item $source $target -Force
+          $version = (Get-Item $target).VersionInfo.FileVersion
+          if ($version -notlike '1.4.0*') { throw "Unexpected file version: $version" }
+          Get-FileHash $target -Algorithm SHA256 | Format-List
       - uses: actions/upload-artifact@v4
         with:
-          name: KakaoMacro-PC-v1.4.0-sale-candidate
-          path: desktop/artifacts/win-x64/**
+          name: KakaoMacro-PC-v1.4.0-sale
+          path: desktop/artifacts/KakaoMacro-PC-v1.4.0.exe
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
