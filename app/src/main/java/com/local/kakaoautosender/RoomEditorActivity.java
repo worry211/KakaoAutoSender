@@ -111,7 +111,7 @@ public class RoomEditorActivity extends Activity {
         scroll.setBackgroundColor(BG);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        applySystemBarInsets(root, 18, 22, 18, 28);
+        applyScrollableInsets(scroll, root, 18, 22, 18, 20);
         scroll.addView(root);
 
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
@@ -852,21 +852,23 @@ public class RoomEditorActivity extends Activity {
         return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
     }
 
-    private void applySystemBarInsets(View view, int leftDp, int topDp, int rightDp, int bottomDp) {
+    private void applyScrollableInsets(ScrollView scroll, View content, int leftDp, int topDp, int rightDp, int bottomDp) {
         final int left = dp(leftDp);
         final int top = dp(topDp);
         final int right = dp(rightDp);
         final int bottom = dp(bottomDp);
-        view.setPadding(left, top, right, bottom);
-        view.setOnApplyWindowInsetsListener((v, insets) -> {
-            v.setPadding(
+        content.setPadding(left, top, right, bottom);
+        scroll.setClipToPadding(true);
+        scroll.setOnApplyWindowInsetsListener((v, insets) -> {
+            content.setPadding(
                     left + insets.getSystemWindowInsetLeft(),
                     top + insets.getSystemWindowInsetTop(),
                     right + insets.getSystemWindowInsetRight(),
-                    bottom + insets.getSystemWindowInsetBottom());
+                    bottom);
+            v.setPadding(0, 0, 0, insets.getSystemWindowInsetBottom());
             return insets;
         });
-        view.requestApplyInsets();
+        scroll.requestApplyInsets();
     }
 
     private int dp(int v) {
