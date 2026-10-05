@@ -325,7 +325,7 @@ public partial class MainWindow : Window
                 {
                     _schedulerGate.Release();
                 }
-                Dispatcher.BeginInvoke(() =>
+                _ = Dispatcher.BeginInvoke(() =>
                 {
                     QueueSaveSettings();
                     RefreshRoomUi();
