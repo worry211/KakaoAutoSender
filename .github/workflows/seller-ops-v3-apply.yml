@@ -5,6 +5,7 @@ on:
     branches: [feat/discord-seller-ops-v3]
     paths:
       - 'scripts/apply_seller_ops_v3.py'
+      - 'scripts/fix_seller_ops_v3.py'
       - '.github/workflows/seller-ops-v3-apply.yml'
 
 permissions:
@@ -24,7 +25,9 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - name: Apply seller operations v3 patch
-        run: python scripts/apply_seller_ops_v3.py
+        run: |
+          python scripts/apply_seller_ops_v3.py
+          python scripts/fix_seller_ops_v3.py
       - name: Install backend dependencies
         working-directory: backend
         run: npm ci
