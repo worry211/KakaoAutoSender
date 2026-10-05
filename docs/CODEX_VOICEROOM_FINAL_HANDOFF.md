@@ -1,3 +1,12 @@
+# Current handoff: Windows v0.4.0 RC4 — 2026-10-05
+
+Continue on feat/voiceroom-standalone-android-v1 / Draft PR #12. Current Windows source uses one RoomWorkflow, dedicated exact-room VoiceHost, typed ON/OFF glyphs, repeated participant/audio evidence, explicit ended-window verification, durable uncertain submission, and guarded header menu detection. Do not restore RICHEDIT or whole-chat menu OCR fallbacks. Android/backend source is preserved.
+
+121 Windows tests pass locally. Actual target Kakao creation and ended-window regeneration were observed, then actual Mic ON/Speaker ON → automatic OFF and strong active verification after app restart (12:00 KST). Final default four-glyph menu was recognized without calibration by actual SafeProbe (12:18). Last healthy existing-room checks were about 1.8–2.2 seconds. A runtime control-occlusion failure was exposed and bounded read-only retries added. At 12:27, after moving the test pointer highlight away from the controls, RUNTIME_GUARD automatically restored actual Speaker ON→OFF and retained ACTIVE/both-muted evidence; AudioRepairs increased to 3. Final CI/package evidence belongs in the release manifest and PR.
+
+The 11:58 creation still used the then-existing compatibility menu. Do not claim final no-calibration fresh-create E2E from a detector fixture. Other-account speaker requests, account multi-room limits, physical monitor OFF/lock/Windows-login restart and real 48-hour expiry remain approval gates. See [current audit](VOICEROOM_WINDOWS_RC_AUDIT.md), [minimal checklist](VOICEROOM_WINDOWS_RC_CHECKLIST.md), and Windows README. Earlier RC records below are historical; their automatic audio pending status is superseded by the RC4 observation.
+
+---
 # RC3 직접 실기 관찰 — 2026-10-05 10:46 KST
 
 다운로드 RC1 실행을 확인한 후 최신 RC3 EXE를 실행했다. UI의 RC3 버전, 기존 방 복원, 중단 시 점검 표시 없음, 이전 trace 요약을 직접 확인했다. 전체 시작 한 번으로 browser→preview→정확한 방 1→검증 폼 제출→‘보이스룸: 1’ 전용 창이 생성됐다. 창에 1명 참여 중과 오디오/퇴장 아이콘을 확인했다.

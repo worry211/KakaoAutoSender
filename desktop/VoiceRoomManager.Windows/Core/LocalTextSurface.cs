@@ -12,6 +12,8 @@ namespace VoiceRoomManager.Windows.Core;
 // Windows OCR operates locally. Captures are held in memory and never uploaded or logged.
 internal static class LocalTextSurface
 {
+    private static readonly SemaphoreSlim OcrGate = new(1, 1);
+    private static OcrEngine? CachedEngine;
     internal sealed record Line(string Text, Rect Bounds);
     internal sealed record Frame(IntPtr Host, KakaoSurfaceLocator.Bounds Surface, IReadOnlyList<Line> Lines, bool VerifiedEditable = false)
     {
@@ -49,12 +51,17 @@ internal static class LocalTextSurface
     }
 
     // Also used by offline fixture diagnostics: no desktop capture, input, or upload.
-    internal static async Task<Reading> RecognizeAsync(byte[] bytes, IntPtr host, KakaoSurfaceLocator.Bounds bounds)
+    internal static async Task<Reading> RecognizeAsync(byte[] bytes, IntPtr host, KakaoSurfaceLocator.Bounds bounds, bool coordinatesRequired = true)
     {
+        await OcrGate.WaitAsync();
         try
         {
-            var korean = OcrEngine.AvailableRecognizerLanguages.FirstOrDefault(l => l.LanguageTag.StartsWith("ko", StringComparison.OrdinalIgnoreCase));
-            var engine = korean is null ? null : OcrEngine.TryCreateFromLanguage(korean);
+            if (CachedEngine is null)
+            {
+                var korean = OcrEngine.AvailableRecognizerLanguages.FirstOrDefault(l => l.LanguageTag.StartsWith("ko", StringComparison.OrdinalIgnoreCase));
+                CachedEngine = korean is null ? null : OcrEngine.TryCreateFromLanguage(korean);
+            }
+            var engine = CachedEngine;
             if (engine is null) return new(ReadStatus.KoreanUnavailable, null,
                 "Windows 한국어 OCR이 없습니다. Windows 언어 옵션에서 한국어 OCR을 설치한 뒤 다시 확인해 주세요. " + Capability());
             using var stream = new InMemoryRandomAccessStream();
@@ -68,7 +75,7 @@ internal static class LocalTextSurface
             var transform = new BitmapTransform { ScaledWidth = (uint)Math.Round(decoder.PixelWidth * scale), ScaledHeight = (uint)Math.Round(decoder.PixelHeight * scale) };
             using var bitmap = await decoder.GetSoftwareBitmapAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, transform, ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage);
             var result = await engine.RecognizeAsync(bitmap);
-            if (result.TextAngle is double angle && Math.Abs(angle) > 3) return new(ReadStatus.Rotated, null, "OCR 화면 기울기 초과");
+            if (coordinatesRequired && result.TextAngle is double angle && !TextEvidence.IsHorizontal(angle)) return new(ReadStatus.Rotated, null, $"OCR 화면 기울기 초과 angle={angle:0.00}");
             var lines = result.Lines.Where(l => l.Words.Count > 0).Select(line =>
             {
                 var left = line.Words.Min(w => w.BoundingRect.Left) / scale;
@@ -80,7 +87,8 @@ internal static class LocalTextSurface
             return new(ReadStatus.Ready, new(host, bounds, lines), $"OCR ready language={engine.RecognizerLanguage.LanguageTag} lines={lines.Length} scale={scale:0.00}");
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception e) { return new(ReadStatus.EngineFailed, null, $"Windows OCR 실행 실패 · {e.GetType().Name} HRESULT=0x{e.HResult:X8}"); }
+        catch (Exception e) { CachedEngine = null; return new(ReadStatus.EngineFailed, null, $"Windows OCR 실행 실패 · {e.GetType().Name} HRESULT=0x{e.HResult:X8}"); }
+        finally { OcrGate.Release(); }
     }
 
     internal static (bool Match, bool RequiresAction, string Diagnostic) VerifyPreview(IntPtr host, KakaoSurfaceLocator.Bounds surface, Rect action, string title)
@@ -173,7 +181,7 @@ internal static class LocalTextSurface
         var previous = SelectObject(memory, bitmap);
         try
         {
-            if (!BitBlt(memory, 0, 0, r.Width, r.Height, screen, r.Left, r.Top, 0x00CC0020)) return null;
+            if (!BitBlt(memory, 0, 0, r.Width, r.Height, screen, r.Left, r.Top, 0x40CC0020)) return null;
             var source = Imaging.CreateBitmapSourceFromHBitmap(bitmap, IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(source));
             using var output = new MemoryStream(); encoder.Save(output); return output.ToArray();
@@ -192,6 +200,7 @@ internal static class LocalTextSurface
 
 public static class TextEvidence
 {
+    public static bool IsHorizontal(double angle) => double.IsFinite(angle) && Math.Abs((angle % 360 + 540) % 360 - 180) <= 3;
     public static bool RoomMatches(string expected, string actual)
     {
         expected = expected.Trim(); actual = actual.Trim();

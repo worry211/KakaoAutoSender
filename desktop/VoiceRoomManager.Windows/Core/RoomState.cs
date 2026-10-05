@@ -19,6 +19,8 @@ public sealed class RoomState
     public int Failures { get; set; }
     public DateTimeOffset? LastSuccessAt { get; set; }
     public DateTimeOffset? LastFailureAt { get; set; }
+    public long LastOperationMilliseconds { get; set; }
+    [JsonIgnore] public string DurationDisplay => LastOperationMilliseconds > 0 ? $"최근 점검 {LastOperationMilliseconds / 1000d:0.0}초" : "점검 기록 없음";
     public string Stage { get; set; } = "준비";
     [JsonIgnore]
     public string NextCheckDisplay => !Enabled || Status == "STOPPED" ? "—" : NextCheckAt?.ToLocalTime().ToString("MM/dd HH:mm:ss") ?? "—";

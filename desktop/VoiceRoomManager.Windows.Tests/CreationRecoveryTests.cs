@@ -5,6 +5,48 @@ using Xunit;
 namespace VoiceRoomManager.Windows.Tests;
 public class CreationRecoveryTests
 {
+    [Fact] public void MissingWindowRechecksWithoutPretendingItEnded()
+    {
+        var room = new RoomState { LiveVerified = true, MicMuted = true, SpeakerMuted = true, CreationUncertain = true, StartedAt = Now.AddHours(-2) };
+        LifecyclePolicy.Apply(room, new(false, "window disappeared", NeedsRecheck: true), Now);
+        Assert.False(room.LiveVerified); Assert.False(room.MicMuted); Assert.True(room.CreationUncertain);
+        Assert.Equal(Now.AddHours(-2), room.StartedAt); Assert.Same(room, LifecyclePolicy.Due([room], Now));
+    }
+    [Fact] public void RecoveredInactiveManagerNeverDisplaysStoredActiveStatus()
+    {
+        var room = new RoomState { Status = "ACTIVE", LiveVerified = true, MicMuted = true, NextCheckAt = Now.AddMinutes(5) };
+        LifecyclePolicy.Recover(new DesktopState { ManagerActive = false, Rooms = [room] }, Now);
+        Assert.Equal("STOPPED", room.Status); Assert.Null(room.NextCheckAt); Assert.False(room.LiveVerified);
+    }
+    [Theory] [InlineData("{\"Schema\":2,\"Rooms\":[null]}")] [InlineData("{\"Schema\":99,\"Rooms\":[]}")]
+    public void MalformedPrimaryAndBackupCannotCrashRecovery(string invalid)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "state.json"), invalid);
+            File.WriteAllText(Path.Combine(directory, "state.json.bak"), invalid);
+            var state = new StateStore(directory).Load();
+            Assert.False(state.ManagerActive); Assert.Empty(state.Rooms);
+            Assert.True(File.Exists(Path.Combine(directory, "state.json.corrupt")));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+    [Fact] public void ExplicitEndSchedulesRecreationAndClearsOldProofs()
+    {
+        var room = new RoomState { LiveVerified = true, MicMuted = true, SpeakerMuted = true, CreationUncertain = true, StartedAt = Now.AddHours(-48) };
+        LifecyclePolicy.Apply(room, new(false, "ended", VerifiedEnded: true), Now);
+        Assert.False(room.LiveVerified); Assert.False(room.MicMuted); Assert.False(room.SpeakerMuted); Assert.False(room.CreationUncertain);
+        Assert.Null(room.StartedAt); Assert.Equal(Now, room.NextCheckAt);
+        Assert.Same(room, LifecyclePolicy.Due([room], Now));
+    }
+    [Fact] public void ActiveButUnprotectedIsNotARecentSuccess()
+    {
+        var room = new RoomState();
+        LifecyclePolicy.Apply(room, new(false, "audio unknown", Active: true, Created: true, InterventionRequired: true), Now);
+        Assert.Null(room.LastSuccessAt); Assert.Equal(Now, room.StartedAt);
+    }
     private static readonly DateTimeOffset Now = new(2026, 10, 5, 0, 0, 0, TimeSpan.Zero);
     [Fact] public void SubmittedButUnverifiedNeverAutomaticallyCreatesAgain()
     {

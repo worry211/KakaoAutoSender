@@ -1,3 +1,4 @@
+using System.Diagnostics;
 namespace VoiceRoomManager.Windows.Core;
 
 public sealed class VoiceRoomCoordinator : IDisposable
@@ -36,7 +37,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
         _run.Cancel(); _run = new CancellationTokenSource();
         _state.ManagerActive = true; PowerPolicy.SetKeepSystemAwake(true);
         foreach (var room in enabled)
-        { room.NextCheckAt = DateTimeOffset.UtcNow; room.Status = "BOOTSTRAP_PENDING"; room.Failures = 0; room.LastError = ""; room.Stage = "자동 시작 대기"; }
+        { room.LiveVerified = room.MicMuted = room.SpeakerMuted = false; room.NextCheckAt = DateTimeOffset.UtcNow; room.Status = "BOOTSTRAP_PENDING"; room.Failures = 0; room.LastError = ""; room.Stage = "자동 시작 대기"; }
         _state.LastStatus = $"{enabled.Length}개 방 자동관리 시작"; Save(); Notify();
         _ = TickAsync();
     }
@@ -45,6 +46,18 @@ public sealed class VoiceRoomCoordinator : IDisposable
         _state.ManagerActive = false; _run.Cancel(); PowerPolicy.SetKeepSystemAwake(false);
         foreach (var room in _state.Rooms) { room.Stage = "관리 중단"; room.Status = "STOPPED"; room.NextCheckAt = null; }
         _state.LastStatus = "자동관리 중단 · 보이스룸은 유지됩니다"; Save(); Notify();
+    }
+    public void RecheckAll()
+    {
+        if (IsBusy || !_state.ManagerActive) return;
+        foreach (var room in _state.Rooms.Where(r => r.Enabled))
+        {
+            room.LiveVerified = room.MicMuted = room.SpeakerMuted = false;
+            room.NextCheckAt = DateTimeOffset.UtcNow;
+            room.Status = "BOOTSTRAP_PENDING";
+            room.Stage = "전체 재점검 대기";
+        }
+        Save(); Notify(); _ = TickAsync();
     }
     public Task<KakaoPcAutomation.Result> SafeProbeAsync(RoomState room) => ManualAsync(room, true);
     public Task<KakaoPcAutomation.Result> LiveCheckAsync(RoomState room) => ManualAsync(room, false);
@@ -59,6 +72,8 @@ public sealed class VoiceRoomCoordinator : IDisposable
             IsBusy = true; Notify();
             var result = await Task.Run(() => Process(room, probe, token));
             if (!probe && !token.IsCancellationRequested) LifecyclePolicy.Apply(room, result, DateTimeOffset.UtcNow);
+            if (!probe && result.AudioRepaired) _state.AudioRepairs++;
+            room.Stage = probe ? "안전 진단 완료" : room.Status == "USER_ACTION_REQUIRED" ? "사용자 조치 필요" : result.Success ? "활성 · 보호 확인" : "재시도 대기";
             room.LastDiagnostic = result.Status; Save(); return result;
         }
         finally { IsBusy = false; _singleFlight.Release(); Notify(); }
@@ -85,6 +100,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
                 if (!token.IsCancellationRequested)
                 {
                     LifecyclePolicy.Apply(due, result, DateTimeOffset.UtcNow);
+                    if (result.AudioRepaired) _state.AudioRepairs++;
                     due.Stage = result.Success ? "활성 · 보호 확인" : due.Status == "USER_ACTION_REQUIRED" ? "사용자 조치 필요" : "재시도 대기";
                     _state.LastStatus = due.Title + " · " + result.Status;
                     OperationLog.Write(due, due.Status, result.Status); Save();
@@ -92,14 +108,20 @@ public sealed class VoiceRoomCoordinator : IDisposable
             }
             else
             {
-                foreach (var room in _state.Rooms.Where(r => r.Enabled && r.LiveVerified).ToArray())
+                foreach (var room in _state.Rooms.Where(r => r.Enabled && r.LiveVerified && r.Status != "USER_ACTION_REQUIRED").ToArray())
                 {
                     if (token.IsCancellationRequested) break;
                     using var op = new AutomationOperation(room, token);
                     var result = await Task.Run(() => _kakao.RuntimeGuard(room));
-                    if (result.Active && !result.Success && result.InterventionRequired)
+                    if (result.VerifiedEnded || result.NeedsRecheck)
                     {
                         LifecyclePolicy.Apply(room, result, DateTimeOffset.UtcNow);
+                        OperationLog.Write(room, result.VerifiedEnded ? "VERIFIED_ENDED" : "RECHECK_REQUIRED", result.Status); Save(); continue;
+                    }
+                    if (!result.Success && result.InterventionRequired)
+                    {
+                        LifecyclePolicy.Apply(room, result, DateTimeOffset.UtcNow);
+                        room.Stage = "사용자 조치 필요";
                         OperationLog.Write(room, "USER_ACTION_REQUIRED", result.Status); Save();
                     }
                     if (result.Success)
@@ -126,6 +148,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
     }
     private KakaoPcAutomation.Result Process(RoomState room, bool probe, CancellationToken token)
     {
+        var duration = Stopwatch.StartNew();
         using var op = new AutomationOperation(room, token, stage => Stage(room, stage));
         try
         {
@@ -134,6 +157,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
         }
         catch (OperationCanceledException) { return new(false, "중단 또는 Windows 잠금 · 입력 중지"); }
         catch (Exception ex) { return new(false, room.Stage + " · " + ex.GetType().Name + ": " + ex.Message); }
+        finally { room.LastOperationMilliseconds = duration.ElapsedMilliseconds; }
     }
     public void Dispose()
     { _disposed = true; _run.Cancel(); _timer.Dispose(); PowerPolicy.SetKeepSystemAwake(false); }

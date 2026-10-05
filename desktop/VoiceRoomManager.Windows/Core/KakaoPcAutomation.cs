@@ -26,7 +26,9 @@ public sealed class KakaoPcAutomation
         bool RejectedRequest = false,
         bool RequestToggleDisabled = false,
         bool AudioRepaired = false,
-        bool InterventionRequired = false);
+        bool InterventionRequired = false,
+        bool VerifiedEnded = false,
+        bool NeedsRecheck = false);
 
     public Result EnsureKakaoRunning()
     {
@@ -47,14 +49,16 @@ public sealed class KakaoPcAutomation
         if (DesktopSession.IsLocked()) return new(false, "Windows가 잠겨 있어 UI 자동화를 대기함");
         var context = EnsureRoomContext(room);
         if (!context.Success) return context;
-        AutomationOperation.Pause(450);
+        AutomationOperation.Pause(80);
 
         var surfaces = ScopedSurfaces();
+        var toolbarReady = VoiceToolbarAdapter.HasMenu();
+        OperationLog.Write(room, "VOICE_TOOLBAR", toolbarReady ? "four-glyph header recognized · no calibration" : "default header not recognized");
+        if (HasStrongActiveProofHybrid(surfaces)) return new(true, "기존 보이스룸 활성 확인 · " + context.Status + (toolbarReady ? " · 기본 메뉴 자동 인식 확인" : ""), true);
 
-        if (HasStrongActiveProofHybrid(surfaces)) return new(true, "기존 보이스룸 활성 확인 · " + context.Status, true);
-
-        var voice = FindClickableExact(surfaces, "보이스룸", "보이스룸 시작", "보이스룸 만들기");
+        var voice = FindVoiceMenu(surfaces);
         if (voice is not null) return new(true, "방 진입/보이스룸 컨트롤 UIA 인식 성공 · 생성은 하지 않음");
+        if (VoiceToolbarAdapter.HasMenu()) return new(true, "방 진입/보이스룸 도구모음 자동 인식 성공 · 생성은 하지 않음");
         if (KakaoCalibrationStore.IsVisualMatch(KakaoCalibrationStore.VoiceMenu, out var calibrated))
             return new(true, "방 진입 + 캘리브레이션된 보이스룸 메뉴 시그니처 확인 · " + calibrated);
 
@@ -68,17 +72,21 @@ public sealed class KakaoPcAutomation
         if (DesktopSession.IsLocked()) return new(false, "Windows가 잠겨 있어 자동화를 대기함");
         var context = EnsureRoomContext(room);
         if (!context.Success) return context;
-        AutomationOperation.Pause(450);
+        AutomationOperation.Pause(80);
 
         var surfaces = ScopedSurfaces();
 
         if (HasStrongActiveProofHybrid(surfaces))
         {
-            AutomationOperation.Pause(300);
+            AutomationOperation.Pause(120);
             surfaces = ScopedSurfaces();
             if (HasStrongActiveProofHybrid(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
         }
 
+        VoiceWindowAdapter.TryCloseEnded();
+        surfaces = ScopedSurfaces();
+        if (VoiceWindowAdapter.HasUnresolvedWindow())
+            return new(false, "기존 보이스룸 창의 활성 또는 종료를 확정하지 못했습니다. 중복 생성은 대기합니다.", InterventionRequired: true);
         if (room.CreationUncertain)
             return new(false,"이전 생성 요청의 활성 여부가 불명확합니다. Kakao에서 실제 상태를 확인해 주세요. 중복 생성은 대기합니다.",InterventionRequired:true);
 
@@ -87,20 +95,24 @@ public sealed class KakaoPcAutomation
         var form = LocalTextSurface.FindCreateForm(host);
         if (form is null)
         {
-            var voice = FindClickableExact(surfaces, "보이스룸", "보이스룸 시작", "보이스룸 만들기");
+            var voice = FindVoiceMenu(surfaces);
             if (voice is not null)
             {
                 if (!Invoke(voice)) return new(false, "보이스룸 메뉴 UIA 호출 실패");
+                OperationLog.Write(room, "VOICE_MENU", "UIA exact action");
             }
-            else if (!LocalTextSurface.ClickExact(host, "보이스룸", "보이스룸 시작", "보이스룸 만들기")
-                && !KakaoCalibrationStore.TryClick(KakaoCalibrationStore.VoiceMenu, out _))
+            else if (VoiceToolbarAdapter.TryOpen())
+                OperationLog.Write(room, "VOICE_MENU", "verified four-glyph toolbar · no calibration");
+            else if (KakaoCalibrationStore.TryClick(KakaoCalibrationStore.VoiceMenu, out _))
+                OperationLog.Write(room, "VOICE_MENU", "compatibility calibration · actual create form still required");
+            else
                 return new(false, "보이스룸 메뉴를 확인하지 못했습니다. 해당 방의 보이스룸 메뉴/한국어 OCR을 확인해 주세요.", InterventionRequired: true);
 
-            AutomationOperation.Pause(650);
+            AutomationOperation.Pause(180);
             surfaces = ScopedSurfaces();
             if (HasStrongActiveProofHybrid(surfaces))
             {
-                AutomationOperation.Pause(300);
+                AutomationOperation.Pause(120);
                 surfaces = ScopedSurfaces();
                 if (HasStrongActiveProofHybrid(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
             }
@@ -182,11 +194,24 @@ public sealed class KakaoPcAutomation
             var foreground = KakaoSurfaceLocator.VisibleTopLevels().FirstOrDefault(s => KakaoSurfaceLocator.IsForeground(s.Hwnd));
             if (foreground is not null && LocalTextSurface.Read(foreground.Hwnd)?.HasRoom(room.Title) == true) host = foreground.Hwnd;
         }
-        if (host == IntPtr.Zero || !KakaoSurfaceLocator.IsForeground(host)) return new(false, "현재 방이 전경이 아님 · 정기점검에서 재확인");
+        var foregroundVoice = KakaoSurfaceLocator.VisibleTopLevels().Any(s => VoiceWindowAdapter.TitleMatches(s.Title, room.Title) && KakaoSurfaceLocator.IsForeground(s.Hwnd));
+        if (host == IntPtr.Zero) return new(false, "채팅 창이 사라짐 · 실제 상태 재점검 예약", NeedsRecheck: true);
+        if (!KakaoSurfaceLocator.IsForeground(host) && !foregroundVoice) return new(false, "현재 방이 전경이 아님 · 정기점검에서 재확인");
         if (!AutomationOperation.Current!.Prove(host)) return new(false, "방 증거 없음");
-        var surfaces = ScopedSurfaces();
-        var active = HasStrongActiveProofHybrid(surfaces);
-        if (!active) return new(false, "실제 보이스룸 활성 증거 없음");
+        Result? pipProtection = null;
+        if (VoiceWindowAdapter.Observe(false) is not null)
+        {
+            pipProtection = VoiceWindowAdapter.Protect("런타임 전용 창 보호");
+            if (!pipProtection.Success) return pipProtection;
+        }
+        else if (VoiceWindowAdapter.TryCloseEnded())
+            return new(false, "실제 종료 확인 · 자동 재생성 대기", VerifiedEnded: true);
+        var requestHost = AutomationOperation.Current.VoiceHost != IntPtr.Zero ? AutomationOperation.Current.VoiceHost : host;
+        var surfaces = requestHost == host ? ScopedSurfaces() : new List<AutomationElement> { AutomationElement.FromHandle(requestHost) };
+        var active = pipProtection?.Active == true || HasStrongActiveProofHybrid(surfaces);
+        if (!active) return VoiceWindowAdapter.HasUnresolvedWindow()
+            ? new(false, "보이스룸 창의 활성/종료를 확인하지 못했습니다. 추가 생성은 대기합니다.", InterventionRequired: true)
+            : new(false, "보이스룸 창이 사라짐 · 실제 상태 재점검 예약", NeedsRecheck: true);
         var scoped = surfaces;
 
         foreach (var root in scoped)
@@ -194,26 +219,37 @@ public sealed class KakaoPcAutomation
             var requestContext = FindByNameContains(root, "스피커 요청", "스피커 신청", "발언 요청");
             if (requestContext is null) continue;
             var reject = FindExplicitRejectNear(requestContext);
-            if (reject is not null && Invoke(reject))
-                return new(true, "스피커 요청 자동 거절", active, room.MicMuted, room.SpeakerMuted, RejectedRequest: true);
+            if (reject is not null && InvokeScopedRequest(reject, requestHost))
+            {
+                AutomationOperation.Pause(120);
+                if (FindByNameContains(root, "스피커 요청", "스피커 신청", "발언 요청") is null)
+                    return (pipProtection ?? new(true, "런타임 보호 확인", active, room.MicMuted, room.SpeakerMuted)) with { Status = "스피커 요청 거절 · 요청 소멸 재확인", RejectedRequest = true };
+            }
         }
 
         var disable = FindClickableExact(scoped,
             "스피커 요청 끄기", "스피커 요청 받지 않기", "스피커 요청 차단하기",
             "스피커 신청 끄기", "스피커 신청 받지 않기", "스피커 신청 차단하기");
-        if (disable is not null && Invoke(disable))
-            return new(true, "스피커 요청 받기 자동 차단", active, room.MicMuted, room.SpeakerMuted, RequestToggleDisabled: true);
-
-        var frame = LocalTextSurface.Read(host);
-        if (frame is not null && frame.HasRoom(room.Title))
+        if (disable is not null && InvokeScopedRequest(disable, requestHost))
         {
-            if (LocalTextSurface.ClickExact(host, "스피커 요청 거절", "스피커 신청 거절", "발언 요청 거절"))
-                return new(true, "스피커 요청 자동 거절 · 명시적 OCR action", active, room.MicMuted, room.SpeakerMuted, RejectedRequest: true);
-            if (LocalTextSurface.ClickExact(host, "스피커 요청 끄기", "스피커 요청 받지 않기", "스피커 요청 차단하기"))
-                return new(true, "스피커 요청 차단 · 명시적 OCR action", active, room.MicMuted, room.SpeakerMuted, RequestToggleDisabled: true);
+            AutomationOperation.Pause(120);
+            if (FindClickableExact(scoped, "스피커 요청 받기", "스피커 요청 켜기", "스피커 신청 받기", "스피커 신청 켜기") is not null)
+                return (pipProtection ?? new(true, "런타임 보호 확인", active, room.MicMuted, room.SpeakerMuted)) with { Status = "스피커 요청 차단 · 반대 명령 재확인", RequestToggleDisabled = true };
         }
 
-        return ProtectAudio(scoped.Count > 0 ? scoped : surfaces, "런타임 보호 확인");
+        // Chat text alone cannot prove an actionable request dialog. Unknown request surfaces remain untouched.
+        return pipProtection ?? ProtectAudio(scoped.Count > 0 ? scoped : surfaces, "런타임 보호 확인");
+    }
+
+    private static bool InvokeScopedRequest(AutomationElement element, IntPtr host)
+    {
+        try
+        {
+            var bounds = element.Current.BoundingRectangle;
+            return !bounds.IsEmpty && KakaoSurfaceLocator.IsForeground(host)
+                && NativeInput.OwnsPoint(host, (int)(bounds.Left + bounds.Width / 2), (int)(bounds.Top + bounds.Height / 2)) && Invoke(element);
+        }
+        catch { return false; }
     }
 
     private Result EnsureRoomContext(RoomState room)
@@ -244,6 +280,7 @@ public sealed class KakaoPcAutomation
 
     private Result ProtectAudio(IReadOnlyCollection<AutomationElement> roots, string prefix)
     {
+        if (AutomationOperation.Current!.VoiceHost != IntPtr.Zero) return VoiceWindowAdapter.Protect(prefix);
         AutomationOperation.Stage("마이크 · 스피커 보호 확인");
         var host = AutomationOperation.Current!.Host;
         var repaired = false;
@@ -255,7 +292,7 @@ public sealed class KakaoPcAutomation
         var speaker = FindClickableExact(roots, "스피커 끄기", "스피커 음소거", "소리 끄기");
         if (speaker is not null) repaired |= Invoke(speaker);
         else repaired |= LocalTextSurface.ClickExact(host, "스피커 끄기", "스피커 음소거", "소리 끄기");
-        AutomationOperation.Pause(300);
+        AutomationOperation.Pause(120);
         roots = ScopedSurfaces();
         var frame = LocalTextSurface.Read(host);
         var micMuted = FindClickableExact(roots, "마이크 켜기", "마이크 음소거 해제") is not null
@@ -270,6 +307,7 @@ public sealed class KakaoPcAutomation
 
     private static bool HasStrongActiveProofHybrid(IReadOnlyCollection<AutomationElement> roots)
     {
+        if (VoiceWindowAdapter.Observe(true) is not null) return true;
         if (HasStrongActiveProof(roots)) return true;
         var op = AutomationOperation.Current;
         if (op?.HasRoomProof != true) return false;
@@ -357,6 +395,22 @@ public sealed class KakaoPcAutomation
             if (name.Length == 0 || !normalized.Any(n => name == n || name == n + " 버튼")) continue;
             var clickable = ClickableAncestor(e);
             if (clickable is not null) return clickable;
+        }
+        return null;
+    }
+    private static AutomationElement? FindVoiceMenu(IEnumerable<AutomationElement> roots)
+    {
+        var op = AutomationOperation.Current!;
+        var surface = KakaoSurfaceLocator.VisibleTopLevels().FirstOrDefault(s => s.Hwnd == op.Host);
+        if (!op.HasRoomProof || surface is null) return null;
+        var header = new KakaoSurfaceLocator.Bounds(surface.Rect.Left, surface.Rect.Top, surface.Rect.Right,
+            Math.Min(surface.Rect.Bottom, surface.Rect.Top + (int)Math.Ceiling(88 * KakaoSurfaceLocator.DpiScale(op.Host))));
+        foreach (var root in roots) foreach (var element in Elements(root))
+        {
+            if (Normalize(SafeName(element)) is not ("보이스룸" or "보이스룸 시작" or "보이스룸 만들기")) continue;
+            var button = ClickableAncestor(element);
+            try { if (button is not null && CreateFormEvidence.Contains(header, button.Current.BoundingRectangle)) return button; }
+            catch { }
         }
         return null;
     }

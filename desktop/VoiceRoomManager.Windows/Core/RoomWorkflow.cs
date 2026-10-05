@@ -54,7 +54,6 @@ internal sealed class WindowsWorkflowDriver(KakaoPcAutomation kakao) : IRoomWork
     public KakaoPcAutomation.Result EnsureKakao() => kakao.EnsureKakaoRunning();
     public KakaoPcAutomation.Result EnterRoom(RoomState room)
     {
-        AutomationOperation.Pause(500);
         var entry = OpenChatLinkLauncher.TryOpen(room);
         return new(entry.Success, entry.Diagnostic, InterventionRequired: entry.InterventionRequired);
     }

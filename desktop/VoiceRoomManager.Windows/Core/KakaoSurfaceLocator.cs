@@ -54,6 +54,8 @@ internal static class KakaoSurfaceLocator
     private static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
+    public static double DpiScale(IntPtr hwnd) => Math.Clamp(GetDpiForWindow(hwnd) / 96d, 1, 3);
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
 
@@ -79,6 +81,7 @@ internal static class KakaoSurfaceLocator
         for(var i=0;i<5 && cursor!=IntPtr.Zero;i++) { owners.Add(cursor.ToInt64().ToString("X"));cursor=GetWindow(cursor,4); }
         return $"foreground={current.ClassName} rect={current.Rect} pid={ProcessId(fg)} expected={expected.ToInt64():X} owners={string.Join(',',owners)}";
     }
+    public static bool IsVisible(IntPtr host) => IsWindowVisible(host);
     public static bool IsForeground(IntPtr host) => GetForegroundWindow() == host;
     public static int ProcessId(IntPtr host) { GetWindowThreadProcessId(host, out var pid); return (int)pid; }
 

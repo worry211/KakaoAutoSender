@@ -1,3 +1,34 @@
+# Windows RC4 감사 및 검증 — 2026-10-05
+
+현재 기준은 RC4이며 아래 RC3/RC2 기록은 역사적 관찰입니다. RC3의 자동 활성·음소거 미검증 상태는 RC4의 실제 전용 창 검증으로 개선했습니다. Android/backend 소스는 이번 변경에서 유지했습니다.
+
+## 구조적 변경
+
+RoomWorkflow가 유일한 bootstrap 경로이고 작업별 exact room/PID/창 증거를 사용합니다. 채팅과 별도 전용 VoiceHost를 분리하여 UIA 빈 트리나 소유 관계 없는 PIP 때문에 정확한 방 성공이 취소되지 않습니다. 전용 창 제목+같은 PID+참여 인원+다섯 컨트롤을 함께 읽고 두 번 확인합니다. ON/OFF 실측 glyph와 상태를 검증한 경우만 토글하며 반대 상태를 재확인합니다. 빈 glyph, 누락 이웃, 잘못된 row/geometry는 거절합니다. 전환 애니메이션에는 최대 네 번 읽기만 재시도하고 같은 입력을 반복하지 않습니다.
+
+명시적 종료의 세 문구를 두 번 읽고 창 닫힘까지 확인한 경우에만 생성 불확실성을 해제합니다. 창 소멸/인식 실패는 종료로 취급하지 않습니다. 실제 생성 전에 불확실성을 저장하고 재시작 시 오래된 활성/음소거 증거를 폐기합니다. 최종 메뉴는 exact chat header의 네 glyph를 함께 확인하며 채팅 텍스트 OCR을 메뉴 입력에 사용하던 경로를 제거했습니다.
+
+기능: 전체 재점검, 설정만 백업/복원(최대 100방, 공식 URL, 중복/크기/schema 검증), 손상된 primary/backup 안전 대기, 작업 소요 시간과 최신 버전 표시, 다크 ComboBox, 선택 방 유지. OCR 엔진 재사용/직렬화, 중복 native/UIA 읽기와 대기 축소. 요청은 scoped 명시적 UIA action과 결과 재확인만 허용합니다. icon-only 요청 처리를 실기로 증명하지 않았습니다.
+
+## 실제 증거와 경계
+
+대상 PC / Kakao 26.8.1.5315 / 방 1 / 100% 배율:
+
+- 10:46 RC3 전체 시작에서 browser → preview → 정확한 방 → 실제 전용 창 생성.
+- 11:27 RC4 개발 중 이미 종료된 전용 창의 명시적 안내 확인/닫기 → 실제 자동 재생성.
+- 11:58 새 생성에는 당시 호환성 메뉴 지점을 사용함. 최종 no-calibration 신규 생성 전체 run은 미검증.
+- 12:00 재시작 후 실제 Mic ON·Speaker ON → 둘 다 자동 OFF → 활성/음소거 반복 확인. 수동 마이크 음소거 없이 이 전환을 관찰함.
+- 12:05 기존 보호된 방 점검 약 2.2초, 12:18 약 1.8초. 전체 신규 생성 latency 보장은 아님.
+- 12:18 안전 진단 로그 `four-glyph header recognized · no calibration`: 최종 기본 메뉴 실제 인식 확인.
+- 12:20 runtime 스피커 전환 시험에서 실제 OFF 전환 후 전환 직후 컨트롤 가림으로 final readback 실패. 실패를 보호 완료로 숨기지 않았으며 bounded read-only 안정화 재확인과 intervention stage를 보강함. 12:27 포인터 강조가 컨트롤을 가리지 않도록 옮긴 재시험에서 RUNTIME_GUARD가 실제 Speaker ON→OFF를 처리하고 ACTIVE/두 음소거를 유지했으며 AudioRepairs가 3으로 증가함. 가림 때문에 footer가 누락된 상황은 보호 완료로 표시하지 않음.
+
+자동 테스트 121개 전부 통과: 기존 정책/simulation 외 실측 footer/header/ended fixture, ON/OFF, 빈 glyph negative, 누락 메뉴 이웃, 100/150/200% 배율, OCR offset 동시성, 설정 import, malformed backup, 사라진 UI와 명시적 종료 분리. 녹화/프로필/채팅 본문을 fixture로 배포하지 않으며 generic glyph와 redacted header만 포함합니다.
+
+남은 승인: 최종 no-calibration 신규 생성 종합 run, 다른 계정 요청, 다중 방/account 한도, 실제 monitor OFF/Windows 잠금·로그인 재시작, 48시간 만료. [최소 체크리스트](VOICEROOM_WINDOWS_RC_CHECKLIST.md)를 사용합니다. 정확한 제목/OCR/control을 확정할 수 없는 버전은 fail closed. native UIA provider 자체의 장시간 blocking은 cooperative 시간 제한의 한계입니다. 보안/플랫폼 제한 우회는 없습니다.
+
+---
+
+## 이전 RC 기록 (현재 검증 범위가 아님)
 # RC3 직접 실기 관찰 — 2026-10-05 10:46 KST
 
 다운로드 RC1 실행을 확인한 후 최신 RC3 EXE를 실행했다. UI의 RC3 버전, 기존 방 복원, 중단 시 점검 표시 없음, 이전 trace 요약을 직접 확인했다. 전체 시작 한 번으로 browser→preview→정확한 방 1→검증 폼 제출→‘보이스룸: 1’ 전용 창이 생성됐다. 창에 1명 참여 중과 오디오/퇴장 아이콘을 확인했다.

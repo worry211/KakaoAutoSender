@@ -12,6 +12,7 @@ internal sealed class AutomationOperation : IDisposable
     private readonly Action<string>? _progress;
     public RoomState Room { get; }
     public IntPtr Host { get; private set; }
+    public IntPtr VoiceHost { get; set; }
     private int _processId;
     private string _proofUrl = "";
     public static AutomationOperation? Current => Slot.Value;
@@ -48,7 +49,7 @@ internal sealed class AutomationOperation : IDisposable
     public bool Prove(IntPtr host)
     {
         Check();
-        var surface = KakaoSurfaceLocator.Snapshot().FirstOrDefault(s => s.Hwnd == host);
+        var surface = KakaoSurfaceLocator.Snapshot(false).FirstOrDefault(s => s.Hwnd == host);
         if (surface is null || !surface.Visible) return false;
         Host = surface.TopLevel;
         _processId = KakaoSurfaceLocator.ProcessId(Host);
@@ -58,7 +59,7 @@ internal sealed class AutomationOperation : IDisposable
 
     public bool HasRoomProof => Host != IntPtr.Zero && _proofUrl == Room.OpenChatUrl
         && _processId != 0 && KakaoSurfaceLocator.ProcessId(Host) == _processId
-        && KakaoSurfaceLocator.VisibleTopLevels().Any(s => s.Hwnd == Host);
+        && KakaoSurfaceLocator.IsVisible(Host);
 
-    public void Dispose() { Host = IntPtr.Zero; Slot.Value = _previous; }
+    public void Dispose() { Host = VoiceHost = IntPtr.Zero; Slot.Value = _previous; }
 }

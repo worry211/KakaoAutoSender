@@ -25,9 +25,7 @@ public sealed class StateStore
             {
                 DesktopState state;
                 if (!File.Exists(_path)) state = new DesktopState();
-                else state = JsonSerializer.Deserialize<DesktopState>(File.ReadAllText(_path), _json) ?? new DesktopState();
-
-                if (state.Schema > 2 || state.Rooms is null) throw new InvalidDataException("Unsupported state schema");
+                else state = ReadValidated(_path);
                 return state;
             }
             catch
@@ -36,7 +34,7 @@ public sealed class StateStore
                 try
                 {
                     if (File.Exists(_path)) File.Copy(_path, _path + ".corrupt", true);
-                    if (File.Exists(_path + ".bak")) recovered = JsonSerializer.Deserialize<DesktopState>(File.ReadAllText(_path + ".bak"), _json);
+                    if (File.Exists(_path + ".bak")) recovered = ReadValidated(_path + ".bak");
                 }
                 catch { }
                 var state = recovered ?? new DesktopState();
@@ -46,6 +44,17 @@ public sealed class StateStore
                 return state;
             }
         }
+    }
+
+    private DesktopState ReadValidated(string path)
+    {
+        if (new FileInfo(path).Length > 2_000_000) throw new InvalidDataException("State too large");
+        var state = JsonSerializer.Deserialize<DesktopState>(File.ReadAllText(path), _json) ?? throw new InvalidDataException("Empty state");
+        if (state.Schema is < 1 or > 2 || state.Rooms is null || state.Rooms.Count > 100
+            || state.Rooms.Any(r => r is null || string.IsNullOrWhiteSpace(r.Id) || r.Title is null || r.OpenChatUrl is null)
+            || state.Rooms.Select(r => r.Id).Distinct(StringComparer.Ordinal).Count() != state.Rooms.Count)
+            throw new InvalidDataException("Unsupported or malformed state");
+        return state;
     }
 
     public void Save(DesktopState state)

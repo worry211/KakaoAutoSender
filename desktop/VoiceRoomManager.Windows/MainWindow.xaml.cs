@@ -1,5 +1,6 @@
 using System.Windows;
 using System.IO;
+using System.Reflection;
 using System.Windows.Controls;
 using VoiceRoomManager.Windows.Core;
 
@@ -38,12 +39,12 @@ public partial class MainWindow : Window
     private void RefreshUi()
     {
         var selectedId = (RoomsGrid.SelectedItem as RoomState)?.Id;
-        RoomsGrid.ItemsSource = null;
-        RoomsGrid.ItemsSource = State.Rooms;
+        if (!ReferenceEquals(RoomsGrid.ItemsSource, State.Rooms)) RoomsGrid.ItemsSource = State.Rooms;
+        else RoomsGrid.Items.Refresh();
         if (selectedId is not null) RoomsGrid.SelectedItem = State.Rooms.FirstOrDefault(r => r.Id == selectedId);
 
-        var version = typeof(MainWindow).Assembly.GetName().Version;
-        VersionBadge.Text = version is null ? "Windows" : $"Windows v{version.Major}.{version.Minor}.{Math.Max(0, version.Build)} RC3";
+        var version = typeof(MainWindow).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0];
+        VersionBadge.Text = version is null ? "Windows" : "Windows v" + version.Replace("-rc.", " RC", StringComparison.Ordinal);
 
         var attention = State.Rooms.Any(r=>r.Enabled) && State.Rooms.Where(r=>r.Enabled).All(r=>r.Status=="USER_ACTION_REQUIRED");
         MasterStatus.Text = State.ManagerActive
@@ -67,6 +68,7 @@ public partial class MainWindow : Window
         RoomSummary.Text = $"등록 {State.Rooms.Count} · 관리 ON {State.Rooms.Count(r => r.Enabled)} · 조치 필요 {State.Rooms.Count(r => r.Status == "USER_ACTION_REQUIRED")}";
         EmptyState.Visibility = State.Rooms.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         StartButton.IsEnabled = !_coordinator.IsBusy;
+        RecheckAllButton.IsEnabled = State.ManagerActive && !_coordinator.IsBusy;
         RoomNameInput.IsEnabled = RoomLinkInput.IsEnabled = ToggleButton.IsEnabled = RemoveButton.IsEnabled = CheckButton.IsEnabled = !_coordinator.IsBusy;
         UpdateSelection();
 
@@ -91,6 +93,7 @@ public partial class MainWindow : Window
         var url = RoomLinkInput.Text.Trim();
         FormError.Text = "";
         if (title.Length == 0) { FormError.Text = "Kakao에 표시되는 방 이름을 입력해 주세요."; return; }
+        if (State.Rooms.Count >= 100 && !State.Rooms.Any(r => r.Title == title)) { FormError.Text = "최대 100개 방을 등록할 수 있습니다."; return; }
         var existing = State.Rooms.FirstOrDefault(r => string.Equals(r.Title, title, StringComparison.Ordinal));
         if (!TryNormalizeLink(url, existing?.Id, out var normalized)) return;
 
@@ -290,7 +293,7 @@ public partial class MainWindow : Window
         ClearCreationButton.Visibility = RoomsGrid.SelectedItem is RoomState { CreationUncertain: true } ? Visibility.Visible : Visibility.Collapsed;
         ClearCreationButton.IsEnabled = !_coordinator.IsBusy;
         if (RoomsGrid.SelectedItem is not RoomState room) { SelectedStatus.Text = "방을 선택하면 보호 상태와 필요한 조치를 확인할 수 있습니다."; SelectedError.Text = ""; return; }
-        SelectedStatus.Text = room.Title + " · " + (room.Enabled ? "관리 ON" : "관리 OFF") + " · " + room.AudioDisplay
+        SelectedStatus.Text = room.Title + " · " + (room.Enabled ? "관리 ON" : "관리 OFF") + " · " + room.AudioDisplay + " · " + room.DurationDisplay
             + (room.LastFailureAt is null ? "" : " · 최근 실패 " + room.LastFailureAt.Value.ToLocalTime().ToString("MM/dd HH:mm"));
         SelectedError.Text = DiagnosticPresentation.Summary(room.LastError);
         LastStatus.Text = room.LastDiagnostic;
@@ -313,6 +316,37 @@ public partial class MainWindow : Window
         _coordinator.Save(); RefreshUi();
     }
 
+    private void RecheckAll_Click(object sender, RoutedEventArgs e) => _coordinator.RecheckAll();
+    private void ExportRooms_Click(object sender, RoutedEventArgs e)
+    {
+        if (_coordinator.IsBusy) return;
+        var dialog = new Microsoft.Win32.SaveFileDialog { FileName = "VoiceRoom-rooms.json", Filter = "방 설정|*.json" };
+        if (dialog.ShowDialog(this) != true) return;
+        try { File.WriteAllText(dialog.FileName, RoomRegistryTransfer.Export(State.Rooms)); State.LastStatus = "방 설정 백업 완료"; }
+        catch (Exception ex) { MessageBox.Show(this, "설정 저장 실패 · " + ex.Message); }
+        RefreshUi();
+    }
+    private void ImportRooms_Click(object sender, RoutedEventArgs e)
+    {
+        if (_coordinator.IsBusy) return;
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "방 설정|*.json" };
+        if (dialog.ShowDialog(this) != true) return;
+        try
+        {
+            if (new FileInfo(dialog.FileName).Length > 512_000) throw new InvalidDataException("설정 파일이 너무 큽니다.");
+            var imported = RoomRegistryTransfer.Import(File.ReadAllText(dialog.FileName));
+            if (State.Rooms.Count + imported.Count > 100) throw new InvalidDataException("최대 100개 방을 등록할 수 있습니다.");
+            if (imported.Any(a => State.Rooms.Any(b => a.Title == b.Title || a.OpenChatUrl == b.OpenChatUrl)))
+                throw new InvalidDataException("기존 방 이름/링크와 중복됩니다. 기존 설정을 보존했습니다.");
+            _coordinator.StopAll();
+            State.Rooms.AddRange(imported);
+            State.LastStatus = $"{imported.Count}개 방 복원 · 전체 시작으로 실제 상태 확인";
+            _coordinator.Save();
+        }
+        catch (Exception ex) { MessageBox.Show(this, "설정 복원 실패 · " + ex.Message); }
+        RefreshUi();
+    }
+
     private void ExportDiagnostics_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new Microsoft.Win32.SaveFileDialog { FileName = "VoiceRoom-diagnostics.zip", Filter = "ZIP|*.zip" };
@@ -326,8 +360,10 @@ public partial class MainWindow : Window
             using var writer = new StreamWriter(entry.Open());
             writer.WriteLine("VoiceRoom Manager " + typeof(MainWindow).Assembly.GetName().Version);
             writer.WriteLine("등록 방: " + State.Rooms.Count);
+            writer.WriteLine("Windows: " + Environment.OSVersion.VersionString);
+            writer.WriteLine("Kakao: " + KakaoCalibrationStore.Summary());
             writer.WriteLine(LocalTextSurface.Capability());
-            foreach (var room in State.Rooms) writer.WriteLine(room.Id + " | " + room.Status + " | " + room.Stage);
+            foreach (var room in State.Rooms) writer.WriteLine(room.Id + " | " + room.Status + " | " + room.Stage + " | " + room.DurationDisplay);
             State.LastStatus = "진단 ZIP 저장 완료 · 방 이름/화면 텍스트가 포함될 수 있으니 공유 전 확인해 주세요.";
         }
         catch (Exception ex) { MessageBox.Show(this, "진단 저장 실패 · " + ex.Message); }
