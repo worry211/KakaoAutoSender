@@ -84,9 +84,9 @@ Legacy offline KAS1 licenses are removed from v2 and require seller migration.
 
 ## Standalone VoiceRoom products
 
-Android VoiceRoom Manager v0.5.1 remains a separate, previously device-proven app. Windows VoiceRoom Manager v0.4.0 RC2 now has a unified operation workflow, dark dashboard, local OCR, recovery and regression coverage. Windows actual Kakao create/PIP/audio/48h operation still requires release approval on the target PC.
+Android VoiceRoom Manager v0.5.1 remains a separate, previously device-proven app. Windows VoiceRoom Manager v0.4.0 RC3 now has a unified operation workflow, dark dashboard, local OCR, recovery and regression coverage. Windows actual Kakao create/PIP/audio/48h operation still requires release approval on the target PC.
 
 - [Android VoiceRoom](voiceroom/README.md)
-- [Windows RC2 setup and verified limits](desktop/VoiceRoomManager.Windows/README.md)
+- [Windows RC3 setup and verified limits](desktop/VoiceRoomManager.Windows/README.md)
 - [Windows audit](docs/VOICEROOM_WINDOWS_RC_AUDIT.md)
 - [Minimum real-PC checklist](docs/VOICEROOM_WINDOWS_RC_CHECKLIST.md)

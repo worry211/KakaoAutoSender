@@ -1,3 +1,9 @@
+# RC3 runtime version correction — 2026-10-05
+
+User screenshot at 10:40 KST was produced by Downloads/VoiceRoomManager-Windows-v0.4.0-rc1-x64, confirmed from the running process path and old OCR diagnostic. It does not establish an RC2 failure. RC3 retains the RC2 automation, summarizes legacy persisted traces, hides obsolete scheduled checks for stopped/disabled rooms and clears pending check time on Stop. 74 Windows regression tests pass locally. Android source is preserved. Actual create/active/audio/48h approval remains pending. Final source/CI/package hashes are in PR #12 and the delivery manifest.
+
+---
+
 # RC2 continuation — 2026-10-05
 
 Windows v0.4.0 RC2 adds contextual preview identity, actionable offline OCR capability diagnosis, verified create-form submission, durable uncertain-submission recovery and a user-confirmed inactive recovery action. Removes obsolete RICHEDIT composer proof and unverified name/create coordinate fallbacks. Only room-menu calibration remains. Android source is unchanged.

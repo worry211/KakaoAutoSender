@@ -43,7 +43,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
     public void StopAll()
     {
         _state.ManagerActive = false; _run.Cancel(); PowerPolicy.SetKeepSystemAwake(false);
-        foreach (var room in _state.Rooms) { room.Stage = "관리 중단"; room.Status = "STOPPED"; }
+        foreach (var room in _state.Rooms) { room.Stage = "관리 중단"; room.Status = "STOPPED"; room.NextCheckAt = null; }
         _state.LastStatus = "자동관리 중단 · 보이스룸은 유지됩니다"; Save(); Notify();
     }
     public Task<KakaoPcAutomation.Result> SafeProbeAsync(RoomState room) => ManualAsync(room, true);

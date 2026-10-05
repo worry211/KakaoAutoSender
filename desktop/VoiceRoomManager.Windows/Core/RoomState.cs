@@ -21,7 +21,7 @@ public sealed class RoomState
     public DateTimeOffset? LastFailureAt { get; set; }
     public string Stage { get; set; } = "준비";
     [JsonIgnore]
-    public string NextCheckDisplay => NextCheckAt?.ToLocalTime().ToString("MM/dd HH:mm:ss") ?? "—";
+    public string NextCheckDisplay => !Enabled || Status == "STOPPED" ? "—" : NextCheckAt?.ToLocalTime().ToString("MM/dd HH:mm:ss") ?? "—";
     [JsonIgnore]
     public string LastSuccessDisplay => LastSuccessAt?.ToLocalTime().ToString("MM/dd HH:mm") ?? "아직 없음";
     [JsonIgnore]

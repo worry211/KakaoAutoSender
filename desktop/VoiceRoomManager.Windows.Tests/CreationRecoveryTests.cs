@@ -60,6 +60,19 @@ public class CreationRecoveryTests
         Assert.True(CreateFormEvidence.IsForm(frame));
         Assert.False(CreateFormEvidence.IsForm(frame with { Lines = [new("보이스름 만들기", new Rect(20, 150, 140, 20)), new("확인", new Rect(230, 170, 40, 20))] }));
     }
+    [Fact] public void StoppedRoomDoesNotAdvertiseAnObsoleteScheduledCheck()
+    {
+        Assert.Equal("—", new RoomState { Status = "STOPPED", NextCheckAt = Now }.NextCheckDisplay);
+        Assert.Equal("—", new RoomState { Enabled = false, NextCheckAt = Now }.NextCheckDisplay);
+    }
+    [Fact] public void LegacySavedTraceGetsAnActionableSummary()
+    {
+        var trace = "preview=카카오 소개 화면 입장 버튼을 찾지 못함 · surfaces=[private] → browser=actions=28 → preview=미리보기 방 이름 OCR 확인 실패 · 한국어 OCR/방 이름 확인 필요";
+        var summary = DiagnosticPresentation.Summary(trace);
+        Assert.Contains("방 이름", summary);
+        Assert.DoesNotContain("preview=", summary);
+        Assert.DoesNotContain("surfaces=", summary);
+    }
     [Theory]
     [InlineData(10, 10, 100, 20, true)]
     [InlineData(10, 10, 400, 20, false)]

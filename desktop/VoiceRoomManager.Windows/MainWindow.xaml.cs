@@ -43,7 +43,7 @@ public partial class MainWindow : Window
         if (selectedId is not null) RoomsGrid.SelectedItem = State.Rooms.FirstOrDefault(r => r.Id == selectedId);
 
         var version = typeof(MainWindow).Assembly.GetName().Version;
-        VersionBadge.Text = version is null ? "Windows" : $"Windows v{version.Major}.{version.Minor}.{Math.Max(0, version.Build)} RC2";
+        VersionBadge.Text = version is null ? "Windows" : $"Windows v{version.Major}.{version.Minor}.{Math.Max(0, version.Build)} RC3";
 
         var attention = State.Rooms.Any(r=>r.Enabled) && State.Rooms.Where(r=>r.Enabled).All(r=>r.Status=="USER_ACTION_REQUIRED");
         MasterStatus.Text = State.ManagerActive
