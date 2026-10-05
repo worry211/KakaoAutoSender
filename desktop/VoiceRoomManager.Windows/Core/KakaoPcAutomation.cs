@@ -28,7 +28,8 @@ public sealed class KakaoPcAutomation
         bool AudioRepaired = false,
         bool InterventionRequired = false,
         bool VerifiedEnded = false,
-        bool NeedsRecheck = false);
+        bool NeedsRecheck = false,
+        bool BackgroundDeferred = false);
 
     public Result EnsureKakaoRunning()
     {

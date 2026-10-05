@@ -172,6 +172,7 @@ internal static class KakaoSurfaceLocator
     public static void Activate(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero) return;
+        AutomationOperation.PrepareForeground(hwnd);
         try
         {
             ShowWindowAsync(hwnd, 9);

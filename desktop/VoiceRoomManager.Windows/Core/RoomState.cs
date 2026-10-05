@@ -22,18 +22,19 @@ public sealed class RoomState
     public long LastOperationMilliseconds { get; set; }
     [JsonIgnore] public string DurationDisplay => LastOperationMilliseconds > 0 ? $"최근 점검 {LastOperationMilliseconds / 1000d:0.0}초" : "점검 기록 없음";
     public string Stage { get; set; } = "준비";
+    [JsonIgnore] public bool BackgroundDeferred { get; set; }
     [JsonIgnore]
-    public string NextCheckDisplay => !Enabled || Status == "STOPPED" ? "—" : NextCheckAt?.ToLocalTime().ToString("MM/dd HH:mm:ss") ?? "—";
+    public string NextCheckDisplay => !Enabled || Status == "STOPPED" ? "—" : BackgroundDeferred ? "작업 후 재개" : NextCheckAt?.ToLocalTime().ToString("MM/dd HH:mm:ss") ?? "—";
     [JsonIgnore]
     public string LastSuccessDisplay => LastSuccessAt?.ToLocalTime().ToString("MM/dd HH:mm") ?? "아직 없음";
     [JsonIgnore]
-    public string AudioDisplay => MicMuted && SpeakerMuted ? "마이크 · 스피커 보호 확인" : "오디오 보호 확인 필요";
+    public string AudioDisplay => BackgroundDeferred ? "마지막 보호 결과 · 재확인 대기" : MicMuted && SpeakerMuted ? "마이크 · 스피커 보호 확인" : "오디오 보호 확인 필요";
 
     [JsonIgnore]
     public string LinkDisplay => OpenChatLinkRegistry.IsSupported(OpenChatUrl) ? "등록됨" : "미등록";
 
     [JsonIgnore]
-    public string StatusDisplay => Status switch
+    public string StatusDisplay => BackgroundDeferred ? "다른 작업 중 · 점검 대기" : Status switch
     {
         "NEW" => OpenChatLinkRegistry.IsSupported(OpenChatUrl) ? "시작 준비" : "링크 등록 필요",
         "BOOTSTRAP_PENDING" => "자동 시작 대기",

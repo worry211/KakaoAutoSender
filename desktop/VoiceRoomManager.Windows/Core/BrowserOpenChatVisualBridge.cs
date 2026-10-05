@@ -59,6 +59,7 @@ internal static class BrowserOpenChatVisualBridge
             return new(true, false, $"브라우저 OpenChat CTA visual matches={hits.Count} · {string.Join(" | ", diagnostics.Take(3))}");
 
         var target = hits[0];
+        AutomationOperation.PrepareForeground(target.Hwnd);
         ShowWindowAsync(target.Hwnd, 9);
         SetForegroundWindow(target.Hwnd);
         AutomationOperation.Pause(120);

@@ -1,3 +1,8 @@
+# RC5: periodic focus stealing fixed
+
+The five-minute health check previously called the complete foreground bootstrap. RC5 gates automatic due checks, retries, runtime work and startup recovery before workflow entry. Other-app foreground defers without a click/activation, failure increment, fresh success or timer/creation-barrier reset. Explicit StartAll/RecheckAll/manual actions remain immediate one-shot work. Automatic operation checks also yield before subsequent input/activation when foreground changes away from controlled surfaces. The manager/exact target room or an unattended desktop (30 seconds idle) permits resume; game/video idle does not. Pending verification is presented explicitly, and audio/request/expiry actions are delayed instead of claiming background proof. 128 tests pass locally. Actual-PC/CI/package evidence is in PR #12 and delivery manifest.
+
+---
 # Windows RC4 감사 및 검증 — 2026-10-05
 
 현재 기준은 RC4이며 아래 RC3/RC2 기록은 역사적 관찰입니다. RC3의 자동 활성·음소거 미검증 상태는 RC4의 실제 전용 창 검증으로 개선했습니다. Android/backend 소스는 이번 변경에서 유지했습니다.

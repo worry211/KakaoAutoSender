@@ -69,8 +69,10 @@ internal static class OpenChatLinkLauncher
         }
         try
         {
+            AutomationOperation.Check();
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             return new(true, false, "오픈채팅 링크 실행 실패 · " + ex.GetType().Name);
@@ -234,6 +236,7 @@ internal static class OpenChatLinkLauncher
     private static void Activate(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero) return;
+        AutomationOperation.PrepareForeground(hwnd);
         ShowWindowAsync(hwnd, 9);
         SetForegroundWindow(hwnd);
     }

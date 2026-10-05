@@ -1,3 +1,10 @@
+# Current continuation: Windows RC5 focus-preserving checks
+
+RC5 fixes periodic five-minute focus stealing. Timer/bootstrap/retry/recovery and runtime input defer while another app is foreground, including idle games/videos. Start only from manager/exact room or a Windows desktop idle for 30 seconds. Explicit user actions get a one-shot immediate check. Operation checks yield before subsequent input/activation if the user switches to another app. Deferral preserves failures, success time, expiry and creation uncertainty; UI clearly distinguishes historical protection from pending fresh proof. Read-only background existence cannot claim active/audio success. Other-app foreground delays audio/request/expiry work until an allowed surface is available. Windows lock remains separate safe wait.
+
+Tests: 128 Windows cases including repeated expired-room ticks with no Kakao invocation, preserving uncertainty/backoff, and mid-operation app-switch before creation intent. Android/backend unchanged. Final CI/package and target-PC quiet/resume evidence will be recorded in PR #12 and output manifest.
+
+---
 # Current handoff: Windows v0.4.0 RC4 — 2026-10-05
 
 Continue on feat/voiceroom-standalone-android-v1 / Draft PR #12. Current Windows source uses one RoomWorkflow, dedicated exact-room VoiceHost, typed ON/OFF glyphs, repeated participant/audio evidence, explicit ended-window verification, durable uncertain submission, and guarded header menu detection. Do not restore RICHEDIT or whole-chat menu OCR fallbacks. Android/backend source is preserved.

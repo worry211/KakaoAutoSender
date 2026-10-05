@@ -32,6 +32,12 @@ public static class LifecyclePolicy
 
     public static void Apply(RoomState room, KakaoPcAutomation.Result result, DateTimeOffset now)
     {
+        if (result.BackgroundDeferred)
+        {
+            room.BackgroundDeferred = true; room.Stage = "다른 작업 중 · 점검 대기";
+            return; // Neither a success nor a failure; preserve expiry and duplicate-create barriers.
+        }
+        room.BackgroundDeferred = false;
         room.LastDiagnostic = result.Status;
         if (result.NeedsRecheck)
         {

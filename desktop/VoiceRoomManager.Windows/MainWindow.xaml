@@ -17,7 +17,7 @@
    <TextBlock x:Name="SystemStatus" Foreground="{StaticResource Muted}" Margin="0,9,0,0" TextWrapping="Wrap"/>
    <WrapPanel Margin="-4,16,0,0"><Button x:Name="StartButton" Content="▶  전체 시작" Click="StartAll_Click" Background="{StaticResource Accent}" MinWidth="148"/>
    <Button x:Name="RecheckAllButton" Content="전체 다시 점검" Click="RecheckAll_Click" Background="{StaticResource Surface}"/><Button Content="전체 중단" Click="StopAll_Click" Background="{StaticResource Surface}"/>
-   <TextBlock Text="모니터 OFF 운영 가능 · 잠금 해제 후 자동 재개" Foreground="{StaticResource Muted}" Margin="16,0,0,0" VerticalAlignment="Center"/>
+   <TextBlock Text="다른 작업 중 창 전환 없이 대기 · 매니저/해당 방에서 재개" Foreground="{StaticResource Muted}" Margin="16,0,0,0" VerticalAlignment="Center"/>
    </WrapPanel>
   </StackPanel>
  </Border>
