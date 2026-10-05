@@ -9,6 +9,8 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.text.Editable;
 import android.text.InputType;
@@ -68,6 +70,9 @@ public class RoomEditorActivity extends Activity {
     private android.widget.ImageView imagePreview;
     private boolean loading;
     private boolean dirty;
+    private MultiRoomStore.Profile cachedProfile;
+    private final Handler previewHandler = new Handler(Looper.getMainLooper());
+    private final Runnable previewRunnable = this::refreshNextPreview;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -238,7 +243,7 @@ public class RoomEditorActivity extends Activity {
 
         modes.setOnCheckedChangeListener((group, checkedId) -> {
             updateScheduleVisibility();
-            refreshNextPreview();
+            scheduleNextPreview();
             markDirty();
         });
 
@@ -306,6 +311,7 @@ public class RoomEditorActivity extends Activity {
     private void loadProfile() {
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
         if (p == null) { finish(); return; }
+        cachedProfile = p.copy();
         messageInput.setText(p.message);
         intervalInput.setText(String.valueOf(p.intervalMinutes));
         timesInput.setText(p.dailyTimes);
@@ -471,6 +477,7 @@ public class RoomEditorActivity extends Activity {
         }
 
         MultiRoomStore.upsert(this, p);
+        cachedProfile = p.copy();
         if (active) SendScheduler.scheduleNext(this);
         Prefs.setStatus(this, "방 설정 저장: " + p.title() + " · " + MultiRoomStore.scheduleSummary(p));
         refreshNextPreview();
@@ -588,7 +595,7 @@ public class RoomEditorActivity extends Activity {
 
     private void refreshNextPreview() {
         if (nextPreview == null) return;
-        MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
+        MultiRoomStore.Profile p = cachedProfile == null ? MultiRoomStore.get(this, routeAlias) : cachedProfile.copy();
         if (p == null) return;
         MultiRoomStore.Profile temp = p.copy();
         if (timesRadio != null && timesRadio.isChecked()) {
@@ -609,21 +616,42 @@ public class RoomEditorActivity extends Activity {
     }
 
     private void installDirtyTracking() {
-        TextWatcher watcher = new TextWatcher() {
+        TextWatcher messageWatcher = new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
                 updateMessageCount();
-                refreshNextPreview();
                 markDirty();
             }
             @Override public void afterTextChanged(Editable s) {}
         };
-        messageInput.addTextChangedListener(watcher);
-        intervalInput.addTextChangedListener(watcher);
-        timesInput.addTextChangedListener(watcher);
-        dailyLimitInput.addTextChangedListener(watcher);
+        TextWatcher scheduleWatcher = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                scheduleNextPreview();
+                markDirty();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        };
+        messageInput.addTextChangedListener(messageWatcher);
+        intervalInput.addTextChangedListener(scheduleWatcher);
+        timesInput.addTextChangedListener(scheduleWatcher);
+        dailyLimitInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { markDirty(); }
+            @Override public void afterTextChanged(Editable s) {}
+        });
         enabledCheck.setOnCheckedChangeListener((b, checked) -> markDirty());
         updateMessageCount();
+    }
+
+    private void scheduleNextPreview() {
+        previewHandler.removeCallbacks(previewRunnable);
+        previewHandler.postDelayed(previewRunnable, 140L);
+    }
+
+    @Override protected void onDestroy() {
+        previewHandler.removeCallbacks(previewRunnable);
+        super.onDestroy();
     }
 
     private void updateMessageCount() {

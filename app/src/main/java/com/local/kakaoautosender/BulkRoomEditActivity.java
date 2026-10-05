@@ -277,7 +277,7 @@ public class BulkRoomEditActivity extends Activity {
         return r;
     }
 
-    private TextView section(String title, String subtitle) {
+    private View section(String title, String subtitle) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.addView(text(title, 16, true, TEXT));
