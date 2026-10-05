@@ -1,0 +1,35 @@
+name: Format Discord v2
+on:
+  push:
+    branches: [fix/discord-admin-quality-v2]
+    paths:
+      - 'backend/src/discordV2.ts'
+      - 'backend/src/index.ts'
+      - 'backend/test/discord-v2.test.ts'
+      - '.github/workflows/format-discord-v2.yml'
+permissions:
+  contents: read
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - name: Format seller console sources
+        run: npx prettier --write src/discordV2.ts src/index.ts test/discord-v2.test.ts
+        working-directory: backend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: discord-v2-prettier-output
+          path: |
+            backend/src/discordV2.ts
+            backend/src/index.ts
+            backend/test/discord-v2.test.ts
+          if-no-files-found: error
+          retention-days: 1
