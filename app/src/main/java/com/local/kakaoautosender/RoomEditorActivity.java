@@ -857,15 +857,19 @@ public class RoomEditorActivity extends Activity {
         final int top = dp(topDp);
         final int right = dp(rightDp);
         final int bottom = dp(bottomDp);
+
+        // Keep app spacing on the scrolling content, but keep system-bar insets on
+        // the ScrollView viewport itself. If the top inset lives on the content,
+        // it scrolls away and cards can slide under the status bar.
         content.setPadding(left, top, right, bottom);
         scroll.setClipToPadding(true);
         scroll.setOnApplyWindowInsetsListener((v, insets) -> {
-            content.setPadding(
-                    left + insets.getSystemWindowInsetLeft(),
-                    top + insets.getSystemWindowInsetTop(),
-                    right + insets.getSystemWindowInsetRight(),
-                    bottom);
-            v.setPadding(0, 0, 0, insets.getSystemWindowInsetBottom());
+            content.setPadding(left, top, right, bottom);
+            v.setPadding(
+                    insets.getSystemWindowInsetLeft(),
+                    insets.getSystemWindowInsetTop(),
+                    insets.getSystemWindowInsetRight(),
+                    insets.getSystemWindowInsetBottom());
             return insets;
         });
         scroll.requestApplyInsets();
