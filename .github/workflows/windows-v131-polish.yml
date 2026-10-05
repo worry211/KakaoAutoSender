@@ -27,6 +27,7 @@ jobs:
           $p = 'scripts/apply_windows_v131_polish.py'
           $s = Get-Content -Raw $p
           $s = $s.Replace('controls")\n', 'controls")')
+          $s = $s.Replace('sender is Button button', 'sender is System.Windows.Controls.Button button')
           Set-Content -Path $p -Value $s -Encoding utf8 -NoNewline
       - name: Apply v1.3.1 polish
         run: python scripts/apply_windows_v131_polish.py
