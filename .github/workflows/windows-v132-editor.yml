@@ -23,12 +23,14 @@ jobs:
           python-version: '3.12'
       - name: Apply v1.3.2 editor workflow polish
         run: python scripts/apply_windows_v132_editor_workflow.py
-      - name: Disambiguate WPF keyboard event type
+      - name: Harden generated editor code for strict nullable build
         shell: pwsh
         run: |
           $path = 'desktop/KakaoMacro.Windows/MainWindow.xaml.cs'
           $text = Get-Content -Raw -Encoding UTF8 $path
           $text = $text.Replace('private void Window_PreviewKeyDown(object sender, KeyEventArgs e)', 'private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)')
+          $text = $text.Replace('EditorSaveStatusText.Text = "입력값 확인 필요 · 유효한 값만 자동 저장됩니다";', 'if (EditorSaveStatusText is not null) EditorSaveStatusText.Text = "입력값 확인 필요 · 유효한 값만 자동 저장됩니다";')
+          $text = $text.Replace('EditorSaveStatusText.Text = $"자동 저장됨 · {DateTime.Now:HH:mm:ss}";', 'if (EditorSaveStatusText is not null) EditorSaveStatusText.Text = $"자동 저장됨 · {DateTime.Now:HH:mm:ss}";')
           Set-Content -Path $path -Value $text -Encoding UTF8
       - uses: actions/setup-dotnet@v4
         with:
