@@ -21,6 +21,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Correct staged patch helper
+        shell: pwsh
+        run: |
+          $p = 'scripts/apply_windows_v131_polish.py'
+          $s = Get-Content -Raw $p
+          $s = $s.Replace('controls")\n', 'controls")')
+          Set-Content -Path $p -Value $s -Encoding utf8 -NoNewline
       - name: Apply v1.3.1 polish
         run: python scripts/apply_windows_v131_polish.py
       - uses: actions/setup-dotnet@v4
