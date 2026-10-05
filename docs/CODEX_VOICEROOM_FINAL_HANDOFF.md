@@ -1,3 +1,13 @@
+# RC3 직접 실기 관찰 — 2026-10-05 10:46 KST
+
+다운로드 RC1 실행을 확인한 후 최신 RC3 EXE를 실행했다. UI의 RC3 버전, 기존 방 복원, 중단 시 점검 표시 없음, 이전 trace 요약을 직접 확인했다. 전체 시작 한 번으로 browser→preview→정확한 방 1→검증 폼 제출→‘보이스룸: 1’ 전용 창이 생성됐다. 창에 1명 참여 중과 오디오/퇴장 아이콘을 확인했다.
+
+프로그램의 강한 자동 활성 검사는 별도 보이스룸 창의 소유 관계/UIA 빈 트리/아이콘만 있는 컨트롤을 읽지 못해 USER_ACTION_REQUIRED가 됐다. CreationUncertain=true가 저장돼 추가 생성이 차단됐다. 마이크와 스피커는 Computer Use로 각각 직접 음소거한 뒤 crossed 아이콘 표시를 확인했다. 이는 수동 보호 증거이며 자동 오디오 보호 성공이 아니다. 보이스룸은 유지했다.
+
+실제 생성 성공은 이번 관찰로 확인됐으나 자동 활성/음소거/요청 거절, recovery와 48h 승인 게이트는 여전히 남는다. 이미지 fixture/CI만으로 그 게이트를 채우지 않는다.
+
+---
+
 # RC3 runtime version correction — 2026-10-05
 
 User screenshot at 10:40 KST was produced by Downloads/VoiceRoomManager-Windows-v0.4.0-rc1-x64, confirmed from the running process path and old OCR diagnostic. It does not establish an RC2 failure. RC3 retains the RC2 automation, summarizes legacy persisted traces, hides obsolete scheduled checks for stopped/disabled rooms and clears pending check time on Stop. 74 Windows regression tests pass locally. Android source is preserved. Actual create/active/audio/48h approval remains pending. Final source/CI/package hashes are in PR #12 and the delivery manifest.
