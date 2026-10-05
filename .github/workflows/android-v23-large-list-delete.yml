@@ -27,6 +27,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Correct staged patch helper
+        run: sed -i 's/Button more = secondaryButton(/Button more = tertiaryButton(/' scripts/apply_android_v23_large_list_bulk_delete.py
       - name: Apply large-list and bulk-delete polish
         run: python3 scripts/apply_android_v23_large_list_bulk_delete.py
       - name: Test, lint and build
@@ -35,7 +37,8 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add app/src/main/java/com/local/kakaoautosender/MainActivityV4.java \
+          git add scripts/apply_android_v23_large_list_bulk_delete.py \
+                  app/src/main/java/com/local/kakaoautosender/MainActivityV4.java \
                   app/src/main/java/com/local/kakaoautosender/MultiRoomStore.java \
                   app/src/test/java/com/local/kakaoautosender/MultiRoomBulkRemoveTest.java
           git commit -m 'feat(android): page large room lists and add safe bulk delete'
