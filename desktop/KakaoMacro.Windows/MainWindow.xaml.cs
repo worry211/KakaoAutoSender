@@ -1097,11 +1097,31 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
-        if (_isShuttingDown || _exitRequested || !_closeToTray) return;
+        if (_isShuttingDown || _exitRequested) return;
         FlushEditorDraft();
-        e.Cancel = true;
-        Hide();
-        AppendLog("창 닫기 요청 · 트레이에서 계속 실행");
+        if (_closeToTray)
+        {
+            e.Cancel = true;
+            Hide();
+            AppendLog("창 닫기 요청 · 트레이에서 계속 실행");
+            return;
+        }
+
+        var running = _rooms.Count(room => room.Running);
+        if (running > 0)
+        {
+            var answer = MessageBox.Show(
+                $"현재 {running}개 방이 실행 중입니다. 프로그램을 종료하면 모든 자동전송이 중단됩니다. 종료할까요?",
+                "KakaoMacro PC",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes)
+            {
+                e.Cancel = true;
+                return;
+            }
+        }
+        _exitRequested = true;
     }
 
     private void ExitApp_Click(object sender, RoutedEventArgs e) => RequestExit();
