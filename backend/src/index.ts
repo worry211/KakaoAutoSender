@@ -1,6 +1,6 @@
 import { Env, ApiError, now, id, json, rate, config, metadata } from "./core";
 import { activate, entitlement, deactivate, recover } from "./license";
-import { discord } from "./discord";
+import { discord } from "./discordV2";
 import { enforceDiscordScope } from "./discordGuard";
 
 async function boundedBody(req: Request) {
