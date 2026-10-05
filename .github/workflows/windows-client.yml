@@ -1,0 +1,36 @@
+name: Windows client
+
+on:
+  push:
+    branches: [main, feat/windows-client-v1]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/windows-client.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/windows-client.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj
+      - name: Build
+        run: dotnet build desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release --no-restore
+      - name: Publish self-contained x64 preview
+        run: dotnet publish desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o desktop/artifacts/win-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KakaoMacro-PC-win-x64-preview
+          path: desktop/artifacts/win-x64/**
+          if-no-files-found: error
+          retention-days: 14
