@@ -1,0 +1,52 @@
+name: Backend CI
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'scripts/secret-scan.mjs'
+      - '.github/workflows/backend-ci.yml'
+  push:
+    branches:
+      - main
+      - feat/discord-seller-ops-v3
+    paths:
+      - 'backend/**'
+      - 'scripts/secret-scan.mjs'
+      - '.github/workflows/backend-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Secret scan
+        run: node scripts/secret-scan.mjs
+      - name: Typecheck
+        working-directory: backend
+        run: npm run typecheck
+      - name: Formatting gate
+        working-directory: backend
+        run: npm run lint
+      - name: Full backend tests
+        working-directory: backend
+        run: npm test
+      - name: Dependency audit
+        working-directory: backend
+        run: npm audit --audit-level=moderate
