@@ -115,7 +115,7 @@ public class MainActivityV4 extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(22), dp(18), dp(42));
+        applySystemBarInsets(root, 18, 22, 18, 32);
         scroll.addView(root);
 
         LinearLayout header = new LinearLayout(this);
@@ -202,7 +202,7 @@ public class MainActivityV4 extends Activity {
         roomSearch.setPadding(dp(13), dp(10), dp(13), dp(10));
         roomSearch.setBackground(roundStroke(FIELD, BORDER, 12));
         roomTools.addView(roomSearch, new LinearLayout.LayoutParams(0, dp(48), 1f));
-        Button selectAll = tertiaryButton("다중 선택");
+        Button selectAll = tertiaryButton("선택");
         LinearLayout.LayoutParams selectLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, dp(48));
         selectLp.leftMargin = dp(8);
@@ -1520,6 +1520,23 @@ public class MainActivityV4 extends Activity {
     private LinearLayout.LayoutParams wrap() {
         return new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+    }
+
+    private void applySystemBarInsets(View view, int leftDp, int topDp, int rightDp, int bottomDp) {
+        final int left = dp(leftDp);
+        final int top = dp(topDp);
+        final int right = dp(rightDp);
+        final int bottom = dp(bottomDp);
+        view.setPadding(left, top, right, bottom);
+        view.setOnApplyWindowInsetsListener((v, insets) -> {
+            v.setPadding(
+                    left + insets.getSystemWindowInsetLeft(),
+                    top + insets.getSystemWindowInsetTop(),
+                    right + insets.getSystemWindowInsetRight(),
+                    bottom + insets.getSystemWindowInsetBottom());
+            return insets;
+        });
+        view.requestApplyInsets();
     }
 
     private int dp(int v) {

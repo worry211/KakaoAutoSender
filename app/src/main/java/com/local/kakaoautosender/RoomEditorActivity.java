@@ -8,6 +8,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -67,6 +68,7 @@ public class RoomEditorActivity extends Activity {
     private TextView messageCount;
     private TextView dirtyStatus;
     private Button saveButton;
+    private int lastFiniteDailyLimit = 8;
     private android.widget.ImageView imagePreview;
     private boolean loading;
     private boolean dirty;
@@ -109,7 +111,7 @@ public class RoomEditorActivity extends Activity {
         scroll.setBackgroundColor(BG);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(22), dp(18), dp(44));
+        applySystemBarInsets(root, 18, 22, 18, 28);
         scroll.addView(root);
 
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
@@ -120,8 +122,9 @@ public class RoomEditorActivity extends Activity {
         header.setGravity(Gravity.TOP);
         LinearLayout titleBox = new LinearLayout(this);
         titleBox.setOrientation(LinearLayout.VERTICAL);
-        TextView roomTitle = text(roomName, 25, true, TEXT);
+        TextView roomTitle = text(roomName, roomName.length() > 28 ? 21 : 25, true, TEXT);
         roomTitle.setMaxLines(2);
+        roomTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
         roomTitle.setLetterSpacing(-0.01f);
         titleBox.addView(roomTitle);
         TextView headerSub = text("ROOM AUTOMATION SETTINGS", 9, true, Color.rgb(121, 136, 166));
@@ -265,7 +268,21 @@ public class RoomEditorActivity extends Activity {
         unlimitedCheck.setText("무제한");
         unlimitedCheck.setTextColor(TEXT);
         unlimitedCheck.setOnCheckedChangeListener((b, checked) -> {
-            dailyLimitInput.setEnabled(!checked);
+            if (checked) {
+                int current = parseInt(dailyLimitInput.getText().toString(), lastFiniteDailyLimit);
+                if (current > 0) lastFiniteDailyLimit = current;
+                dailyLimitInput.setText("");
+                dailyLimitInput.setHint("제한 없음");
+                dailyLimitInput.setEnabled(false);
+                dailyLimitInput.setAlpha(0.55f);
+            } else {
+                dailyLimitInput.setEnabled(true);
+                dailyLimitInput.setAlpha(1f);
+                dailyLimitInput.setHint("하루 최대 횟수");
+                if (dailyLimitInput.getText().toString().trim().isEmpty()) {
+                    dailyLimitInput.setText(String.valueOf(Math.max(1, lastFiniteDailyLimit)));
+                }
+            }
             markDirty();
         });
         LinearLayout.LayoutParams uLp = new LinearLayout.LayoutParams(
@@ -316,9 +333,19 @@ public class RoomEditorActivity extends Activity {
         intervalInput.setText(String.valueOf(p.intervalMinutes));
         timesInput.setText(p.dailyTimes);
         if (p.fixedTimes()) timesRadio.setChecked(true); else intervalRadio.setChecked(true);
+        lastFiniteDailyLimit = p.unlimited() ? 8 : Math.max(1, p.dailyLimit);
         unlimitedCheck.setChecked(p.unlimited());
-        dailyLimitInput.setText(p.unlimited() ? "8" : String.valueOf(p.dailyLimit));
-        dailyLimitInput.setEnabled(!p.unlimited());
+        if (p.unlimited()) {
+            dailyLimitInput.setText("");
+            dailyLimitInput.setHint("제한 없음");
+            dailyLimitInput.setEnabled(false);
+            dailyLimitInput.setAlpha(0.55f);
+        } else {
+            dailyLimitInput.setText(String.valueOf(p.dailyLimit));
+            dailyLimitInput.setHint("하루 최대 횟수");
+            dailyLimitInput.setEnabled(true);
+            dailyLimitInput.setAlpha(1f);
+        }
         enabledCheck.setChecked(p.enabled);
         updateScheduleVisibility();
         refreshConnection();
@@ -637,7 +664,13 @@ public class RoomEditorActivity extends Activity {
         timesInput.addTextChangedListener(scheduleWatcher);
         dailyLimitInput.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { markDirty(); }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                if (unlimitedCheck != null && !unlimitedCheck.isChecked()) {
+                    int parsed = parseInt(s == null ? "" : s.toString(), lastFiniteDailyLimit);
+                    if (parsed > 0) lastFiniteDailyLimit = parsed;
+                }
+                markDirty();
+            }
             @Override public void afterTextChanged(Editable s) {}
         });
         enabledCheck.setOnCheckedChangeListener((b, checked) -> markDirty());
@@ -673,8 +706,10 @@ public class RoomEditorActivity extends Activity {
             dirtyStatus.setTextColor(value ? AMBER : Color.rgb(119, 132, 156));
         }
         if (saveButton != null) {
-            saveButton.setText(value ? "변경 사항 저장" : "설정 저장됨");
-            saveButton.setAlpha(value ? 1f : 0.72f);
+            saveButton.setText("변경 사항 저장");
+            saveButton.setVisibility(value ? View.VISIBLE : View.GONE);
+            saveButton.setEnabled(value);
+            saveButton.setAlpha(value ? 1f : 0f);
         }
     }
 
@@ -815,6 +850,23 @@ public class RoomEditorActivity extends Activity {
 
     private LinearLayout.LayoutParams weight() {
         return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+    }
+
+    private void applySystemBarInsets(View view, int leftDp, int topDp, int rightDp, int bottomDp) {
+        final int left = dp(leftDp);
+        final int top = dp(topDp);
+        final int right = dp(rightDp);
+        final int bottom = dp(bottomDp);
+        view.setPadding(left, top, right, bottom);
+        view.setOnApplyWindowInsetsListener((v, insets) -> {
+            v.setPadding(
+                    left + insets.getSystemWindowInsetLeft(),
+                    top + insets.getSystemWindowInsetTop(),
+                    right + insets.getSystemWindowInsetRight(),
+                    bottom + insets.getSystemWindowInsetBottom());
+            return insets;
+        });
+        view.requestApplyInsets();
     }
 
     private int dp(int v) {
