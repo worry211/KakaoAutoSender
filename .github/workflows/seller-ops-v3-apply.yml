@@ -1,0 +1,50 @@
+name: Seller operations v3 apply
+
+on:
+  push:
+    branches: [feat/discord-seller-ops-v3]
+    paths:
+      - 'scripts/apply_seller_ops_v3.py'
+      - '.github/workflows/seller-ops-v3-apply.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/discord-seller-ops-v3
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Apply seller operations v3 patch
+        run: python scripts/apply_seller_ops_v3.py
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Format changed backend code
+        working-directory: backend
+        run: npx prettier --write src test scripts
+      - name: Secret scan
+        run: node scripts/secret-scan.mjs
+      - name: Typecheck, lint, test and audit
+        working-directory: backend
+        run: npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
+      - name: Commit verified product changes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/src/admin.ts backend/src/commands.ts backend/src/discord.ts backend/src/discordV2.ts backend/test/platform.test.ts backend/test/seller-ops-v3.test.ts
+          if git diff --cached --quiet; then
+            echo 'No product changes to commit.'
+            exit 0
+          fi
+          git commit -m 'feat(discord): upgrade seller operations and safety'
+          git push origin HEAD:feat/discord-seller-ops-v3
