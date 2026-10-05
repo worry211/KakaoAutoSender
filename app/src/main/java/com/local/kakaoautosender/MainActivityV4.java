@@ -73,7 +73,7 @@ public class MainActivityV4 extends Activity {
     private String roomQuery = "";
     private String roomFilter = RoomDashboardPolicy.FILTER_ALL;
     private String roomSort = RoomDashboardPolicy.SORT_STATUS;
-    private LinearLayout roomFilterRow;
+    private Button roomFilterButton;
     private Button roomSortButton;
     private String lastRoomRenderFingerprint = "";
     private int roomRenderLimit = ROOM_PAGE_SIZE;
@@ -224,23 +224,17 @@ public class MainActivityV4 extends Activity {
         LinearLayout filterTools = new LinearLayout(this);
         filterTools.setOrientation(LinearLayout.HORIZONTAL);
         filterTools.setGravity(Gravity.CENTER_VERTICAL);
-        HorizontalScrollView filterScroll = new HorizontalScrollView(this);
-        filterScroll.setHorizontalScrollBarEnabled(false);
-        filterScroll.setFillViewport(false);
-        filterScroll.setHorizontalFadingEdgeEnabled(true);
-        filterScroll.setFadingEdgeLength(dp(14));
-        roomFilterRow = new LinearLayout(this);
-        roomFilterRow.setOrientation(LinearLayout.HORIZONTAL);
-        roomFilterRow.setGravity(Gravity.CENTER_VERTICAL);
-        filterScroll.addView(roomFilterRow);
-        filterTools.addView(filterScroll, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        roomFilterButton = tertiaryButton("필터 · 전체");
+        roomFilterButton.setTextSize(11);
+        roomFilterButton.setMinWidth(0);
+        roomFilterButton.setOnClickListener(v -> showRoomFilterMenu());
+        filterTools.addView(roomFilterButton, new LinearLayout.LayoutParams(0, dp(42), 1f));
         roomSortButton = tertiaryButton("정렬 · 상태");
-        roomSortButton.setTextSize(10);
+        roomSortButton.setTextSize(11);
         roomSortButton.setMinWidth(0);
-        roomSortButton.setPadding(dp(10), dp(8), dp(10), dp(8));
         roomSortButton.setOnClickListener(v -> cycleRoomSort());
-        LinearLayout.LayoutParams sortLp = new LinearLayout.LayoutParams(dp(92), dp(42));
-        sortLp.leftMargin = dp(6);
+        LinearLayout.LayoutParams sortLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        sortLp.leftMargin = dp(7);
         filterTools.addView(roomSortButton, sortLp);
         root.addView(filterTools, top(7));
         renderRoomFilters();
@@ -393,8 +387,12 @@ public class MainActivityV4 extends Activity {
             }
         }
 
-        if (active && usable > 0 && ready < usable) {
-            masterStatus.setText("자동전송 실행 중 · 연결 대기");
+        if (active && usable < enabled) {
+            masterStatus.setText("자동전송 실행 중 · 일부 방 설정 필요");
+            masterStatus.setTextColor(AMBER);
+            stylePill(masterBadge, "CHECK", Color.rgb(55, 45, 27), AMBER);
+        } else if (active && usable > 0 && ready < usable) {
+            masterStatus.setText("자동전송 실행 중 · 일부 방 대기");
             masterStatus.setTextColor(AMBER);
             stylePill(masterBadge, "WAIT", Color.rgb(55, 45, 27), AMBER);
         } else if (active) {
@@ -422,11 +420,11 @@ public class MainActivityV4 extends Activity {
         StringBuilder system = new StringBuilder();
         system.append("라이선스 ").append(LicenseManager.shortStatus(this));
         system.append("  ·  알림 접근 ").append(access ? "정상" : "권한 필요");
-        system.append("\n카카오 연결 ").append(listener ? "정상" : "대기");
+        system.append("\n카카오 서비스 ").append(listener ? "정상" : "대기");
         if (Build.VERSION.SDK_INT >= 31) {
             system.append("  ·  예약 정확도 ").append(exact ? "정확 시각" : "근사 시각");
         }
-        system.append("  ·  연결 방 ").append(profiles.size()).append("개");
+        system.append("  ·  전송 가능 방 ").append(ready).append("/").append(usable);
         String notice = LicenseManager.updateNotice(this);
         if (notice != null && !notice.trim().isEmpty()) system.append("\n").append(notice.trim());
         systemStatus.setText(system.toString());
@@ -521,9 +519,12 @@ public class MainActivityV4 extends Activity {
             note = "첫 방을 연결하면 메시지·스케줄·전송 상태를 여기서 한눈에 확인할 수 있습니다.";
         } else if (enabled == 0) {
             note = "연결된 방은 있지만 현재 사용 중인 자동전송 방이 없습니다.";
-        } else if (ready < enabled) {
+        } else if (usable < enabled) {
             warning = true;
-            note = "사용 중인 방 중 " + (enabled - ready) + "개가 연결 대기 중입니다. 해당 방의 새 메시지를 받으면 복구됩니다.";
+            note = "사용 중인 방 중 " + (enabled - usable) + "개는 메시지 또는 사진 설정을 확인해 주세요.";
+        } else if (ready < usable) {
+            warning = true;
+            note = "사용 중인 방 중 " + (usable - ready) + "개가 답장 세션 대기 중입니다. 해당 방의 새 메시지를 받으면 복구됩니다.";
         } else if (active && next > 0) {
             note = "다음 전송 예정  ·  " + formatDateTime(next);
         } else {
@@ -665,38 +666,45 @@ public class MainActivityV4 extends Activity {
     }
 
     private void renderRoomFilters() {
-        if (roomFilterRow == null) return;
-        roomFilterRow.removeAllViews();
-        addRoomFilterButton("전체", RoomDashboardPolicy.FILTER_ALL);
-        addRoomFilterButton("사용 중", RoomDashboardPolicy.FILTER_ENABLED);
-        addRoomFilterButton("일시정지", RoomDashboardPolicy.FILTER_PAUSED);
-        addRoomFilterButton("연결 필요", RoomDashboardPolicy.FILTER_NEEDS_CONNECTION);
-        addRoomFilterButton("오류", RoomDashboardPolicy.FILTER_ERROR);
+        updateRoomFilterButton();
         updateRoomSortButton();
     }
 
-    private void addRoomFilterButton(String label, String key) {
-        boolean active = key.equals(roomFilter);
-        Button button = button(label,
-                active ? Color.rgb(39, 51, 89) : Color.rgb(24, 30, 43),
-                active ? Color.rgb(203, 212, 255) : Color.rgb(164, 176, 199),
-                active ? ACCENT : BORDER);
-        button.setTextSize(11);
-        button.setMinHeight(0);
-        button.setPadding(dp(10), dp(8), dp(10), dp(8));
-        button.setOnClickListener(v -> {
-            if (key.equals(roomFilter)) return;
-            roomFilter = key;
-            selectedRooms.clear();
-            resetRoomRenderLimit();
-            renderRoomFilters();
-            invalidateRoomList();
-            refreshUi();
-        });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        if (roomFilterRow.getChildCount() > 0) lp.leftMargin = dp(5);
-        roomFilterRow.addView(button, lp);
+    private void updateRoomFilterButton() {
+        if (roomFilterButton == null) return;
+        String label = RoomDashboardPolicy.FILTER_ENABLED.equals(roomFilter) ? "사용 중"
+                : RoomDashboardPolicy.FILTER_PAUSED.equals(roomFilter) ? "일시정지"
+                : RoomDashboardPolicy.FILTER_NEEDS_CONNECTION.equals(roomFilter) ? "연결 필요"
+                : RoomDashboardPolicy.FILTER_ERROR.equals(roomFilter) ? "오류" : "전체";
+        roomFilterButton.setText("필터 · " + label);
+    }
+
+    private void showRoomFilterMenu() {
+        String[] labels = {"전체", "사용 중", "일시정지", "연결 필요", "오류"};
+        String[] keys = {
+                RoomDashboardPolicy.FILTER_ALL,
+                RoomDashboardPolicy.FILTER_ENABLED,
+                RoomDashboardPolicy.FILTER_PAUSED,
+                RoomDashboardPolicy.FILTER_NEEDS_CONNECTION,
+                RoomDashboardPolicy.FILTER_ERROR
+        };
+        int checked = 0;
+        for (int i = 0; i < keys.length; i++) {
+            if (keys[i].equals(roomFilter)) { checked = i; break; }
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("방 필터")
+                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                    roomFilter = keys[which];
+                    selectedRooms.clear();
+                    resetRoomRenderLimit();
+                    renderRoomFilters();
+                    invalidateRoomList();
+                    refreshUi();
+                    dialog.dismiss();
+                })
+                .setNegativeButton("닫기", null)
+                .show();
     }
 
     private void cycleRoomSort() {
