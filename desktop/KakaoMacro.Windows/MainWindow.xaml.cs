@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Interop;
-using System.Windows.Threading;
 using KakaoMacro.Windows.Models;
 using KakaoMacro.Windows.Services;
 
@@ -16,37 +18,55 @@ public partial class MainWindow : Window
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
     private const uint VkF8 = 0x77;
+    private const int MaxLogLines = 250;
+    private static readonly TimeSpan SchedulerResolution = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan InterRoomDelay = TimeSpan.FromMilliseconds(650);
 
     private readonly SettingsStore _store = new();
     private readonly AppSettings _settings;
     private readonly ObservableCollection<RoomProfile> _rooms;
+    private readonly ICollectionView _roomView;
     private readonly InstallIdentity _identity;
     private readonly LicenseClient _license;
     private readonly KakaoWindowBinder _binder = new();
     private readonly CancellationTokenSource _shutdown = new();
-    private readonly DispatcherTimer _timer;
+    private readonly SemaphoreSlim _schedulerGate = new(1, 1);
+    private readonly Queue<string> _logLines = new();
+    private readonly TrayService _tray;
+    private CancellationTokenSource _dispatchFence = new();
+    private CancellationTokenSource? _saveDebounce;
     private Task? _heartbeatTask;
+    private Task? _schedulerTask;
     private IntPtr _windowHandle;
-    private bool _tickBusy;
+    private bool _isShuttingDown;
+    private string _roomSearch = "";
 
     public MainWindow()
     {
         InitializeComponent();
         _settings = _store.Load();
         _rooms = new ObservableCollection<RoomProfile>(_settings.Rooms);
-        RoomList.ItemsSource = _rooms;
+        _roomView = CollectionViewSource.GetDefaultView(_rooms);
+        _roomView.Filter = FilterRoom;
+        RoomList.ItemsSource = _roomView;
+
         _identity = new InstallIdentity();
         _license = new LicenseClient(_identity);
         _license.Changed += snapshot => Dispatcher.BeginInvoke(() => UpdateLicenseUi(snapshot));
 
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _timer.Tick += async (_, _) => await SchedulerTickAsync();
-        _timer.Start();
+        _dispatchFence.Cancel(); // explicit start is required after every app launch.
+        _tray = new TrayService();
+        _tray.ShowRequested += () => Dispatcher.BeginInvoke(ShowFromTray);
+        _tray.StartRequested += () => Dispatcher.BeginInvoke(async () => await StartRoomsAsync(_rooms.ToList(), "트레이 전체 시작"));
+        _tray.StopRequested += () => Dispatcher.BeginInvoke(() => StopRooms(_rooms.ToList(), true, "트레이 전체 중단"));
+        _tray.ExitRequested += () => Dispatcher.BeginInvoke(Close);
 
         Loaded += async (_, _) => await InitializeAsync();
         Closed += (_, _) => Shutdown();
         if (_rooms.Count > 0) RoomList.SelectedIndex = 0;
-        AppendLog("Windows 클라이언트 시작 · 자동전송은 명시적 전체 시작 전까지 정지 상태");
+        AppendLog("Windows 클라이언트 시작 · 자동전송은 명시적 시작 전까지 정지 상태");
+        UpdateSelectionUi();
+        UpdateDashboard();
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -56,7 +76,7 @@ public partial class MainWindow : Window
         HwndSource.FromHwnd(_windowHandle)?.AddHook(WndProc);
         if (!RegisterHotKey(_windowHandle, HotkeyId, ModControl | ModShift, VkF8))
         {
-            PairingStatusText.Text = "Ctrl+Shift+F8 등록 실패 · 다른 프로그램 단축키와 충돌";
+            PairingStatusText.Text = "Ctrl+Shift+F8 등록 실패 · ‘현재 방 연결’ 버튼을 사용하세요.";
             AppendLog("방 연결 단축키 등록 실패");
         }
     }
@@ -69,6 +89,8 @@ public partial class MainWindow : Window
         if (recovered.Active) AppendLog("기존 PC 설치 라이선스 복구 완료");
         else AppendLog($"라이선스 상태: {recovered.State}");
         _heartbeatTask = _license.RunHeartbeatLoopAsync(_shutdown.Token);
+        _schedulerTask = Task.Run(() => SchedulerLoopAsync(_shutdown.Token));
+        UpdateDashboard();
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -81,6 +103,15 @@ public partial class MainWindow : Window
         return IntPtr.Zero;
     }
 
+    private async void PairCurrent_Click(object sender, RoutedEventArgs e)
+    {
+        PairingStatusText.Text = "2.5초 안에 카카오톡 채팅방 입력칸을 클릭하세요…";
+        AppendLog("버튼 방 연결 모드 시작");
+        WindowState = WindowState.Minimized;
+        await Task.Delay(2500);
+        CaptureCurrentKakaoRoom();
+    }
+
     private void CaptureCurrentKakaoRoom()
     {
         var capture = _binder.CaptureFocusedRoom();
@@ -88,6 +119,7 @@ public partial class MainWindow : Window
         {
             PairingStatusText.Text = capture.Message;
             AppendLog("방 연결 차단: " + capture.Message);
+            ShowFromTray();
             return;
         }
 
@@ -113,12 +145,14 @@ public partial class MainWindow : Window
                 existing.DisplayName = binding.WindowTitle;
             existing.LastStatus = "방 연결 갱신 완료";
         }
-        SaveSettings();
-        RoomList.Items.Refresh();
+        QueueSaveSettings();
+        _roomView.Refresh();
+        RoomList.SelectedItems.Clear();
         RoomList.SelectedItem = existing;
         PairingStatusText.Text = capture.Message;
         AppendLog($"방 연결 완료 · 프로필 {ShortId(existing.Id)} · 실제 제목 길이 {binding.WindowTitle.Length}");
-        Dispatcher.BeginInvoke(() => { Show(); Activate(); });
+        ShowFromTray();
+        RefreshRoomUi();
     }
 
     private async void Activate_Click(object sender, RoutedEventArgs e)
@@ -141,9 +175,34 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void StartAll_Click(object sender, RoutedEventArgs e)
+    private async void StartAll_Click(object sender, RoutedEventArgs e) =>
+        await StartRoomsAsync(_rooms.ToList(), "전체 시작");
+
+    private async void StartSelected_Click(object sender, RoutedEventArgs e)
     {
-        SaveEditorToSelected(false);
+        var selected = SelectedRooms();
+        if (selected.Count == 0)
+        {
+            MessageBox.Show("시작할 방을 하나 이상 선택하세요.", "KakaoMacro PC");
+            return;
+        }
+        await StartRoomsAsync(selected, "선택 시작");
+    }
+
+    private void StopAll_Click(object sender, RoutedEventArgs e) =>
+        StopRooms(_rooms.ToList(), true, "전체 중단");
+
+    private void StopSelected_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = SelectedRooms();
+        if (selected.Count == 0) return;
+        StopRooms(selected, false, "선택 중단");
+    }
+
+    private async Task StartRoomsAsync(IReadOnlyCollection<RoomProfile> targetRooms, string label)
+    {
+        if (targetRooms.Count == 0) return;
+        if (SelectedRooms().Count == 1) SaveEditorToSelected(false);
         await _license.HeartbeatAsync(_shutdown.Token);
         if (!_license.CanDispatch)
         {
@@ -151,13 +210,45 @@ public partial class MainWindow : Window
             return;
         }
 
-        var now = DateTimeOffset.Now;
+        EnsureDispatchFenceOpen();
+        await _schedulerGate.WaitAsync(_shutdown.Token);
         var started = 0;
-        foreach (var room in _rooms)
+        try
+        {
+            var now = DateTimeOffset.Now;
+            started = await Task.Run(() => PrepareRoomsForStart(targetRooms, now), _shutdown.Token);
+        }
+        finally
+        {
+            _schedulerGate.Release();
+        }
+        QueueSaveSettings();
+        RefreshRoomUi();
+        AppendLog($"{label} · 실행 가능한 방 {started}/{targetRooms.Count}개");
+    }
+
+    private int PrepareRoomsForStart(IEnumerable<RoomProfile> targetRooms, DateTimeOffset now)
+    {
+        var started = 0;
+        foreach (var room in targetRooms)
         {
             room.Running = false;
             room.NextAt = null;
-            if (!room.Enabled || room.Binding is null || string.IsNullOrWhiteSpace(room.Message)) continue;
+            if (!room.Enabled)
+            {
+                room.LastStatus = "사용 안 함 · 시작 제외";
+                continue;
+            }
+            if (room.Binding is null)
+            {
+                room.LastStatus = "방 연결 필요";
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(room.Message))
+            {
+                room.LastStatus = "메시지 입력 필요";
+                continue;
+            }
             var valid = _binder.Validate(room.Binding);
             if (!valid.Valid)
             {
@@ -177,48 +268,76 @@ public partial class MainWindow : Window
             room.LastStatus = $"실행 중 · 다음 {room.NextAt.Value.LocalDateTime:MM-dd HH:mm:ss}";
             started++;
         }
-        SaveSettings();
-        RoomList.Items.Refresh();
-        AppendLog($"전체 시작 · 실행 가능한 방 {started}개");
+        return started;
     }
 
-    private void StopAll_Click(object sender, RoutedEventArgs e)
+    private void StopRooms(IReadOnlyCollection<RoomProfile> targetRooms, bool global, string label)
     {
-        foreach (var room in _rooms)
+        if (global && !_dispatchFence.IsCancellationRequested) _dispatchFence.Cancel();
+        foreach (var room in targetRooms)
         {
             room.Running = false;
             room.NextAt = null;
-            if (room.Enabled) room.LastStatus = "전체 중단됨";
+            room.LastStatus = global ? "전체 중단됨" : "선택 중단됨";
         }
-        SaveSettings();
-        RoomList.Items.Refresh();
-        AppendLog("전체 중단 · 예약 실행 큐 비움");
+        QueueSaveSettings();
+        RefreshRoomUi();
+        AppendLog($"{label} · {targetRooms.Count}개 방 예약 중단");
     }
 
-    private async Task SchedulerTickAsync()
+    private async Task SchedulerLoopAsync(CancellationToken cancellationToken)
     {
-        if (_tickBusy || !_license.CanDispatch) return;
-        var now = DateTimeOffset.Now;
-        var due = _rooms.Where(r => r.Running && r.NextAt is not null && r.NextAt <= now).ToList();
-        if (due.Count == 0) return;
-        _tickBusy = true;
+        using var timer = new PeriodicTimer(SchedulerResolution);
         try
         {
-            foreach (var room in due)
+            while (await timer.WaitForNextTickAsync(cancellationToken))
             {
-                if (!_license.CanDispatch) break;
-                await DispatchAsync(room, true);
+                if (!_license.CanDispatch || _dispatchFence.IsCancellationRequested) continue;
+                var now = DateTimeOffset.Now;
+                var due = await Dispatcher.InvokeAsync(() =>
+                    _rooms.Where(r => r.Running && r.NextAt is not null && r.NextAt <= now)
+                          .OrderBy(r => r.NextAt)
+                          .Take(20)
+                          .ToList());
+                if (due.Count == 0) continue;
+                if (!await _schedulerGate.WaitAsync(0, cancellationToken)) continue;
+                try
+                {
+                    foreach (var room in due)
+                    {
+                        if (!_license.CanDispatch || _dispatchFence.IsCancellationRequested) break;
+                        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+                            cancellationToken,
+                            _dispatchFence.Token);
+                        try
+                        {
+                            await DispatchAsync(room, true, linked.Token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                        {
+                            room.LastStatus = "전송 중단됨";
+                            break;
+                        }
+                        await Task.Delay(InterRoomDelay, linked.Token).ConfigureAwait(false);
+                    }
+                }
+                finally
+                {
+                    _schedulerGate.Release();
+                }
+                Dispatcher.BeginInvoke(() =>
+                {
+                    QueueSaveSettings();
+                    RefreshRoomUi();
+                });
             }
-            SaveSettings();
-            RoomList.Items.Refresh();
         }
-        finally
+        catch (OperationCanceledException)
         {
-            _tickBusy = false;
         }
     }
 
-    private async Task DispatchAsync(RoomProfile room, bool scheduled)
+    private async Task DispatchAsync(RoomProfile room, bool scheduled, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.Now;
         ScheduleCalculator.NormalizeDailyCount(room, now);
@@ -244,7 +363,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var result = await _binder.SendTextAsync(room.Binding, room.Message, scheduled, _shutdown.Token);
+        var result = await _binder.SendTextAsync(room.Binding, room.Message, scheduled, cancellationToken).ConfigureAwait(false);
         if (result.Success)
         {
             room.FailureStreak = 0;
@@ -288,31 +407,47 @@ public partial class MainWindow : Window
 
     private async void TestSend_Click(object sender, RoutedEventArgs e)
     {
-        if (!SaveEditorToSelected(true) || RoomList.SelectedItem is not RoomProfile room) return;
+        if (!SaveEditorToSelected(true) || SelectedRooms().SingleOrDefault() is not RoomProfile room) return;
         await _license.HeartbeatAsync(_shutdown.Token);
         if (!_license.CanDispatch)
         {
             MessageBox.Show("라이선스 서버 확인 후 테스트 전송할 수 있습니다.", "KakaoMacro PC");
             return;
         }
-        await DispatchAsync(room, false);
-        SaveSettings();
-        RoomList.Items.Refresh();
+        TestSendButton.IsEnabled = false;
+        await _schedulerGate.WaitAsync(_shutdown.Token);
+        try
+        {
+            await Task.Run(() => DispatchAsync(room, false, _shutdown.Token), _shutdown.Token);
+        }
+        finally
+        {
+            _schedulerGate.Release();
+            TestSendButton.IsEnabled = true;
+        }
+        QueueSaveSettings();
+        RefreshRoomUi();
     }
 
     private void SaveRoom_Click(object sender, RoutedEventArgs e)
     {
         if (SaveEditorToSelected(true))
         {
-            SaveSettings();
-            RoomList.Items.Refresh();
+            QueueSaveSettings();
+            RefreshRoomUi();
             AppendLog("선택 방 설정 저장");
         }
     }
 
     private bool SaveEditorToSelected(bool showErrors)
     {
-        if (RoomList.SelectedItem is not RoomProfile room) return false;
+        var selected = SelectedRooms();
+        if (selected.Count != 1)
+        {
+            if (showErrors) MessageBox.Show("개별 설정은 방 하나만 선택했을 때 수정할 수 있습니다.");
+            return false;
+        }
+        var room = selected[0];
         if (!int.TryParse(IntervalBox.Text, out var interval) || interval is < 1 or > 10080)
         {
             if (showErrors) MessageBox.Show("반복 간격은 1~10080분으로 입력하세요.");
@@ -330,23 +465,43 @@ public partial class MainWindow : Window
             return false;
         }
 
-        room.DisplayName = string.IsNullOrWhiteSpace(DisplayNameBox.Text) ? room.Binding?.WindowTitle ?? "카톡방" : DisplayNameBox.Text.Trim();
+        room.DisplayName = string.IsNullOrWhiteSpace(DisplayNameBox.Text)
+            ? room.Binding?.WindowTitle ?? "카톡방"
+            : DisplayNameBox.Text.Trim();
         room.Message = message;
         room.ScheduleKind = ScheduleModeBox.SelectedIndex == 1 ? ScheduleKind.FixedTimes : ScheduleKind.Interval;
         room.IntervalMinutes = interval;
         room.DailyTimes = ScheduleCalculator.CanonicalTimes(TimesBox.Text);
         room.DailyLimit = dailyLimit;
         room.Enabled = EnabledCheck.IsChecked == true;
+        if (!room.Enabled)
+        {
+            room.Running = false;
+            room.NextAt = null;
+            room.LastStatus = "사용 안 함";
+        }
+        else if (room.Running)
+        {
+            room.NextAt = ScheduleCalculator.ComputeNext(room, DateTimeOffset.Now);
+        }
         return true;
     }
 
     private void RoomList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (RoomList.SelectedItem is not RoomProfile room)
+        var selected = SelectedRooms();
+        UpdateSelectionUi();
+        if (selected.Count != 1)
         {
-            BoundRoomText.Text = "왼쪽에서 방을 선택하세요.";
+            BoundRoomText.Text = selected.Count == 0
+                ? "방 하나를 선택하면 세부 설정을 편집할 수 있습니다."
+                : $"{selected.Count}개 방 선택됨 · 일괄 편집 탭을 사용하세요.";
+            SetSingleEditorEnabled(false);
             return;
         }
+
+        var room = selected[0];
+        SetSingleEditorEnabled(true);
         DisplayNameBox.Text = room.DisplayName;
         MessageEditor.Text = room.Message;
         ScheduleModeBox.SelectedIndex = room.ScheduleKind == ScheduleKind.FixedTimes ? 1 : 0;
@@ -355,9 +510,22 @@ public partial class MainWindow : Window
         DailyLimitBox.Text = room.DailyLimit.ToString();
         EnabledCheck.IsChecked = room.Enabled;
         BoundRoomText.Text = room.Binding is null
-            ? "실제 카카오톡 방: 연결 필요"
-            : $"실제 카카오톡 방: {room.Binding.WindowTitle} · {room.BindingSummary}";
+            ? "실제 카카오톡 방 · 연결 필요"
+            : $"실제 카카오톡 방 · {room.Binding.WindowTitle} · {room.BindingSummary}";
         UpdateSchedulePanels();
+    }
+
+    private void SetSingleEditorEnabled(bool enabled)
+    {
+        DisplayNameBox.IsEnabled = enabled;
+        MessageEditor.IsEnabled = enabled;
+        ScheduleModeBox.IsEnabled = enabled;
+        IntervalBox.IsEnabled = enabled;
+        TimesBox.IsEnabled = enabled;
+        DailyLimitBox.IsEnabled = enabled;
+        EnabledCheck.IsEnabled = enabled;
+        SaveRoomButton.IsEnabled = enabled;
+        TestSendButton.IsEnabled = enabled;
     }
 
     private void ScheduleModeBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateSchedulePanels();
@@ -370,22 +538,214 @@ public partial class MainWindow : Window
         TimesPanel.Visibility = fixedTimes ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void RemoveRoom_Click(object sender, RoutedEventArgs e)
+    private void ApplyBulk_Click(object sender, RoutedEventArgs e)
     {
-        if (RoomList.SelectedItem is not RoomProfile room) return;
-        room.Running = false;
-        _rooms.Remove(room);
-        SaveSettings();
-        AppendLog($"프로필 {ShortId(room.Id)} 삭제");
+        var selected = SelectedRooms();
+        if (selected.Count == 0)
+        {
+            MessageBox.Show("일괄 수정할 방을 하나 이상 선택하세요.");
+            return;
+        }
+        var applyMessage = ApplyMessageCheck.IsChecked == true;
+        var applySchedule = ApplyScheduleCheck.IsChecked == true;
+        var applyLimit = ApplyDailyLimitCheck.IsChecked == true;
+        var applyEnabled = ApplyEnabledCheck.IsChecked == true;
+        if (!applyMessage && !applySchedule && !applyLimit && !applyEnabled)
+        {
+            MessageBox.Show("일괄 적용할 항목을 하나 이상 체크하세요.");
+            return;
+        }
+
+        var message = BulkMessageEditor.Text.Trim();
+        if (applyMessage && message.Length > 4000)
+        {
+            MessageBox.Show("메시지는 4000자 이하로 입력하세요.");
+            return;
+        }
+        if (applySchedule && (!int.TryParse(BulkIntervalBox.Text, out var interval) || interval is < 1 or > 10080))
+        {
+            MessageBox.Show("일괄 반복 간격은 1~10080분으로 입력하세요.");
+            return;
+        }
+        interval = int.TryParse(BulkIntervalBox.Text, out var parsedInterval) ? parsedInterval : 60;
+        if (applyLimit && (!int.TryParse(BulkDailyLimitBox.Text, out var limit) || limit is < 0 or > 9999))
+        {
+            MessageBox.Show("일괄 하루 최대 전송은 0~9999로 입력하세요.");
+            return;
+        }
+        limit = int.TryParse(BulkDailyLimitBox.Text, out var parsedLimit) ? parsedLimit : 0;
+        var scheduleKind = BulkScheduleModeBox.SelectedIndex == 1 ? ScheduleKind.FixedTimes : ScheduleKind.Interval;
+        var times = ScheduleCalculator.CanonicalTimes(BulkTimesBox.Text);
+        var now = DateTimeOffset.Now;
+
+        foreach (var room in selected)
+        {
+            if (applyMessage) room.Message = message;
+            if (applySchedule)
+            {
+                room.ScheduleKind = scheduleKind;
+                room.IntervalMinutes = interval;
+                room.DailyTimes = times;
+                if (room.Running) room.NextAt = ScheduleCalculator.ComputeNext(room, now);
+            }
+            if (applyLimit) room.DailyLimit = limit;
+            if (applyEnabled)
+            {
+                room.Enabled = BulkEnabledCheck.IsChecked == true;
+                if (!room.Enabled)
+                {
+                    room.Running = false;
+                    room.NextAt = null;
+                    room.LastStatus = "사용 안 함 · 일괄 변경";
+                }
+            }
+        }
+        QueueSaveSettings();
+        RefreshRoomUi();
+        AppendLog($"일괄 설정 적용 · {selected.Count}개 방");
     }
 
-    private void ValidateRoom_Click(object sender, RoutedEventArgs e)
+    private void CopyPrimaryToSelected_Click(object sender, RoutedEventArgs e)
     {
-        if (RoomList.SelectedItem is not RoomProfile room) return;
-        var result = _binder.Validate(room.Binding);
-        room.LastStatus = result.Message;
-        RoomList.Items.Refresh();
-        AppendLog($"프로필 {ShortId(room.Id)} 연결 확인 · {(result.Valid ? "정상" : "차단")}");
+        var selected = SelectedRooms();
+        if (selected.Count < 2 || RoomList.SelectedItem is not RoomProfile source)
+        {
+            MessageBox.Show("설정을 복사할 원본 포함 2개 이상의 방을 선택하세요.");
+            return;
+        }
+        var now = DateTimeOffset.Now;
+        var copied = 0;
+        foreach (var room in selected.Where(r => r.Id != source.Id))
+        {
+            room.Message = source.Message;
+            room.ScheduleKind = source.ScheduleKind;
+            room.IntervalMinutes = source.IntervalMinutes;
+            room.DailyTimes = source.DailyTimes;
+            room.DailyLimit = source.DailyLimit;
+            room.Enabled = source.Enabled;
+            if (!room.Enabled)
+            {
+                room.Running = false;
+                room.NextAt = null;
+            }
+            else if (room.Running)
+            {
+                room.NextAt = ScheduleCalculator.ComputeNext(room, now);
+            }
+            copied++;
+        }
+        QueueSaveSettings();
+        RefreshRoomUi();
+        AppendLog($"첫 선택 방 설정 복사 · 대상 {copied}개");
+    }
+
+    private void EnableSelected_Click(object sender, RoutedEventArgs e) => SetSelectedEnabled(true);
+    private void DisableSelected_Click(object sender, RoutedEventArgs e) => SetSelectedEnabled(false);
+
+    private void SetSelectedEnabled(bool enabled)
+    {
+        var selected = SelectedRooms();
+        if (selected.Count == 0) return;
+        foreach (var room in selected)
+        {
+            room.Enabled = enabled;
+            if (!enabled)
+            {
+                room.Running = false;
+                room.NextAt = null;
+                room.LastStatus = "사용 안 함 · 일괄 변경";
+            }
+        }
+        QueueSaveSettings();
+        RefreshRoomUi();
+        AppendLog($"선택 {selected.Count}개 방 사용 {(enabled ? "켜기" : "끄기")}");
+    }
+
+    private async void ValidateSelected_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = SelectedRooms();
+        if (selected.Count == 0) return;
+        await Task.Run(() =>
+        {
+            foreach (var room in selected)
+            {
+                var result = _binder.Validate(room.Binding);
+                room.LastStatus = result.Message;
+            }
+        }, _shutdown.Token);
+        RefreshRoomUi();
+        AppendLog($"선택 {selected.Count}개 방 연결 상태 확인 완료");
+    }
+
+    private void RemoveSelected_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = SelectedRooms();
+        if (selected.Count == 0) return;
+        var answer = MessageBox.Show(
+            $"선택한 {selected.Count}개 방 설정을 삭제할까요?\n실제 카카오톡 방은 삭제되지 않습니다.",
+            "KakaoMacro PC",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (answer != MessageBoxResult.Yes) return;
+        foreach (var room in selected)
+        {
+            room.Running = false;
+            _rooms.Remove(room);
+        }
+        QueueSaveSettings();
+        RefreshRoomUi();
+        AppendLog($"선택 방 삭제 · {selected.Count}개");
+    }
+
+    private void RoomSearch_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        _roomSearch = RoomSearchBox.Text.Trim();
+        _roomView.Refresh();
+        UpdateDashboard();
+    }
+
+    private bool FilterRoom(object item)
+    {
+        if (item is not RoomProfile room || string.IsNullOrWhiteSpace(_roomSearch)) return true;
+        return room.DisplayName.Contains(_roomSearch, StringComparison.OrdinalIgnoreCase)
+            || (room.Binding?.WindowTitle?.Contains(_roomSearch, StringComparison.OrdinalIgnoreCase) ?? false)
+            || room.LastStatus.Contains(_roomSearch, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void SelectAllRooms_Click(object sender, RoutedEventArgs e) => RoomList.SelectAll();
+    private void ClearSelection_Click(object sender, RoutedEventArgs e) => RoomList.UnselectAll();
+
+    private void HideToTray_Click(object sender, RoutedEventArgs e)
+    {
+        Hide();
+        AppendLog("트레이로 숨김");
+    }
+
+    private void ShowFromTray()
+    {
+        if (_isShuttingDown) return;
+        Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    private void OpenSettingsFolder_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _store.EnsureDirectory();
+            Process.Start(new ProcessStartInfo { FileName = _store.DirectoryPath, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("설정 폴더를 열지 못했습니다: " + ex.Message);
+        }
+    }
+
+    private void ClearLog_Click(object sender, RoutedEventArgs e)
+    {
+        _logLines.Clear();
+        LogBox.Clear();
     }
 
     private void UpdateLicenseUi(LicenseSnapshot snapshot)
@@ -395,32 +755,125 @@ public partial class MainWindow : Window
             ? DateTimeOffset.FromUnixTimeSeconds(snapshot.ExpiresAt.Value).ToLocalTime().ToString("yyyy-MM-dd HH:mm") + " 만료"
             : snapshot.Active ? "영구 라이선스" : snapshot.Message;
         LicenseDetailText.Text = snapshot.Active
-            ? $"{expiry} · PC 설치 바인딩 · 서버 임대 확인 활성"
+            ? $"{expiry} · PC 설치 바인딩 · 서버 확인 활성"
             : snapshot.Message;
+        LicenseActivationPanel.Visibility = snapshot.Active ? Visibility.Collapsed : Visibility.Visible;
+        UpdateDashboard();
+    }
+
+    private void UpdateSelectionUi()
+    {
+        if (SelectedCountText is null || BulkSelectedText is null) return;
+        var count = SelectedRooms().Count;
+        SelectedCountText.Text = $"선택 {count}개 · Ctrl/Shift로 다중 선택";
+        BulkSelectedText.Text = count == 0
+            ? "왼쪽에서 여러 방을 선택하세요."
+            : $"현재 {count}개 방 선택됨 · 체크한 항목만 변경됩니다.";
+        UpdateDashboard();
+    }
+
+    private void UpdateDashboard()
+    {
+        if (DashboardText is null || RuntimeStatusText is null) return;
+        var total = _rooms.Count;
+        var linked = _rooms.Count(r => r.Binding is not null);
+        var running = _rooms.Count(r => r.Running);
+        var enabled = _rooms.Count(r => r.Enabled);
+        var selected = RoomList?.SelectedItems.Count ?? 0;
+        DashboardText.Text = $"방 {total}개 · 연결 {linked}개 · 사용 {enabled}개 · 실행 {running}개 · 선택 {selected}개";
+        RuntimeStatusText.Text = _license.CanDispatch
+            ? $"라이선스 정상 · 실행 {running}개 · 스케줄러 0.5초 해상도 · 방 사이 최소 650ms"
+            : "라이선스 확인 전에는 예약 전송이 실행되지 않습니다.";
+        _tray?.UpdateTooltip(running, total, _license.CanDispatch);
+    }
+
+    private List<RoomProfile> SelectedRooms() => RoomList.SelectedItems.Cast<RoomProfile>().ToList();
+
+    private void RefreshRoomUi()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(RefreshRoomUi);
+            return;
+        }
+        _roomView.Refresh();
+        RoomList.Items.Refresh();
+        UpdateSelectionUi();
+    }
+
+    private void QueueSaveSettings()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(QueueSaveSettings);
+            return;
+        }
+        _saveDebounce?.Cancel();
+        _saveDebounce?.Dispose();
+        _saveDebounce = new CancellationTokenSource();
+        var token = _saveDebounce.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(550, token);
+                if (!token.IsCancellationRequested && !_isShuttingDown)
+                    await Dispatcher.InvokeAsync(SaveSettings);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        });
     }
 
     private void SaveSettings()
     {
+        _settings.SchemaVersion = 2;
         _settings.Rooms = _rooms.ToList();
         _store.Save(_settings);
     }
 
     private void AppendLog(string message)
     {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => AppendLog(message));
+            return;
+        }
         var line = $"[{DateTime.Now:HH:mm:ss}] {message}";
-        LogBox.AppendText((LogBox.Text.Length == 0 ? "" : Environment.NewLine) + line);
+        _logLines.Enqueue(line);
+        while (_logLines.Count > MaxLogLines) _logLines.Dequeue();
+        LogBox.Text = string.Join(Environment.NewLine, _logLines);
         LogBox.ScrollToEnd();
+    }
+
+    private void EnsureDispatchFenceOpen()
+    {
+        if (!_dispatchFence.IsCancellationRequested) return;
+        _dispatchFence.Dispose();
+        _dispatchFence = new CancellationTokenSource();
     }
 
     private void Shutdown()
     {
-        foreach (var room in _rooms) { room.Running = false; room.NextAt = null; }
-        SaveSettings();
-        _timer.Stop();
+        if (_isShuttingDown) return;
+        _isShuttingDown = true;
+        _saveDebounce?.Cancel();
+        _dispatchFence.Cancel();
+        foreach (var room in _rooms)
+        {
+            room.Running = false;
+            room.NextAt = null;
+        }
+        try { SaveSettings(); } catch { }
         _shutdown.Cancel();
         if (_windowHandle != IntPtr.Zero) UnregisterHotKey(_windowHandle, HotkeyId);
+        _tray.Dispose();
         _license.Dispose();
         _identity.Dispose();
+        _schedulerGate.Dispose();
+        _dispatchFence.Dispose();
+        _saveDebounce?.Dispose();
         _shutdown.Dispose();
     }
 
