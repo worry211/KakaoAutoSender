@@ -24,13 +24,13 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Restore
         run: dotnet restore desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj
-      - name: Build
-        run: dotnet build desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release --no-restore
-      - name: Publish self-contained x64 preview
-        run: dotnet publish desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o desktop/artifacts/win-x64
+      - name: Release build with warnings as errors
+        run: dotnet build desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release --no-restore -warnaserror
+      - name: Publish self-contained x64
+        run: dotnet publish desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o desktop/artifacts/win-x64
       - uses: actions/upload-artifact@v4
         with:
-          name: KakaoMacro-PC-win-x64-preview
+          name: KakaoMacro-PC-v1.4.0-sale-candidate
           path: desktop/artifacts/win-x64/**
           if-no-files-found: error
           retention-days: 14
