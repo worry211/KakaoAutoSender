@@ -69,7 +69,7 @@
                     <Grid Grid.Row="1" Margin="0,11,0,8">
                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="118"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                         <TextBox x:Name="RoomSearchBox" ToolTip="방 이름 / 상태 검색" TextChanged="RoomSearch_TextChanged"/>
-                        <ComboBox x:Name="RoomFilterBox" Grid.Column="1" Margin="6,0,0,0" SelectedIndex="0" SelectionChanged="RoomFilterBox_SelectionChanged" ToolTip="방 상태 필터">
+                        <ComboBox x:Name="RoomFilterBox" Grid.Column="1" Margin="6,0,0,0" SelectionChanged="RoomFilterBox_SelectionChanged" ToolTip="방 상태 필터">
                             <ComboBoxItem Content="전체"/>
                             <ComboBoxItem Content="실행 중"/>
                             <ComboBoxItem Content="사용 설정"/>

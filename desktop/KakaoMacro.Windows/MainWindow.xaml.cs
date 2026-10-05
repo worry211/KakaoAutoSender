@@ -51,6 +51,7 @@ public partial class MainWindow : Window
         _roomView = CollectionViewSource.GetDefaultView(_rooms);
         _roomView.Filter = FilterRoom;
         RoomList.ItemsSource = _roomView;
+        RoomFilterBox.SelectedIndex = 0;
 
         _identity = new InstallIdentity();
         _license = new LicenseClient(_identity);
@@ -697,10 +698,8 @@ public partial class MainWindow : Window
         {
             foreach (var room in selected)
             {
-                var before = room.LastStatus;
                 await DispatchAsync(room, false, _shutdown.Token);
-                if (!string.Equals(before, room.LastStatus, StringComparison.Ordinal) &&
-                    string.Equals(room.LastStatus, "수동 테스트 전송 성공", StringComparison.Ordinal))
+                if (string.Equals(room.LastStatus, "수동 테스트 전송 성공", StringComparison.Ordinal))
                     sent++;
                 if (room != selected[^1])
                     await Task.Delay(InterRoomDelay, _shutdown.Token);
