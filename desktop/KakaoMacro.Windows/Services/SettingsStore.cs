@@ -58,7 +58,7 @@ internal sealed class SettingsStore
 
     private static void Sanitize(AppSettings value)
     {
-        value.SchemaVersion = 2;
+        value.SchemaVersion = 3;
         value.Rooms ??= new List<RoomProfile>();
         foreach (var room in value.Rooms)
         {

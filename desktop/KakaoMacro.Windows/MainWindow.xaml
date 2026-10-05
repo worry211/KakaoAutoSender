@@ -149,6 +149,7 @@
                                         <StackPanel>
                                             <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/>
                                             <TextBlock Text="{Binding ScheduleSummary}" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,4,0,0"/>
+                                            <TextBlock Text="{Binding BindingSummary}" Foreground="#8FB8A2" FontSize="11" Margin="0,4,0,0"/>
                                             <TextBlock Text="{Binding LastStatus}" Foreground="#B7C0CE" FontSize="11" Margin="0,5,0,0"
                                                        TextTrimming="CharacterEllipsis" MaxHeight="32"/>
                                         </StackPanel>
@@ -392,8 +393,13 @@
                             </StackPanel>
                             <WrapPanel Grid.Row="1" Margin="0,0,0,10">
                                 <Button Content="선택 연결 확인" Click="ValidateSelected_Click"/>
+                                <Button Content="전체 연결 확인" Click="ValidateAll_Click"/>
                                 <Button Content="설정 폴더 열기" Click="OpenSettingsFolder_Click"/>
                                 <Button Style="{StaticResource GhostButton}" Content="로그 지우기" Click="ClearLog_Click"/>
+                                <CheckBox x:Name="CloseToTrayCheck" Content="X 버튼은 트레이로 숨김" IsChecked="True"
+                                          Checked="CloseToTrayCheck_Changed" Unchecked="CloseToTrayCheck_Changed"
+                                          VerticalAlignment="Center" Margin="12,0,8,0" ToolTip="실수로 창을 닫아도 자동전송 엔진을 유지합니다."/>
+                                <Button Style="{StaticResource DangerButton}" Content="프로그램 종료" Click="ExitApp_Click"/>
                             </WrapPanel>
                             <TextBox x:Name="LogBox" Grid.Row="2" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
                                      VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"

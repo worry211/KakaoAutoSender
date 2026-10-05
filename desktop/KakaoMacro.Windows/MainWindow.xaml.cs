@@ -40,12 +40,15 @@ public partial class MainWindow : Window
     private readonly Dictionary<Guid, BulkEditSnapshot> _lastBulkUndo = new();
     private Task? _heartbeatTask;
     private Task? _schedulerTask;
+    private Task? _bindingHealthTask;
     private IntPtr _windowHandle;
     private bool _isShuttingDown;
     private string _roomSearch = "";
     private string _roomFilter = "ALL";
     private string _roomSort = "STATUS";
     private bool _uiReady;
+    private bool _closeToTray = true;
+    private bool _exitRequested;
     private bool _loadingSingleEditor;
     private bool _editorDirty;
     private Guid? _editingRoomId;
@@ -54,6 +57,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         var settings = _store.Load();
+        _closeToTray = settings.CloseToTray;
         _rooms = new ObservableCollection<RoomProfile>(settings.Rooms);
         _roomView = CollectionViewSource.GetDefaultView(_rooms);
         _roomView.Filter = FilterRoom;
@@ -68,8 +72,10 @@ public partial class MainWindow : Window
         _tray.ShowRequested += () => Dispatcher.BeginInvoke(ShowFromTray);
         _tray.StartRequested += () => Dispatcher.BeginInvoke(async () => await StartRoomsAsync(_rooms.ToList(), "트레이 전체 시작"));
         _tray.StopRequested += () => Dispatcher.BeginInvoke(() => StopRooms(_rooms.ToList(), true, "트레이 전체 중단"));
-        _tray.ExitRequested += () => Dispatcher.BeginInvoke(Close);
+        _tray.ExitRequested += () => Dispatcher.BeginInvoke(RequestExit);
 
+        CloseToTrayCheck.IsChecked = _closeToTray;
+        Closing += MainWindow_Closing;
         _uiReady = true;
         RoomFilterBox.SelectedIndex = 0;
         RoomSortBox.SelectedIndex = 0;
@@ -104,6 +110,8 @@ public partial class MainWindow : Window
         else AppendLog($"라이선스 상태: {recovered.State}");
         _heartbeatTask = _license.RunHeartbeatLoopAsync(_shutdown.Token);
         _schedulerTask = Task.Run(() => SchedulerLoopAsync(_shutdown.Token));
+        await RefreshBindingHealthAsync(_shutdown.Token);
+        _bindingHealthTask = Task.Run(() => BindingHealthLoopAsync(_shutdown.Token));
         UpdateDashboard();
     }
 
@@ -174,6 +182,8 @@ public partial class MainWindow : Window
                 existing.DisplayName = binding.WindowTitle;
             existing.LastStatus = "방 연결 갱신 완료";
         }
+        existing.BindingValid = true;
+        existing.BindingHealthMessage = "연결 정상";
         QueueSaveSettings();
         _roomView.Refresh();
         RoomList.SelectedItems.Clear();
@@ -279,6 +289,8 @@ public partial class MainWindow : Window
                 continue;
             }
             var valid = _binder.Validate(room.Binding);
+            room.BindingValid = valid.Valid;
+            room.BindingHealthMessage = valid.Message;
             if (!valid.Valid)
             {
                 room.LastStatus = valid.Message;
@@ -395,6 +407,8 @@ public partial class MainWindow : Window
         var result = await _binder.SendTextAsync(room.Binding, room.Message, scheduled, cancellationToken).ConfigureAwait(false);
         if (result.Success)
         {
+            room.BindingValid = true;
+            room.BindingHealthMessage = "연결 정상";
             room.FailureStreak = 0;
             if (scheduled)
             {
@@ -408,6 +422,11 @@ public partial class MainWindow : Window
         }
 
         room.LastStatus = result.Message;
+        if (result.Failure == SendFailure.InvalidBinding)
+        {
+            room.BindingValid = false;
+            room.BindingHealthMessage = result.Message;
+        }
         if (!scheduled)
         {
             AppendLog($"프로필 {ShortId(room.Id)} 테스트 전송 실패 · {result.Failure}");
@@ -864,16 +883,84 @@ public partial class MainWindow : Window
     {
         var selected = SelectedRooms();
         if (selected.Count == 0) return;
-        await Task.Run(() =>
+        await ValidateRoomsAsync(selected, $"선택 {selected.Count}개 방");
+    }
+
+    private async void ValidateAll_Click(object sender, RoutedEventArgs e)
+    {
+        if (_rooms.Count == 0) return;
+        await ValidateRoomsAsync(_rooms.ToList(), "전체 방");
+    }
+
+    private async Task ValidateRoomsAsync(IReadOnlyCollection<RoomProfile> rooms, string label)
+    {
+        var snapshot = rooms.Select(room => (room.Id, room.Binding)).ToList();
+        var results = await Task.Run(() => snapshot.Select(item =>
         {
-            foreach (var room in selected)
-            {
-                var result = _binder.Validate(room.Binding);
-                room.LastStatus = result.Message;
-            }
-        }, _shutdown.Token);
+            var validation = _binder.Validate(item.Binding);
+            return (item.Id, validation.Valid, validation.Message);
+        }).ToList(), _shutdown.Token);
+
+        foreach (var result in results)
+        {
+            var room = _rooms.FirstOrDefault(candidate => candidate.Id == result.Id);
+            if (room is null) continue;
+            ApplyBindingValidation(room, result.Valid, result.Message, true);
+        }
         RefreshRoomUi();
-        AppendLog($"선택 {selected.Count}개 방 연결 상태 확인 완료");
+        AppendLog($"{label} 연결 상태 확인 완료");
+    }
+
+    private async Task BindingHealthLoopAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+                await RefreshBindingHealthAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task RefreshBindingHealthAsync(CancellationToken cancellationToken)
+    {
+        var snapshot = await Dispatcher.InvokeAsync(() =>
+            _rooms.Select(room => (room.Id, room.Binding)).ToList());
+        if (snapshot.Count == 0) return;
+
+        var results = await Task.Run(() => snapshot.Select(item =>
+        {
+            var validation = _binder.Validate(item.Binding);
+            return (item.Id, validation.Valid, validation.Message);
+        }).ToList(), cancellationToken);
+
+        await Dispatcher.InvokeAsync(() =>
+        {
+            var stopped = 0;
+            foreach (var result in results)
+            {
+                var room = _rooms.FirstOrDefault(candidate => candidate.Id == result.Id);
+                if (room is null) continue;
+                if (!result.Valid && room.Running) stopped++;
+                ApplyBindingValidation(room, result.Valid, result.Message, true);
+            }
+            if (stopped > 0) AppendLog($"연결 이상 감지 · 실행 중 {stopped}개 방 자동 중지");
+            RefreshRoomUi();
+        });
+    }
+
+    private static void ApplyBindingValidation(RoomProfile room, bool valid, string message, bool stopOnFailure)
+    {
+        room.BindingValid = valid;
+        room.BindingHealthMessage = message;
+        if (!valid && stopOnFailure && room.Running)
+        {
+            room.Running = false;
+            room.NextAt = null;
+            room.LastStatus = message + " · 자동 중지";
+        }
     }
 
     private void RemoveSelected_Click(object sender, RoutedEventArgs e)
@@ -976,8 +1063,8 @@ public partial class MainWindow : Window
             "RUNNING" => room.Running,
             "PAUSED" => room.Enabled && !room.Running,
             "ENABLED" => room.Enabled,
-            "UNLINKED" => room.Binding is null,
-            "ATTENTION" => room.Enabled && (room.Binding is null || room.FailureStreak > 0
+            "UNLINKED" => room.Binding is null || room.BindingValid is false,
+            "ATTENTION" => room.Enabled && (room.Binding is null || room.BindingValid is false || room.FailureStreak > 0
                 || room.LastStatus.Contains("필요", StringComparison.OrdinalIgnoreCase)
                 || room.LastStatus.Contains("실패", StringComparison.OrdinalIgnoreCase)
                 || room.LastStatus.Contains("차단", StringComparison.OrdinalIgnoreCase)
@@ -998,6 +1085,42 @@ public partial class MainWindow : Window
     {
         Hide();
         AppendLog("트레이로 숨김");
+    }
+
+    private void CloseToTrayCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_uiReady || CloseToTrayCheck is null) return;
+        _closeToTray = CloseToTrayCheck.IsChecked == true;
+        QueueSaveSettings();
+        AppendLog(_closeToTray ? "X 버튼 동작: 트레이로 숨김" : "X 버튼 동작: 프로그램 종료");
+    }
+
+    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (_isShuttingDown || _exitRequested || !_closeToTray) return;
+        FlushEditorDraft();
+        e.Cancel = true;
+        Hide();
+        AppendLog("창 닫기 요청 · 트레이에서 계속 실행");
+    }
+
+    private void ExitApp_Click(object sender, RoutedEventArgs e) => RequestExit();
+
+    private void RequestExit()
+    {
+        if (_isShuttingDown) return;
+        var running = _rooms.Count(room => room.Running);
+        if (running > 0)
+        {
+            var answer = MessageBox.Show(
+                $"현재 {running}개 방이 실행 중입니다. 프로그램을 종료하면 모든 자동전송이 중단됩니다. 종료할까요?",
+                "KakaoMacro PC",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes) return;
+        }
+        _exitRequested = true;
+        Close();
     }
 
     private void ShowFromTray()
@@ -1055,13 +1178,18 @@ public partial class MainWindow : Window
     {
         if (!_uiReady || DashboardText is null || RuntimeStatusText is null) return;
         var total = _rooms.Count;
-        var linked = _rooms.Count(r => r.Binding is not null);
+        var paired = _rooms.Count(r => r.Binding is not null);
+        var healthy = _rooms.Count(r => r.BindingValid is true);
         var running = _rooms.Count(r => r.Running);
         var enabled = _rooms.Count(r => r.Enabled);
         var selected = RoomList?.SelectedItems.Count ?? 0;
-        DashboardText.Text = $"방 {total}개 · 연결 {linked}개 · 사용 {enabled}개 · 실행 {running}개 · 선택 {selected}개";
+        var next = _rooms.Where(r => r.Running && r.NextAt is not null)
+            .OrderBy(r => r.NextAt)
+            .Select(r => r.NextAt!.Value.LocalDateTime.ToString("HH:mm:ss"))
+            .FirstOrDefault();
+        DashboardText.Text = $"방 {total}개 · 연결 정상 {healthy}/{paired} · 사용 {enabled}개 · 실행 {running}개 · 선택 {selected}개";
         RuntimeStatusText.Text = _license.CanDispatch
-            ? $"라이선스 정상 · 실행 중인 방 {running}개 · 예약 전송 엔진 정상"
+            ? $"라이선스 정상 · 연결 정상 {healthy}/{paired} · 실행 {running}개" + (next is null ? " · 다음 전송 없음" : $" · 다음 전송 {next}")
             : "라이선스 확인 전에는 예약 전송이 실행되지 않습니다.";
         _tray?.UpdateTooltip(running, total, _license.CanDispatch);
     }
@@ -1107,7 +1235,8 @@ public partial class MainWindow : Window
 
     private AppSettings BuildSettingsSnapshot() => new()
     {
-        SchemaVersion = 2,
+        SchemaVersion = 3,
+        CloseToTray = _closeToTray,
         Rooms = _rooms.Select(CloneRoomForStorage).ToList(),
     };
 

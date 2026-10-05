@@ -44,7 +44,17 @@ public sealed class RoomProfile
     public DateTimeOffset? NextAt { get; set; }
 
     [JsonIgnore]
-    public string BindingSummary => Binding is null ? "연결 필요" : "연결됨 · 카카오톡 방 확인됨";
+    public bool? BindingValid { get; set; }
+
+    [JsonIgnore]
+    public string BindingHealthMessage { get; set; } = "연결 상태 확인 중";
+
+    [JsonIgnore]
+    public string BindingSummary => Binding is null
+        ? "연결 필요"
+        : BindingValid is true
+            ? "연결 정상"
+            : BindingValid is false ? "연결 확인 필요" : "연결 확인 중";
 
     [JsonIgnore]
     public string ScheduleSummary => ScheduleKind == ScheduleKind.FixedTimes
@@ -54,6 +64,7 @@ public sealed class RoomProfile
 
 public sealed class AppSettings
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 3;
+    public bool CloseToTray { get; set; } = true;
     public List<RoomProfile> Rooms { get; set; } = new();
 }
