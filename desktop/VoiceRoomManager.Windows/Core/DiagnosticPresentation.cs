@@ -5,6 +5,7 @@ internal static class DiagnosticPresentation
     public static string Summary(string detail)
     {
         if (string.IsNullOrWhiteSpace(detail)) return "";
+        detail = detail.Split(" → ", StringSplitOptions.None).Last();
         if (detail.Contains("Windows 한국어 OCR이 없습니다", StringComparison.Ordinal)) return "Windows 한국어 OCR을 설치한 뒤 ‘지금 확인’을 눌러 주세요.";
         if (detail.Contains("Windows OCR 실행 실패", StringComparison.Ordinal)) return "Windows 화면 인식 기능을 실행하지 못했습니다. 고급 진단을 확인해 주세요.";
         if (detail.Contains("미리보기 제목이 등록한 이름", StringComparison.Ordinal)) return "미리보기와 등록한 방 이름이 일치하지 않습니다. 정확한 이름을 확인해 주세요.";
