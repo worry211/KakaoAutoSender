@@ -81,8 +81,11 @@ export async function admin(
     } else if (action === "min-version" || action === "latest-version") {
       if (!/^\d{1,8}$/.test(String(p.version)) || Number(p.version) < 20)
         throw new ApiError("INVALID_VERSION");
+      const version = Number(p.version);
+      if (action === "latest-version" && version < Number(c.min_version))
+        throw new ApiError("LATEST_VERSION_BELOW_MIN", 409);
       next[action === "min-version" ? "min_version" : "latest_version"] =
-        Number(p.version);
+        version;
       if (action === "latest-version") {
         let u: URL;
         try {
@@ -92,6 +95,10 @@ export async function admin(
         }
         if (u.protocol !== "https:") throw new ApiError("INVALID_URL");
         next.download_url = u.href;
+        if (Object.prototype.hasOwnProperty.call(p, "notes"))
+          next.release_notes = String(p.notes ?? "")
+            .trim()
+            .slice(0, 500);
       }
     } else if (action === "policy") {
       if (
@@ -110,7 +117,7 @@ export async function admin(
     next.last_request = request;
     const rs = await env.DB.batch([
       env.DB.prepare(
-        `UPDATE config SET maintenance=?,kill_switch=?,message=?,min_version=?,latest_version=?,download_url=?,heartbeat_seconds=?,grace_seconds=?,revision=?,last_request=? WHERE id=1 AND revision=?`,
+        `UPDATE config SET maintenance=?,kill_switch=?,message=?,min_version=?,latest_version=?,download_url=?,release_notes=?,heartbeat_seconds=?,grace_seconds=?,revision=?,last_request=? WHERE id=1 AND revision=?`,
       ).bind(
         next.maintenance,
         next.kill_switch,
@@ -118,6 +125,7 @@ export async function admin(
         next.min_version,
         next.latest_version,
         next.download_url,
+        next.release_notes,
         next.heartbeat_seconds,
         next.grace_seconds,
         next.revision,
@@ -180,6 +188,8 @@ export async function admin(
     return out;
   }
   if (action === "stats") {
+    // Seller-facing "today" follows Korea Standard Time rather than UTC.
+    const sellerDayStart = t - ((t + 9 * 3600) % 86400);
     return env.DB.prepare(
       `SELECT count(*) AS total,
    coalesce(sum(status='UNUSED'),0) AS unused,
@@ -190,11 +200,24 @@ export async function admin(
    coalesce(sum(status='DELETED'),0) AS deleted,
    coalesce(sum(activated_at>=?),0) AS activated_today,
    coalesce(sum(created_at>=?),0) AS created_today,
-   coalesce(sum(status='ACTIVE' AND expires_at>? AND expires_at<=?),0) AS expiring_7d,
-   coalesce(sum(status='ACTIVE' AND last_seen_at>=?),0) AS recently_seen
+   coalesce(sum(status IN ('ACTIVE','SUSPENDED') AND expires_at>? AND expires_at<=?),0) AS expiring_7d,
+   coalesce(sum(status='ACTIVE' AND last_seen_at>=?),0) AS recently_seen,
+   coalesce(sum(status='UNUSED' AND created_at<=?),0) AS unused_30d,
+   coalesce(sum(status='ACTIVE' AND (expires_at IS NULL OR expires_at>?) AND (last_seen_at IS NULL OR last_seen_at<?)),0) AS inactive_7d
    FROM licenses`,
     )
-      .bind(t, t, t - (t % 86400), t - (t % 86400), t, t + 7 * 86400, t - 86400)
+      .bind(
+        t,
+        t,
+        sellerDayStart,
+        sellerDayStart,
+        t,
+        t + 7 * 86400,
+        t - 86400,
+        t - 30 * 86400,
+        t,
+        t - 7 * 86400,
+      )
       .first();
   }
   if (action === "list" || action === "search" || action === "expiring") {
@@ -212,7 +235,8 @@ export async function admin(
       const windowDays = p.days ?? 7;
       if (!Number.isInteger(windowDays) || windowDays < 1 || windowDays > 90)
         throw new ApiError("INVALID_DURATION");
-      where = "status='ACTIVE' AND expires_at>? AND expires_at<=?";
+      where =
+        "status IN ('ACTIVE','SUSPENDED') AND expires_at>? AND expires_at<=?";
       args = [t, t + windowDays * 86400];
     } else if (p.status) {
       if (
@@ -335,6 +359,10 @@ export async function admin(
       break;
     case "note":
       set.push("admin_memo=?");
+      args.push(String(p.memo ?? "").slice(0, 500));
+      break;
+    case "customer-memo":
+      set.push("customer_memo=?");
       args.push(String(p.memo ?? "").slice(0, 500));
       break;
     default:

@@ -66,6 +66,7 @@ const actionLabel = (action: any) => {
     RESET_DEVICE: "기기 초기화",
     REPLACE_UNUSED_KEY: "미사용 키 교체",
     NOTE: "관리 메모 변경",
+    CUSTOMER_MEMO: "고객 메모 변경",
     ACTIVATE: "활성화",
     MAINTENANCE_CHANGE: "점검 모드 변경",
     KILL_SWITCH_CHANGE: "긴급 중단 변경",
@@ -206,7 +207,7 @@ export function renderDiscordPanel(result: any, command?: Command) {
           {
             name: "🔎 조회 / 지원",
             value:
-              "`/license info` 상세\n`/license search` 검색\n`/license list` 목록\n`/license expiring` 만료 예정\n`/license history` 변경 이력",
+              "`/license info` 상세\n`/license search` 검색\n`/license list` 목록\n`/license expiring` 만료 예정\n`/license history` 변경 이력\n`/license customer-memo` 고객/주문 메모",
             inline: true,
           },
           {
@@ -308,6 +309,11 @@ export function renderDiscordPanel(result: any, command?: Command) {
             inline: false,
           },
           {
+            name: "📝 릴리즈 노트",
+            value: oneLine(result.release_notes, 500),
+            inline: false,
+          },
+          {
             name: "📢 고객 안내",
             value: oneLine(result.message, 500),
             inline: false,
@@ -367,8 +373,23 @@ export function renderDiscordPanel(result: any, command?: Command) {
     );
   }
 
-  if (result?.licenses)
-    return response("", [listEmbed(result, command)], pager(command, result));
+  if (result?.licenses) {
+    const detailButtons = (result.licenses as Row[])
+      .slice(0, 5)
+      .map((license, index) =>
+        button(`${index + 1} 상세`, `nav:info:${license.license_id}`, 2),
+      );
+    return response(
+      "",
+      [listEmbed(result, command)],
+      [
+        ...pager(command, result),
+        ...(detailButtons.length
+          ? [{ type: 1, components: detailButtons }]
+          : []),
+      ],
+    );
+  }
 
   if (result?.license_id) {
     const meta = stateMeta(result.state);
@@ -403,45 +424,75 @@ export function renderDiscordPanel(result: any, command?: Command) {
         value: `\`${result.key}\``,
         inline: false,
       });
-    return response("", [
-      {
-        title: `${meta.label} · 라이선스 상세`,
-        description: `**${result.license_id}**`,
-        color: meta.color,
-        fields,
-        footer: footer("고객지원용 상세 정보"),
-        timestamp: stamp(),
-      },
-    ]);
+    return response(
+      "",
+      [
+        {
+          title: `${meta.label} · 라이선스 상세`,
+          description: `**${result.license_id}**`,
+          color: meta.color,
+          fields,
+          footer: footer("고객지원용 상세 정보"),
+          timestamp: stamp(),
+        },
+      ],
+      [
+        {
+          type: 1,
+          components: [
+            button("변경 이력", `nav:hist:${result.license_id}:1`, 2),
+            button("새로고침", `nav:info:${result.license_id}`, 1),
+          ],
+        },
+      ],
+    );
   }
 
   if (result && Object.prototype.hasOwnProperty.call(result, "total"))
-    return response("", [
-      {
-        title: "📊 라이선스 현황",
-        description: `전체 **${Number(result.total) || 0}개**`,
-        color: COLORS.blue,
-        fields: [
-          {
-            name: "현재 상태",
-            value: `🟢 사용 중 **${Number(result.active) || 0}**\n🟡 미사용 **${Number(result.unused) || 0}**\n🟠 만료 **${Number(result.expired) || 0}**`,
-            inline: true,
-          },
-          {
-            name: "관리 상태",
-            value: `⏸️ 정지 **${Number(result.suspended) || 0}**\n🔴 취소 **${Number(result.revoked) || 0}**\n⚫ 삭제 **${Number(result.deleted) || 0}**`,
-            inline: true,
-          },
-          {
-            name: "최근 운영",
-            value: `오늘 생성 **${Number(result.created_today) || 0}**\n오늘 활성화 **${Number(result.activated_today) || 0}**\n7일 내 만료 **${Number(result.expiring_7d) || 0}**\n24시간 내 확인 **${Number(result.recently_seen) || 0}**`,
-            inline: true,
-          },
-        ],
-        footer: footer("판매 / 지원 요약"),
-        timestamp: stamp(),
-      },
-    ]);
+    return response(
+      "",
+      [
+        {
+          title: "📊 라이선스 현황",
+          description: `전체 **${Number(result.total) || 0}개**`,
+          color: COLORS.blue,
+          fields: [
+            {
+              name: "현재 상태",
+              value: `🟢 사용 중 **${Number(result.active) || 0}**\n🟡 미사용 **${Number(result.unused) || 0}**\n🟠 만료 **${Number(result.expired) || 0}**`,
+              inline: true,
+            },
+            {
+              name: "관리 상태",
+              value: `⏸️ 정지 **${Number(result.suspended) || 0}**\n🔴 취소 **${Number(result.revoked) || 0}**\n⚫ 삭제 **${Number(result.deleted) || 0}**`,
+              inline: true,
+            },
+            {
+              name: "최근 운영 · KST",
+              value: `오늘 생성 **${Number(result.created_today) || 0}**\n오늘 활성화 **${Number(result.activated_today) || 0}**\n7일 내 만료 **${Number(result.expiring_7d) || 0}**\n24시간 내 확인 **${Number(result.recently_seen) || 0}**`,
+              inline: true,
+            },
+            {
+              name: "⚠️ 확인할 항목",
+              value: `30일+ 미사용 키 **${Number(result.unused_30d) || 0}**\n7일+ 미접속 활성 고객 **${Number(result.inactive_7d) || 0}**`,
+              inline: true,
+            },
+          ],
+          footer: footer("판매 / 지원 요약"),
+          timestamp: stamp(),
+        },
+      ],
+      [
+        {
+          type: 1,
+          components: [
+            button("7일 만료", "nav:exp:7:1", 2),
+            button("미사용", "nav:list:UNUSED:1", 2),
+            button("사용 중", "nav:list:ACTIVE:1", 2),
+          ],
+        },
+      ],
+    );
 
   return response("", [
     {
@@ -538,6 +589,13 @@ function navCommand(custom: string): Command | null {
       action: "expiring",
       params: { days: Number(m[1]), page: Number(m[2]) },
     };
+  m = custom.match(/^nav:info:(LIC-[a-f0-9-]{36})$/i);
+  if (m)
+    return {
+      group: "license",
+      action: "info",
+      params: { "key-or-id": m[1] },
+    };
   m = custom.match(/^nav:hist:(LIC-[a-f0-9-]{36}):([1-9]\d{0,5})$/i);
   if (m)
     return {
@@ -601,7 +659,7 @@ export async function executeDiscordV2(
       throw new ApiError("INVALID_COMMAND");
     }
 
-    if (needsConfirmation(command.group, command.action)) {
+    if (needsConfirmation(command.group, command.action, command.params)) {
       if (command.group === "license") {
         const info = await admin(
           env,
@@ -637,7 +695,12 @@ export async function executeDiscordV2(
             fields: [
               {
                 name: "작업",
-                value: `**${actionLabel(command.action.toUpperCase().replaceAll("-", "_"))} · ${mode}**`,
+                value: `**${actionLabel(
+                  command.group === "system"
+                    ? command.action.toUpperCase().replaceAll("-", "_") +
+                        "_CHANGE"
+                    : command.action.toUpperCase().replaceAll("-", "_"),
+                )} · ${mode}**`,
                 inline: false,
               },
               { name: "대상", value: `**${target}**`, inline: false },
