@@ -27,7 +27,12 @@ jobs:
       - name: Apply v1.3 resilience on redesigned workspace
         run: python scripts/apply_windows_v13_on_redesign.py
       - name: Fix unsupported WPF property from redesigned base
-        run: python -c "from pathlib import Path; p=Path('desktop/KakaoMacro.Windows/MainWindow.xaml'); s=p.read_text(encoding='utf-8'); p.write_text(s.replace(' LetterSpacing=\"0.2\"',''), encoding='utf-8')"
+        shell: pwsh
+        run: |
+          $path = 'desktop/KakaoMacro.Windows/MainWindow.xaml'
+          $raw = Get-Content -Raw -Path $path
+          $raw = $raw.Replace(' LetterSpacing="0.2"', '')
+          [System.IO.File]::WriteAllText((Resolve-Path $path), $raw, [System.Text.UTF8Encoding]::new($false))
       - name: Restore
         run: dotnet restore desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj
       - name: Build release with warnings as errors
