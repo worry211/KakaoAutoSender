@@ -13,8 +13,6 @@ namespace VoiceRoomManager.Windows.Core;
 internal static class KakaoCalibrationStore
 {
     public const string VoiceMenu = "voice_menu";
-    public const string VoiceNameInput = "voice_name_input";
-    public const string VoiceCreate = "voice_create";
     private sealed class CalibrationFile
     {
         public int Schema { get; set; } = 1;
@@ -56,6 +54,7 @@ internal static class KakaoCalibrationStore
 
     public static (bool Success, string Diagnostic) CaptureAtCursor(string target)
     {
+        if (target != VoiceMenu) return (false, "지원하지 않는 호환성 지점입니다.");
         if (DesktopSession.IsLocked()) return (false, "Windows 잠금 상태에서는 캘리브레이션하지 않아.");
         if (!GetCursorPos(out var cursor)) return (false, "마우스 위치를 읽지 못함");
 
@@ -76,7 +75,9 @@ internal static class KakaoCalibrationStore
         lock (Gate)
         {
             var file = LoadCore();
-            file.KakaoVersion = CurrentKakaoVersion();
+            var version = CurrentKakaoVersion();
+            if (file.KakaoVersion != version) file.Targets.Clear();
+            file.KakaoVersion = version;
             file.Targets[target] = new TargetProfile
             {
                 HostClass = host.ClassName,
@@ -133,17 +134,6 @@ internal static class KakaoCalibrationStore
         var host = KakaoSurfaceLocator.ActiveOwnedSurface(AutomationOperation.Current!.Host);
         if (!NativeInput.OwnsPoint(host, x, y)) { diagnostic = "다른 창에 가려짐"; return false; }
         return NativeInput.Click(host, x, y);
-    }
-
-    public static bool TryClickAndType(string target, string text, out string diagnostic)
-    {
-        if (!TryClick(target, out diagnostic)) return false;
-        AutomationOperation.Pause(100);
-        var host = KakaoSurfaceLocator.ActiveOwnedSurface(AutomationOperation.Current!.Host);
-        if (!NativeInput.ReplaceText(host, text) || LocalTextSurface.Read(host)?.Has(text) != true)
-        { diagnostic += " · 이름 입력 재확인 실패"; return false; }
-        diagnostic += " · unicodeType=1";
-        return true;
     }
 
     public static void Clear()

@@ -36,6 +36,7 @@ public static class LifecyclePolicy
         room.SpeakerMuted = result.Active && result.SpeakerMuted;
         if (result.Active)
         {
+            room.CreationUncertain = false;
             room.LastSuccessAt = now;
             if (result.Created) room.StartedAt = now;
         }
@@ -48,8 +49,9 @@ public static class LifecyclePolicy
         else
         {
             room.Failures++; room.LastFailureAt = now; room.LastError = result.Status;
-            room.Status = result.InterventionRequired ? "USER_ACTION_REQUIRED" : "ERROR";
-            room.NextCheckAt = result.InterventionRequired ? null : now.Add(Retry(room.Failures));
+            var intervention = result.InterventionRequired || room.CreationUncertain;
+            room.Status = intervention ? "USER_ACTION_REQUIRED" : "ERROR";
+            room.NextCheckAt = intervention ? null : now.Add(Retry(room.Failures));
         }
     }
     private static DateTimeOffset Min(DateTimeOffset a, DateTimeOffset b) => a < b ? a : b;

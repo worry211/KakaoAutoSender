@@ -40,6 +40,11 @@ internal sealed class AutomationOperation : IDisposable
 
     public static void Stage(string stage) { Check(); Current!._progress?.Invoke(stage); }
 
+    public static void MarkCreationIntent()
+    {
+        Check(); Current!.Room.CreationUncertain=true;
+        Stage("생성 요청 · 실제 상태 재확인");
+    }
     public bool Prove(IntPtr host)
     {
         Check();

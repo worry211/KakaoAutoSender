@@ -6,7 +6,7 @@ namespace VoiceRoomManager.Windows.Core;
 /// </summary>
 internal static class KakaoOpenChatEntry
 {
-    public sealed record Result(bool Attempted, bool Success, string Diagnostic);
+    public sealed record Result(bool Attempted, bool Success, string Diagnostic, bool InterventionRequired = false);
 
     public static Result TryEnter(RoomState room)
     {
@@ -50,7 +50,7 @@ internal static class KakaoOpenChatEntry
             return new(true, true, string.Join(" → ", trace));
         }
 
-        return new(true, false, string.Join(" → ", trace));
+        return new(true, false, string.Join(" → ", trace), afterBrowser.InterventionRequired);
     }
 
     private static Result TryKakaoStage(string roomTitle, TimeSpan timeout, bool allowConfirmation = false)
@@ -66,11 +66,12 @@ internal static class KakaoOpenChatEntry
             if (lastPreview.Success)
                 return new(true, true, "preview=" + lastPreview.Diagnostic);
 
+            if (lastPreview.InterventionRequired) break;
             AutomationOperation.Pause(180);
         }
 
         return new(lastPreview?.Attempted == true, false,
-            "preview=" + (lastPreview?.Diagnostic ?? "not-attempted"));
+            "preview=" + (lastPreview?.Diagnostic ?? "not-attempted"), lastPreview?.InterventionRequired == true);
     }
 
 }

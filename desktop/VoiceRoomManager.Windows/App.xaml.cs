@@ -13,6 +13,15 @@ public partial class App : Application
         {
             RenderPreview(e.Args); return;
         }
+        if (e.Args.Length == 3 && e.Args[0] == "--ocr-image")
+        {
+            var bytes = File.ReadAllBytes(e.Args[1]);
+            var source = BitmapDecoder.Create(new MemoryStream(bytes), BitmapCreateOptions.None, BitmapCacheOption.OnLoad).Frames[0];
+            var bounds = new Core.KakaoSurfaceLocator.Bounds(0, 0, source.PixelWidth, source.PixelHeight);
+            var result = Task.Run(() => Core.LocalTextSurface.RecognizeAsync(bytes, IntPtr.Zero, bounds)).GetAwaiter().GetResult();
+            File.WriteAllText(e.Args[2], System.Text.Json.JsonSerializer.Serialize(new { result.Status, result.Diagnostic, Lines = result.Frame?.Lines.Select(l => new { l.Text, X=l.Bounds.X, Y=l.Bounds.Y, W=l.Bounds.Width, H=l.Bounds.Height }) }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            Shutdown(); return;
+        }
         _instance = new Mutex(true, @"Local\VoiceRoomManagerWindows", out var created);
         if (!created) { MessageBox.Show("VoiceRoom Manager가 이미 실행 중입니다."); Shutdown(); return; }
         new MainWindow().Show();

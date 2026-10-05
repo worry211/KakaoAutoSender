@@ -79,55 +79,43 @@ public sealed class KakaoPcAutomation
             if (HasStrongActiveProofHybrid(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
         }
 
-        var voice = FindClickableExact(surfaces, "보이스룸", "보이스룸 시작", "보이스룸 만들기");
-        if (voice is not null)
-        {
-            if (!Invoke(voice)) return new(false, "보이스룸 메뉴 UIA 호출 실패");
-        }
-        else if (!LocalTextSurface.ClickExact(AutomationOperation.Current!.Host, "보이스룸", "보이스룸 시작", "보이스룸 만들기")
-            && !KakaoCalibrationStore.TryClick(KakaoCalibrationStore.VoiceMenu, out var voiceDiag))
-        {
-            return new(false, "보이스룸 메뉴를 확인하지 못했습니다. 해당 방의 보이스룸 메뉴/한국어 OCR을 확인해 주세요.", InterventionRequired: true);
-        }
-        AutomationOperation.Pause(650);
+        if (room.CreationUncertain)
+            return new(false,"이전 생성 요청의 활성 여부가 불명확합니다. Kakao에서 실제 상태를 확인해 주세요. 중복 생성은 대기합니다.",InterventionRequired:true);
 
-        surfaces = ScopedSurfaces();
-        if (HasStrongActiveProofHybrid(surfaces))
+        // A recognized form resumes directly; opening the menu again would invalidate it.
+        var host = AutomationOperation.Current!.Host;
+        var form = LocalTextSurface.FindCreateForm(host);
+        if (form is null)
         {
-            AutomationOperation.Pause(300);
+            var voice = FindClickableExact(surfaces, "보이스룸", "보이스룸 시작", "보이스룸 만들기");
+            if (voice is not null)
+            {
+                if (!Invoke(voice)) return new(false, "보이스룸 메뉴 UIA 호출 실패");
+            }
+            else if (!LocalTextSurface.ClickExact(host, "보이스룸", "보이스룸 시작", "보이스룸 만들기")
+                && !KakaoCalibrationStore.TryClick(KakaoCalibrationStore.VoiceMenu, out _))
+                return new(false, "보이스룸 메뉴를 확인하지 못했습니다. 해당 방의 보이스룸 메뉴/한국어 OCR을 확인해 주세요.", InterventionRequired: true);
+
+            AutomationOperation.Pause(650);
             surfaces = ScopedSurfaces();
-            if (HasStrongActiveProofHybrid(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
+            if (HasStrongActiveProofHybrid(surfaces))
+            {
+                AutomationOperation.Pause(300);
+                surfaces = ScopedSurfaces();
+                if (HasStrongActiveProofHybrid(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
+            }
         }
 
         AutomationOperation.Stage("보이스룸 생성 폼 확인");
-        var voiceName = TruncateCodePoints(room.Title.Trim().Length == 0 ? "보이스룸" : room.Title.Trim(), 30);
-        if (FindClickableExact(surfaces, "보이스룸 만들기") is null
-            && FindByNameContains(surfaces, "보이스룸 이름") is null
-            && LocalTextSurface.Read(AutomationOperation.Current!.Host)?.Has("보이스룸 만들기") != true)
-            return new(false, "보이스룸 생성 폼을 확인하지 못했습니다. 활성/종료 상태를 직접 확인해 주세요.", InterventionRequired: true);
-        var edit = FindBestEditable(surfaces);
-        if (edit is not null)
+        for (var attempt = 0; attempt < 8 && form is null; attempt++)
         {
-            if (!SetValue(edit, voiceName)) return new(false, "보이스룸 이름 UIA 입력 실패");
+            form = LocalTextSurface.FindCreateForm(host);
+            if (form is null) AutomationOperation.Pause(250);
         }
-        else if (!LocalTextSurface.EnterVoiceName(AutomationOperation.Current!.Host, voiceName)
-            && !KakaoCalibrationStore.TryClickAndType(KakaoCalibrationStore.VoiceNameInput, voiceName, out var inputDiag))
-        {
-            return new(false, "보이스룸 이름 입력칸을 확인하지 못했습니다. 고급 호환성 설정에서 이름 입력칸을 등록해 주세요.", InterventionRequired: true);
-        }
-        AutomationOperation.Pause(320);
-
-        surfaces = ScopedSurfaces();
-        var create = FindClickableExact(surfaces, "만들기", "보이스룸 만들기");
-        if (create is not null)
-        {
-            if (!Invoke(create)) return new(false, "활성화된 만들기 버튼 UIA 호출 실패");
-        }
-        else if (!LocalTextSurface.ClickExact(AutomationOperation.Current!.Host, "보이스룸 만들기")
-            && !KakaoCalibrationStore.TryClick(KakaoCalibrationStore.VoiceCreate, out var createDiag))
-        {
-            return new(false, "보이스룸 만들기 버튼을 확인하지 못했습니다. 현재 생성 화면을 확인해 주세요.", InterventionRequired: true);
-        }
+        if (form is null)
+            return new(false, "보이스룸 생성 폼을 확인하지 못했습니다. 한국어 OCR과 Kakao 생성 화면을 확인해 주세요.", InterventionRequired: true);
+        var submission = SubmitVerifiedCreateForm(room, form);
+        if (!submission.Success) return submission;
 
         AutomationOperation.Stage("실제 활성 상태 검증");
         for (var i = 0; i < 16; i++)
@@ -142,7 +130,47 @@ public sealed class KakaoPcAutomation
         }
 
         return new(false,
-            "만들기 이후 보이스룸 활성 증거를 2회 확인하지 못함 · " + SurfaceDiagnostic(surfaces));
+            "만들기 이후 보이스룸 활성 증거를 2회 확인하지 못함 · " + SurfaceDiagnostic(surfaces), InterventionRequired: true);
+    }
+
+    private static Result SubmitVerifiedCreateForm(RoomState room, LocalTextSurface.Frame form)
+    {
+        // Explicit blank-name instruction permits Kakao's room-name default.
+        if (CreateFormEvidence.CanUseRoomName(form))
+        {
+            AutomationOperation.MarkCreationIntent(); // Persist before any submission input.
+            return LocalTextSurface.SubmitDefaultForm(form)
+                ? new(true, "생성 요청 전송")
+                : new(false, "생성 폼이 변경됐거나 확인 입력을 검증하지 못했습니다. 실제 상태 확인 전 추가 생성은 대기합니다.", InterventionRequired: true);
+        }
+
+        var voiceName = TruncateCodePoints(room.Title.Trim(), 30);
+        var fields = ScopedSurfaces().SelectMany(Elements)
+            .Where(e => IsEditableInForm(e, form.Surface))
+            .GroupBy(e => string.Join(',', e.GetRuntimeId())).Select(g => g.First()).ToArray();
+        if (fields.Length != 1 || !SetValue(fields[0], voiceName))
+            return new(false, "생성 폼의 단일 이름 입력칸과 입력 결과를 확인하지 못했습니다.", InterventionRequired: true);
+
+        var fresh = LocalTextSurface.FindCreateForm(AutomationOperation.Current!.Host);
+        if (fresh is null || fresh.Surface != form.Surface || !IsEditableInForm(fields[0], fresh.Surface) || !ValueMatches(fields[0], voiceName))
+            return new(false, "이름 입력 후 생성 폼이 변경됐습니다. 다시 확인해 주세요.", InterventionRequired: true);
+        AutomationOperation.MarkCreationIntent();
+        return LocalTextSurface.ClickFormConfirm(fresh)
+            ? new(true, "생성 요청 전송")
+            : new(false, "생성 폼 확인 입력을 검증하지 못했습니다. 실제 상태 확인 전 추가 생성은 대기합니다.", InterventionRequired: true);
+    }
+
+    internal static bool IsEditableInForm(AutomationElement element, KakaoSurfaceLocator.Bounds bounds)
+    {
+        try
+        {
+            var current = element.Current;
+            return current.ControlType == ControlType.Edit && current.IsEnabled && !current.IsOffscreen
+                && CreateFormEvidence.Contains(bounds, current.BoundingRectangle)
+                && element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern)
+                && !((ValuePattern)pattern).Current.IsReadOnly;
+        }
+        catch { return false; }
     }
 
     public Result RuntimeGuard(RoomState room)
@@ -319,30 +347,6 @@ public sealed class KakaoPcAutomation
         return hasAudio && hasVoice;
     }
 
-    private static AutomationElement? FindBestEditable(IEnumerable<AutomationElement> roots)
-    {
-        AutomationElement? best = null;
-        var bestScore = int.MinValue;
-        foreach (var root in roots)
-        foreach (var e in Elements(root))
-        {
-            try
-            {
-                if (e.Current.ControlType != ControlType.Edit || !e.Current.IsEnabled || !e.TryGetCurrentPattern(ValuePattern.Pattern, out _)) continue;
-                var name = Normalize(SafeName(e));
-                if (!name.Contains("보이스룸", StringComparison.Ordinal) && !name.Contains("이름", StringComparison.Ordinal)) continue;
-                var score = 0;
-                if (name.Contains("보이스룸", StringComparison.Ordinal)) score += 100;
-                if (name.Contains("이름", StringComparison.Ordinal)) score += 80;
-                var b = e.Current.BoundingRectangle;
-                if (!b.IsEmpty && b.Width > 100 && b.Height > 20) score += 20;
-                if (score > bestScore) { best = e; bestScore = score; }
-            }
-            catch { }
-        }
-        return best;
-    }
-
     private static AutomationElement? FindClickableExact(IEnumerable<AutomationElement> roots, params string[] names)
     {
         var normalized = names.Select(Normalize).ToArray();
@@ -432,14 +436,22 @@ public sealed class KakaoPcAutomation
         return false;
     }
 
+    private static bool ValueMatches(AutomationElement element, string value)
+    {
+        try { return element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern) && ((ValuePattern)pattern).Current.Value == value; }
+        catch { return false; }
+    }
+
     private static bool SetValue(AutomationElement element, string value)
     {
         AutomationOperation.Check();
         try
         {
             if (!element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern)) return false;
-            ((ValuePattern)pattern).SetValue(value);
-            return true;
+            var field = (ValuePattern)pattern;
+            if (field.Current.IsReadOnly) return false;
+            field.SetValue(value);
+            return field.Current.Value == value;
         }
         catch { return false; }
     }

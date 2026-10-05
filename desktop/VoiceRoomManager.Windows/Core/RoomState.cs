@@ -8,6 +8,7 @@ public sealed class RoomState
     public string OpenChatUrl { get; set; } = "";
     public bool Enabled { get; set; } = true;
     public bool LiveVerified { get; set; }
+    public bool CreationUncertain { get; set; }
     public bool MicMuted { get; set; }
     public bool SpeakerMuted { get; set; }
     public DateTimeOffset? StartedAt { get; set; }

@@ -72,6 +72,13 @@ internal static class KakaoSurfaceLocator
         return OwnedBy(foreground, owner) && ProcessId(foreground) == ProcessId(owner) ? foreground : owner;
     }
 
+    internal static string ForegroundDiagnostic(IntPtr expected)
+    {
+        var fg=GetForegroundWindow(); var current=Read(fg,fg,true);
+        var owners=new List<string>();var cursor=fg;
+        for(var i=0;i<5 && cursor!=IntPtr.Zero;i++) { owners.Add(cursor.ToInt64().ToString("X"));cursor=GetWindow(cursor,4); }
+        return $"foreground={current.ClassName} rect={current.Rect} pid={ProcessId(fg)} expected={expected.ToInt64():X} owners={string.Join(',',owners)}";
+    }
     public static bool IsForeground(IntPtr host) => GetForegroundWindow() == host;
     public static int ProcessId(IntPtr host) { GetWindowThreadProcessId(host, out var pid); return (int)pid; }
 
@@ -134,19 +141,6 @@ internal static class KakaoSurfaceLocator
             .FirstOrDefault(x => string.Equals(x.ClassName, KakaoWindowClass, StringComparison.Ordinal)
                               && !string.Equals(x.Title.Trim(), KakaoMainTitle, StringComparison.Ordinal)
                               && string.Equals(x.Title.Trim(), wanted, StringComparison.Ordinal))?.Hwnd ?? IntPtr.Zero;
-    }
-
-    public static bool TryFindChatComposer(out Surface? composer)
-    {
-        composer = Snapshot(includeChildren: true)
-            .Where(x => x.Visible
-                     && x.Rect.Width >= 120
-                     && x.Rect.Height >= 18
-                     && x.Rect.Height <= 180
-                     && x.ClassName.Contains("RICHEDIT", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(x => x.Rect.Width)
-            .FirstOrDefault();
-        return composer is not null;
     }
 
     public static IReadOnlyList<Surface> PreviewCandidates()

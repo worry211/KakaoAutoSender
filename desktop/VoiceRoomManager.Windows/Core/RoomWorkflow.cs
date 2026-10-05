@@ -56,7 +56,7 @@ internal sealed class WindowsWorkflowDriver(KakaoPcAutomation kakao) : IRoomWork
     {
         AutomationOperation.Pause(500);
         var entry = OpenChatLinkLauncher.TryOpen(room);
-        return new(entry.Success, entry.Diagnostic);
+        return new(entry.Success, entry.Diagnostic, InterventionRequired: entry.InterventionRequired);
     }
     public bool HasRoomProof(RoomState room) => AutomationOperation.Current is { } op && op.Room.Id == room.Id && op.HasRoomProof;
     public KakaoPcAutomation.Result InspectVoiceRoom(RoomState room, bool probe) => probe ? kakao.SafeProbe(room) : kakao.EnsureVoiceRoom(room);

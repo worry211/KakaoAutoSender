@@ -23,7 +23,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
     public void Save() => _store.Save(_state);
     private void Notify() { if (!_disposed) StateChanged?.Invoke(); }
     private void Stage(RoomState room, string stage)
-    { room.Stage = stage; OperationLog.Write(room, stage); Notify(); }
+    { room.Stage = stage; OperationLog.Write(room, stage); Save(); Notify(); }
     public void StartAll()
     {
         if (IsBusy) return;
@@ -85,7 +85,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
                 if (!token.IsCancellationRequested)
                 {
                     LifecyclePolicy.Apply(due, result, DateTimeOffset.UtcNow);
-                    due.Stage = result.Success ? "활성 · 보호 확인" : result.InterventionRequired ? "사용자 조치 필요" : "재시도 대기";
+                    due.Stage = result.Success ? "활성 · 보호 확인" : due.Status == "USER_ACTION_REQUIRED" ? "사용자 조치 필요" : "재시도 대기";
                     _state.LastStatus = due.Title + " · " + result.Status;
                     OperationLog.Write(due, due.Status, result.Status); Save();
                 }

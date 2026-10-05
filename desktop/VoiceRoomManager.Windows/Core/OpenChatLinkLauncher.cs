@@ -42,7 +42,7 @@ internal static class OpenChatLinkLauncher
     [DllImport("user32.dll")]
     private static extern bool ShowWindowAsync(IntPtr hwnd, int cmdShow);
 
-    public sealed record Result(bool Attempted, bool Success, string Diagnostic);
+    public sealed record Result(bool Attempted, bool Success, string Diagnostic, bool InterventionRequired = false);
     private sealed record BrowserButton(IntPtr Hwnd, AutomationElement Element, string WindowTitle, string Name);
 
     public static Result TryOpen(RoomState room)
@@ -65,7 +65,7 @@ internal static class OpenChatLinkLauncher
         {
             Activate(existingLanding[0].Hwnd);
             var resume = KakaoOpenChatEntry.TryEnter(room);
-            return new(true, resume.Success, resume.Diagnostic);
+            return new(true, resume.Success, resume.Diagnostic, resume.InterventionRequired);
         }
         try
         {
@@ -85,7 +85,7 @@ internal static class OpenChatLinkLauncher
         }
 
         var entry = KakaoOpenChatEntry.TryEnter(room);
-        return new(true, entry.Success, entry.Diagnostic);
+        return new(true, entry.Success, entry.Diagnostic, entry.InterventionRequired);
     }
 
     public static bool TryBrowserAction(bool confirm, out string diagnostic)

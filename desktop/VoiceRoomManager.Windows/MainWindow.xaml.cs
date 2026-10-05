@@ -43,15 +43,16 @@ public partial class MainWindow : Window
         if (selectedId is not null) RoomsGrid.SelectedItem = State.Rooms.FirstOrDefault(r => r.Id == selectedId);
 
         var version = typeof(MainWindow).Assembly.GetName().Version;
-        VersionBadge.Text = version is null ? "Windows" : $"Windows v{version.Major}.{version.Minor}.{Math.Max(0, version.Build)} RC1";
+        VersionBadge.Text = version is null ? "Windows" : $"Windows v{version.Major}.{version.Minor}.{Math.Max(0, version.Build)} RC2";
 
+        var attention = State.Rooms.Any(r=>r.Enabled) && State.Rooms.Where(r=>r.Enabled).All(r=>r.Status=="USER_ACTION_REQUIRED");
         MasterStatus.Text = State.ManagerActive
-            ? "● 보이스룸 자동관리 실행 중"
+            ? attention ? "● 사용자 확인이 필요합니다" : "● 보이스룸 자동관리 실행 중"
             : State.Rooms.Any(r => r.LiveVerified)
                 ? "● 보이스룸 활성 · 자동관리 꺼짐"
                 : "● 보이스룸 자동관리 중지됨";
         MasterStatus.Foreground = State.ManagerActive
-            ? (System.Windows.Media.Brush)FindResource("Good")
+            ? (System.Windows.Media.Brush)FindResource(attention ? "Warn" : "Good")
             : State.Rooms.Any(r => r.LiveVerified)
                 ? (System.Windows.Media.Brush)FindResource("Warn")
                 : System.Windows.Media.Brushes.White;
@@ -151,6 +152,7 @@ public partial class MainWindow : Window
 
     private static void ResetVerification(RoomState room)
     {
+        room.CreationUncertain = false;
         room.LiveVerified = false;
         room.MicMuted = false;
         room.SpeakerMuted = false;
@@ -285,12 +287,32 @@ public partial class MainWindow : Window
     private void UpdateSelection()
     {
         if (SelectedStatus is null) return;
+        ClearCreationButton.Visibility = RoomsGrid.SelectedItem is RoomState { CreationUncertain: true } ? Visibility.Visible : Visibility.Collapsed;
+        ClearCreationButton.IsEnabled = !_coordinator.IsBusy;
         if (RoomsGrid.SelectedItem is not RoomState room) { SelectedStatus.Text = "방을 선택하면 보호 상태와 필요한 조치를 확인할 수 있습니다."; SelectedError.Text = ""; return; }
         SelectedStatus.Text = room.Title + " · " + (room.Enabled ? "관리 ON" : "관리 OFF") + " · " + room.AudioDisplay
             + (room.LastFailureAt is null ? "" : " · 최근 실패 " + room.LastFailureAt.Value.ToLocalTime().ToString("MM/dd HH:mm"));
-        SelectedError.Text = room.LastError.Length > 200 ? room.LastError[..200] + "… 고급 진단에서 전체 확인" : room.LastError;
+        SelectedError.Text = DiagnosticPresentation.Summary(room.LastError);
         LastStatus.Text = room.LastDiagnostic;
     }
+    private void ClearCreation_Click(object sender, RoutedEventArgs e)
+    {
+        var room = SelectedRoom();
+        if (room is null || !room.CreationUncertain || _coordinator.IsBusy) return;
+        if (MessageBox.Show(this,
+            "Kakao에서 이 방의 보이스룸이 종료됐거나 생성되지 않은 것을 직접 확인했나요?\n활성 보이스룸이 있다면 ‘아니요’를 누르고 ‘지금 확인’을 사용하세요.\n‘예’를 누르면 다음 실제 점검에서 생성할 수 있습니다.",
+            "중복 생성 방지 대기 해제", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        room.CreationUncertain = false;
+        room.LiveVerified = room.MicMuted = room.SpeakerMuted = false;
+        room.StartedAt = null;
+        room.Status = "BOOTSTRAP_PENDING";
+        room.Stage = "사용자 종료 확인 · 점검 대기";
+        room.NextCheckAt = DateTimeOffset.UtcNow;
+        room.LastError = "";
+        OperationLog.Write(room, "USER_CONFIRMED_INACTIVE", "생성 대기 해제 · 다음 점검에서 실제 상태 재확인");
+        _coordinator.Save(); RefreshUi();
+    }
+
     private void ExportDiagnostics_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new Microsoft.Win32.SaveFileDialog { FileName = "VoiceRoom-diagnostics.zip", Filter = "ZIP|*.zip" };
@@ -304,6 +326,7 @@ public partial class MainWindow : Window
             using var writer = new StreamWriter(entry.Open());
             writer.WriteLine("VoiceRoom Manager " + typeof(MainWindow).Assembly.GetName().Version);
             writer.WriteLine("등록 방: " + State.Rooms.Count);
+            writer.WriteLine(LocalTextSurface.Capability());
             foreach (var room in State.Rooms) writer.WriteLine(room.Id + " | " + room.Status + " | " + room.Stage);
             State.LastStatus = "진단 ZIP 저장 완료 · 방 이름/화면 텍스트가 포함될 수 있으니 공유 전 확인해 주세요.";
         }

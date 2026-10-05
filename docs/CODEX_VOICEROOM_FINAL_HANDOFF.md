@@ -1,3 +1,13 @@
+# RC2 continuation — 2026-10-05
+
+Windows v0.4.0 RC2 adds contextual preview identity, actionable offline OCR capability diagnosis, verified create-form submission, durable uncertain-submission recovery and a user-confirmed inactive recovery action. Removes obsolete RICHEDIT composer proof and unverified name/create coordinate fallbacks. Only room-menu calibration remains. Android source is unchanged.
+
+Local Windows tests: 72 passed. Target PC evidence: exact independent chat `1` entry and opening its create form were observed; automatic submission, active VoiceRoom and audio protection were NOT proven. Real OCR create heading read `보이스름 만들기`; this alias is accepted only within create-form evidence, never room identity or activity. CI without Korean OCR verifies capability reporting, not Korean recognition success. Final commit CI results are recorded in PR #12 and the output release manifest.
+
+Use [current audit](VOICEROOM_WINDOWS_RC_AUDIT.md), [PC checklist](VOICEROOM_WINDOWS_RC_CHECKLIST.md) and [README](../desktop/VoiceRoomManager.Windows/README.md). Build/fixtures are not real Kakao E2E proof. Do not remove the persisted creation barrier to make retries appear successful. Remain Draft until actual release gates pass.
+
+---
+
 # Current handoff update — 2026-10-05 / Windows v0.4.0 RC1
 
 The historical mission and v0.3.2 baseline below are retained as context. The current implementation removes duplicate preview/search engines and global timed session tokens; uses RoomWorkflow, operation-scoped proof, local Korean OCR, verified audio readback, restart recheck, atomic backup, process-owned power request, dark onboarding/dashboard, diagnostics export and regression fixtures.

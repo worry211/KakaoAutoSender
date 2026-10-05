@@ -1,3 +1,25 @@
+# Windows v0.4.0 RC2 추가 감사 — 2026-10-05
+
+RC1 이후 실제 대상 PC에서 `1` 방으로 정확히 진입하고 보이스룸 생성 폼을 여는 것을 관찰했다. 생성 버튼 제출 이후 활성/오디오 보호는 증명되지 않았다. 이 보고서는 그 경계를 유지한다. Android 소스는 변경하지 않았다.
+
+## 구조 개선
+- Preview 이름은 참여자/개설일에 붙은 제목 영역에서 exact match한다. 아바타의 글자나 참여자 수를 방 이름으로 쓰지 않는다. 큰 화면 OCR에서 빠지는 짧은 숫자는 같은 문맥을 포함한 영역으로 다시 인식한다.
+- 한국어 OCR 설치 상태와 엔진 HRESULT를 분리한다. 미설치/엔진 오류/정확한 이름 불일치의 조치 안내를 표시하며 raw trace는 진단에 보관한다.
+- 생성 폼을 먼저 확인하고 재사용한다. 폼이 열려 있는데 메뉴를 다시 누르는 경로를 제거했다. 제목·확인·글자수/기본 안내/단일 editable 증거가 있어야 한다. UIA 입력칸 전체가 폼 안에 있어야 하고 writable ValuePattern 입력값을 읽어 일치해야 한다.
+- 검증되지 않은 이름/생성 좌표와 best-edit guess를 삭제했다. 호환성 캘리브레이션은 방 메뉴에만 남았다. 기존 calibration 데이터의 obsolete target은 실행하지 않는다. Kakao 버전 변경 시 예전 지점을 폐기한다.
+- 생성 요청 전 상태 파일에 CreationUncertain을 atomic 저장한다. 확인 실패/중단/재시작 이후 중복 생성을 차단한다. 강한 활성 확인 또는 사용자의 실제 종료 확인으로만 해제한다. 시작시각을 추측하지 않는다.
+- 실제 폼/preview의 개인정보 제거 fixture, 문맥 identity·UIA 폼 경계·불확실 생성/상태 저장/재시작 회귀 검사를 추가했다.
+
+## 이번 RC 검증
+Windows Release 테스트 72 PASS, 0 FAIL, 0 SKIP. 로컬 한국어 OCR fixture 인식은 PASS. CI에서 한국어 OCR이 없는 환경은 명확한 설치 필요 안내를 검사하며 실제 한국어 인식 PASS로 간주하지 않는다. 게시된 빌드/CI 결과와 SHA-256은 PR #12 및 배포 manifest에서 확인한다. 기존 RC1의 Android/backend 로컬 검증은 아래에 기록되어 있고 이번 커밋 CI로 다시 검사한다.
+
+## 아직 남은 실기 게이트
+최종 폼 입력/제출 → 실제 active/PIP → 마이크/스피커 readback, 실제 스피커 요청 차단/거절, monitor OFF, 잠금/해제, Kakao/앱/Windows 재시작, 다중 방 및 계정 한도, 48h 실제 만료/재생성. 기존 실제 chat/form 진입 확인만으로 이 항목을 통과 처리하지 않는다. 현재 배포는 unsigned RC이며 판매 승인 완료가 아니다.
+
+컴퓨터 제어 도구는 브라우저 URL을 판별하지 못해 안전 검사를 통과하지 못했다. 해당 도구 제한을 우회하지 않고 코드/fixture/패키지 검증을 계속했다. 최종 자동 생성 실기는 별도로 수행해야 한다.
+
+---
+
 # Windows v0.4.0 RC1 감사 기록 — 2026-10-05
 
 기준: `feat/voiceroom-standalone-android-v1`, PR #12 head `cfff7d2f6bd5731876a3f68f0a05c6a7d72ad6cf`. 최초 handoff 전체, PR 본문/댓글(댓글 없음), Windows 모든 소스/XAML, 네 workflow, root/Android/Windows README, Android 수명/저장/접근성/요청·오디오/복구 핵심 정책을 읽고 감사했다. 이전 head의 Windows/APK CI는 success였다. 새 변경은 별도 검사한다.

@@ -1,15 +1,11 @@
 using System.Runtime.InteropServices;
 using System.Windows.Automation;
+using System.Windows;
 
 namespace VoiceRoomManager.Windows.Core;
 
-/// <summary>
-/// Converts the Kakao OpenChat cover/preview into the real chat surface. Kakao 26.x can render
-/// the narrow chat list and the right-side OpenChat preview in different HWNDs, and some builds
-/// custom-render the real chat composer as well. Entry therefore accepts three fail-closed proofs:
-/// exact chat title, a real RICHEDIT composer, or a stable verified transition of the exact Kakao
-/// preview CTA into a different Kakao-owned surface.
-/// </summary>
+// Entry requires exact title/context before input and a fresh exact chat/header after transition.
+// HWND child surfaces, custom rendering and missing RICHEDIT do not change these invariants.
 internal static class KakaoOpenChatPreviewBridge
 {
     private static readonly HashSet<string> EnterNames = new(StringComparer.Ordinal)
@@ -20,12 +16,7 @@ internal static class KakaoOpenChatPreviewBridge
         "채팅방 들어가기"
     };
 
-    private const uint MouseLeftDown = 0x0002;
-    private const uint MouseLeftUp = 0x0004;
     private const uint InvalidColor = 0xFFFFFFFF;
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Point { public int X; public int Y; }
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetDC(IntPtr hwnd);
@@ -33,14 +24,7 @@ internal static class KakaoOpenChatPreviewBridge
     private static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
     [DllImport("gdi32.dll")]
     private static extern uint GetPixel(IntPtr hdc, int x, int y);
-    [DllImport("user32.dll")]
-    private static extern bool GetCursorPos(out Point point);
-    [DllImport("user32.dll")]
-    private static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")]
-    private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
-
-    public sealed record Result(bool Attempted, bool Success, string Diagnostic);
+    public sealed record Result(bool Attempted, bool Success, string Diagnostic, bool InterventionRequired = false);
     private sealed record VisualCandidate(KakaoSurfaceLocator.Surface Surface, int X, int Y, int Width, int Height, int Samples, long Score);
     private sealed record TransitionProbe(
         KakaoSurfaceLocator.Bounds SurfaceRect,
@@ -67,9 +51,13 @@ internal static class KakaoOpenChatPreviewBridge
         var semantic = FindSemanticEntry(out var semanticDiag);
         if (semantic is not null)
         {
-            var host = KakaoSurfaceLocator.VisibleTopLevels().FirstOrDefault(s => KakaoSurfaceLocator.IsForeground(s.Hwnd));
-            if (host is null || LocalTextSurface.Read(host.Hwnd)?.HasPreviewTitle(roomTitle) != true)
-                return new(true, false, "미리보기 방 이름 확인 실패 · 다른 방은 조작하지 않음");
+            var button = semantic.Current.BoundingRectangle;
+            var surface = KakaoSurfaceLocator.PreviewCandidates()
+                .Where(s => KakaoSurfaceLocator.IsForeground(s.TopLevel) && s.Rect.Contains((int)(button.Left + button.Width / 2), (int)(button.Top + button.Height / 2)))
+                .OrderBy(s => s.Rect.Area).FirstOrDefault();
+            if (surface is null) return new(true, false, "미리보기 대상 창 확인 실패");
+            var identity = LocalTextSurface.VerifyPreview(surface.TopLevel, surface.Rect, button, roomTitle);
+            if (!identity.Match) return new(true, false, identity.Diagnostic, identity.RequiresAction);
             var transition = CaptureSemanticTransitionProbe(semantic);
             if (!Invoke(semantic))
                 return new(true, false, "카카오 오픈채팅 입장 버튼 UIA 호출 실패 · " + semanticDiag);
@@ -87,8 +75,9 @@ internal static class KakaoOpenChatPreviewBridge
 
         KakaoSurfaceLocator.Activate(visual.Surface.TopLevel);
         AutomationOperation.Pause(140);
-        if (LocalTextSurface.Read(visual.Surface.TopLevel)?.HasPreviewTitle(roomTitle) != true)
-            return new(true, false, "미리보기 방 이름 OCR 확인 실패 · 한국어 OCR/방 이름 확인 필요");
+        var action = new Rect(visual.X - visual.Width / 2d, visual.Y - visual.Height / 2d, visual.Width, visual.Height);
+        var visualIdentity = LocalTextSurface.VerifyPreview(visual.Surface.TopLevel, visual.Surface.Rect, action, roomTitle);
+        if (!visualIdentity.Match) return new(true, false, visualIdentity.Diagnostic, visualIdentity.RequiresAction);
         var visualTransition = CaptureTransitionProbe(
             visual.Surface.Rect,
             visual.X - visual.Width / 2,
@@ -159,7 +148,7 @@ internal static class KakaoOpenChatPreviewBridge
     private static VisualCandidate? FindVisualEntry(out string diagnostic)
     {
         var candidates = new List<VisualCandidate>();
-        foreach(var surface in KakaoSurfaceLocator.PreviewCandidates())
+        foreach(var surface in KakaoSurfaceLocator.PreviewCandidates().OrderBy(s => s.Rect.Area))
         {
             if (!KakaoSurfaceLocator.IsForeground(surface.TopLevel)) continue;
             var bytes = LocalTextSurface.Capture(surface.Rect);
