@@ -68,6 +68,8 @@ internal sealed class SettingsStore
                 File.Copy(SettingsPath, BackupPath, true);
 
             File.Move(temp, SettingsPath, true);
+            if (!File.Exists(BackupPath))
+                File.Copy(SettingsPath, BackupPath, true);
             _lastSerialized = serialized;
         }
     }
