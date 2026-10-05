@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private bool _isShuttingDown;
     private string _roomSearch = "";
     private string _roomFilter = "ALL";
+    private bool _uiReady;
 
     public MainWindow()
     {
@@ -51,7 +52,6 @@ public partial class MainWindow : Window
         _roomView = CollectionViewSource.GetDefaultView(_rooms);
         _roomView.Filter = FilterRoom;
         RoomList.ItemsSource = _roomView;
-        RoomFilterBox.SelectedIndex = 0;
 
         _identity = new InstallIdentity();
         _license = new LicenseClient(_identity);
@@ -63,6 +63,9 @@ public partial class MainWindow : Window
         _tray.StartRequested += () => Dispatcher.BeginInvoke(async () => await StartRoomsAsync(_rooms.ToList(), "트레이 전체 시작"));
         _tray.StopRequested += () => Dispatcher.BeginInvoke(() => StopRooms(_rooms.ToList(), true, "트레이 전체 중단"));
         _tray.ExitRequested += () => Dispatcher.BeginInvoke(Close);
+
+        _uiReady = true;
+        RoomFilterBox.SelectedIndex = 0;
 
         Loaded += async (_, _) => await InitializeAsync();
         Closed += (_, _) => Shutdown();
@@ -904,7 +907,7 @@ public partial class MainWindow : Window
 
     private void UpdateDashboard()
     {
-        if (DashboardText is null || RuntimeStatusText is null) return;
+        if (!_uiReady || DashboardText is null || RuntimeStatusText is null) return;
         var total = _rooms.Count;
         var linked = _rooms.Count(r => r.Binding is not null);
         var running = _rooms.Count(r => r.Running);
