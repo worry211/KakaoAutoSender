@@ -87,4 +87,15 @@ public class MultiRoomBulkPatchTest {
         assertFalse(b.enabled);
         assertEquals(0L, b.nextAt);
     }
+    @Test
+    public void getMany_resolvesInSelectionOrderWithOneLogicalBatch() {
+        java.util.ArrayList<MultiRoomStore.Profile> selected = MultiRoomStore.getMany(context,
+                Arrays.asList("route-b", "route-missing", "route-a", "route-b"));
+        assertEquals(2, selected.size());
+        assertEquals("route-b", selected.get(0).room);
+        assertEquals("route-a", selected.get(1).room);
+        selected.get(0).message = "mutated-copy";
+        assertEquals("old-b", MultiRoomStore.get(context, "route-b").message);
+    }
+
 }

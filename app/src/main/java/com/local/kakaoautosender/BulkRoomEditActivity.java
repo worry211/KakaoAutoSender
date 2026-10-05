@@ -48,18 +48,15 @@ public class BulkRoomEditActivity extends Activity {
     private RadioButton timesRadio;
     private LinearLayout intervalBox;
     private LinearLayout timesBox;
+    private MultiRoomStore.Profile templateProfile;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         ArrayList<String> incoming = getIntent().getStringArrayListExtra(EXTRA_ROOMS);
-        if (incoming != null) {
-            for (String room : incoming) {
-                if (room != null && !room.trim().isEmpty() && MultiRoomStore.get(this, room) != null && !rooms.contains(room)) {
-                    rooms.add(room);
-                }
-            }
-        }
-        if (rooms.isEmpty()) { finish(); return; }
+        ArrayList<MultiRoomStore.Profile> selected = MultiRoomStore.getMany(this, incoming);
+        for (MultiRoomStore.Profile profile : selected) rooms.add(profile.room);
+        if (selected.isEmpty()) { finish(); return; }
+        templateProfile = selected.get(0).copy();
         setContentView(buildUi());
         loadFirstProfileAsTemplate();
         syncApplyState();
@@ -186,7 +183,7 @@ public class BulkRoomEditActivity extends Activity {
     }
 
     private void loadFirstProfileAsTemplate() {
-        MultiRoomStore.Profile first = MultiRoomStore.get(this, rooms.get(0));
+        MultiRoomStore.Profile first = templateProfile == null ? null : templateProfile.copy();
         if (first == null) return;
         messageInput.setText(first.message);
         intervalInput.setText(String.valueOf(first.intervalMinutes));

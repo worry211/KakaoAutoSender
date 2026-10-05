@@ -155,6 +155,21 @@ final class MultiRoomStore {
         return result;
     }
 
+    static synchronized ArrayList<Profile> getMany(Context context, List<String> rooms) {
+        ArrayList<Profile> result = new ArrayList<>();
+        if (rooms == null || rooms.isEmpty()) return result;
+        java.util.HashMap<String, Profile> byAlias = new java.util.HashMap<>();
+        for (Profile profile : list(context)) byAlias.put(normalize(profile.room), profile);
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+        for (String room : rooms) {
+            String key = normalize(room);
+            if (key.isEmpty() || !seen.add(key)) continue;
+            Profile profile = byAlias.get(key);
+            if (profile != null) result.add(profile.copy());
+        }
+        return result;
+    }
+
     static synchronized Profile get(Context context, String room) {
         if (room == null || room.trim().isEmpty()) return null;
         String wanted = normalize(room);
