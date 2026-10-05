@@ -25,30 +25,44 @@ internal sealed class SettingsStore
 
     public AppSettings Load()
     {
-        LastRecoveryNotice = null;
-        if (!File.Exists(SettingsPath)) return new AppSettings();
-
-        if (TryLoad(SettingsPath, out var primary))
+        lock (_gate)
         {
-            SeedBackupFromValidPrimary();
-            _lastSerialized = JsonSerializer.Serialize(primary, JsonOptions);
-            return primary;
-        }
-
-        PreserveCorruptPrimary();
-        if (TryLoad(BackupPath, out var backup))
-        {
+            LastRecoveryNotice = null;
             Directory.CreateDirectory(_directory);
-            File.Copy(BackupPath, SettingsPath, true);
-            _lastSerialized = JsonSerializer.Serialize(backup, JsonOptions);
-            LastRecoveryNotice = "설정 파일 손상을 감지해 마지막 정상 백업에서 자동 복구했습니다.";
-            WriteRecoveryLog(LastRecoveryNotice);
-            return backup;
-        }
 
-        LastRecoveryNotice = "설정 파일 손상을 감지했지만 복구 가능한 백업이 없어 새 설정으로 시작했습니다.";
-        WriteRecoveryLog(LastRecoveryNotice);
-        return new AppSettings();
+            if (TryLoadCanonical(SettingsPath, out var primary, out var primarySerialized))
+            {
+                _lastSerialized = primarySerialized;
+                EnsureInitialBackup(primarySerialized);
+                return primary;
+            }
+
+            var primaryExisted = File.Exists(SettingsPath);
+            if (primaryExisted) PreserveCorruptCopy(SettingsPath, "settings");
+
+            // A missing primary can happen after an interrupted replace. Recover from
+            // the last-known-good backup instead of silently starting with zero rooms.
+            if (TryLoadCanonical(BackupPath, out var backup, out var backupSerialized))
+            {
+                WriteAtomic(SettingsPath, backupSerialized);
+                _lastSerialized = backupSerialized;
+                LastRecoveryNotice = primaryExisted
+                    ? "설정 파일 손상을 감지해 마지막 정상 백업으로 자동 복구했습니다."
+                    : "설정 파일이 없어 마지막 정상 백업으로 자동 복구했습니다.";
+                WriteRecoveryLog(LastRecoveryNotice);
+                return backup;
+            }
+
+            var backupExisted = File.Exists(BackupPath);
+            if (backupExisted) PreserveCorruptCopy(BackupPath, "settings-backup");
+            if (primaryExisted || backupExisted)
+            {
+                LastRecoveryNotice = "설정 파일을 복구하지 못했습니다. 손상본은 설정 폴더에 보존했습니다.";
+                WriteRecoveryLog(LastRecoveryNotice);
+            }
+
+            return new AppSettings();
+        }
     }
 
     public void Save(AppSettings value)
@@ -59,49 +73,48 @@ internal sealed class SettingsStore
         {
             if (string.Equals(serialized, _lastSerialized, StringComparison.Ordinal)) return;
             Directory.CreateDirectory(_directory);
-            var temp = SettingsPath + ".tmp";
-            File.WriteAllText(temp, serialized);
 
-            // Keep one last-known-good copy before replacing the primary settings.
-            // If the process or machine stops between these steps, either the old
-            // primary or the backup remains recoverable on the next launch.
-            if (File.Exists(SettingsPath) && TryLoad(SettingsPath, out _))
-                File.Copy(SettingsPath, BackupPath, true);
+            // Rotate only a parseable primary into the backup slot. A corrupt or
+            // truncated primary must never overwrite the last-known-good backup.
+            if (TryLoadCanonical(SettingsPath, out _, out var previousSerialized))
+                WriteAtomic(BackupPath, previousSerialized);
 
-            File.Move(temp, SettingsPath, true);
-            if (!File.Exists(BackupPath))
-                File.Copy(SettingsPath, BackupPath, true);
+            WriteAtomic(SettingsPath, serialized);
+
+            // The very first save also gets a recovery point immediately.
+            if (!File.Exists(BackupPath)) WriteAtomic(BackupPath, serialized);
             _lastSerialized = serialized;
         }
     }
 
     public void EnsureDirectory() => Directory.CreateDirectory(_directory);
 
-    private void SeedBackupFromValidPrimary()
+    private void EnsureInitialBackup(string serialized)
     {
         try
         {
-            if (File.Exists(BackupPath)) return;
-            Directory.CreateDirectory(_directory);
-            File.Copy(SettingsPath, BackupPath, false);
+            if (!File.Exists(BackupPath)) WriteAtomic(BackupPath, serialized);
         }
         catch
         {
-            // Startup must not fail only because the protective backup could not be seeded.
+            // Primary settings remain usable; backup creation can retry on a later save.
         }
     }
 
-    private static bool TryLoad(string path, out AppSettings value)
+    private static bool TryLoadCanonical(string path, out AppSettings value, out string serialized)
     {
         value = new AppSettings();
+        serialized = "";
         try
         {
             if (!File.Exists(path)) return false;
             var raw = File.ReadAllText(path);
+            if (string.IsNullOrWhiteSpace(raw)) return false;
             var parsed = JsonSerializer.Deserialize<AppSettings>(raw, JsonOptions);
             if (parsed is null) return false;
             Sanitize(parsed);
             value = parsed;
+            serialized = JsonSerializer.Serialize(parsed, JsonOptions);
             return true;
         }
         catch
@@ -110,19 +123,39 @@ internal sealed class SettingsStore
         }
     }
 
-    private void PreserveCorruptPrimary()
+    private static void WriteAtomic(string path, string content)
+    {
+        var temp = path + ".tmp";
+        try
+        {
+            File.WriteAllText(temp, content);
+            File.Move(temp, path, true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temp)) File.Delete(temp);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private void PreserveCorruptCopy(string path, string prefix)
     {
         try
         {
-            if (!File.Exists(SettingsPath)) return;
+            if (!File.Exists(path)) return;
             Directory.CreateDirectory(_directory);
-            var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-            var target = Path.Combine(_directory, $"settings.corrupt-{stamp}.json");
-            File.Copy(SettingsPath, target, true);
+            var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
+            var target = Path.Combine(_directory, $"{prefix}.corrupt-{stamp}.json");
+            File.Copy(path, target, false);
         }
         catch
         {
-            // Recovery must continue even if diagnostics cannot be preserved.
+            // Recovery must continue even if a diagnostic copy cannot be preserved.
         }
     }
 
