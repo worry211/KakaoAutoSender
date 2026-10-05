@@ -96,16 +96,6 @@ internal static class KakaoCalibrationStore
         return (true, $"{target} 저장 · host={host.ClassName} {host.Rect.Width}x{host.Rect.Height} rel={rx:F3},{ry:F3}");
     }
 
-    public static bool Has(string target)
-    {
-        lock (Gate) return LoadCore().Targets.ContainsKey(target);
-    }
-
-    public static int Count
-    {
-        get { lock (Gate) return LoadCore().Targets.Count; }
-    }
-
     public static string Summary()
     {
         lock (Gate)
@@ -270,6 +260,8 @@ internal static class KakaoCalibrationStore
         }
         catch { }
         _cache ??= new CalibrationFile { KakaoVersion = CurrentKakaoVersion() };
+        foreach (var obsolete in _cache.Targets.Keys.Where(k => k != VoiceMenu).ToArray())
+            _cache.Targets.Remove(obsolete);
         return _cache;
     }
 
