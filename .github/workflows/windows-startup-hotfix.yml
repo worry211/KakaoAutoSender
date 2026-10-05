@@ -1,0 +1,162 @@
+name: Windows startup hotfix
+on:
+  push:
+    branches: [feat/windows-client-v1]
+    paths:
+      - '.github/workflows/windows-startup-hotfix.yml'
+permissions:
+  contents: write
+jobs:
+  hotfix:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/windows-client-v1
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Apply startup hardening
+        shell: python
+        run: |
+          from pathlib import Path
+
+          app_xaml = Path('desktop/KakaoMacro.Windows/App.xaml')
+          s = app_xaml.read_text(encoding='utf-8')
+          s = s.replace('             StartupUri="MainWindow.xaml">', '>')
+          app_xaml.write_text(s, encoding='utf-8')
+
+          app_cs = Path('desktop/KakaoMacro.Windows/App.xaml.cs')
+          app_cs.write_text(r'''using System.Windows;
+using System.Windows.Threading;
+using KakaoMacro.Windows.Services;
+
+namespace KakaoMacro.Windows;
+
+public partial class App : System.Windows.Application
+{
+    protected override void OnStartup(StartupEventArgs e)
+    {
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+
+        base.OnStartup(e);
+
+        try
+        {
+            var window = new MainWindow();
+            MainWindow = window;
+            window.Show();
+        }
+        catch (Exception ex)
+        {
+            var path = CrashReporter.Write("startup", ex);
+            MessageBox.Show(
+                "KakaoMacro PC를 시작하지 못했습니다.\n\n" +
+                "오류 기록: " + (string.IsNullOrWhiteSpace(path) ? "기록 실패" : path) +
+                "\n\n이 파일을 보내주면 원인을 바로 확인할 수 있습니다.",
+                "KakaoMacro PC 시작 오류",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            Shutdown(1);
+        }
+    }
+
+    private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        var path = CrashReporter.Write("dispatcher", e.Exception);
+        try
+        {
+            MessageBox.Show(
+                "KakaoMacro PC에서 복구할 수 없는 오류가 발생했습니다.\n\n오류 기록: " + path,
+                "KakaoMacro PC 오류",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        catch { }
+        e.Handled = true;
+        Shutdown(1);
+    }
+
+    private static void OnDomainUnhandledException(object? sender, UnhandledExceptionEventArgs e)
+    {
+        var ex = e.ExceptionObject as Exception ?? new Exception(e.ExceptionObject?.ToString() ?? "Unknown fatal error");
+        CrashReporter.Write("domain", ex);
+    }
+
+    private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        CrashReporter.Write("task", e.Exception);
+        e.SetObserved();
+    }
+}
+''', encoding='utf-8')
+
+          crash = Path('desktop/KakaoMacro.Windows/Services/CrashReporter.cs')
+          crash.write_text(r'''using System.Text;
+
+namespace KakaoMacro.Windows.Services;
+
+internal static class CrashReporter
+{
+    public static string Write(string phase, Exception exception)
+    {
+        try
+        {
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "KakaoMacro",
+                "Windows",
+                "crashes");
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, $"crash-{DateTime.Now:yyyyMMdd-HHmmssfff}-{phase}.log");
+            var text = new StringBuilder()
+                .AppendLine("KakaoMacro PC crash report")
+                .AppendLine($"Time: {DateTimeOffset.Now:O}")
+                .AppendLine($"Phase: {phase}")
+                .AppendLine($"OS: {Environment.OSVersion}")
+                .AppendLine($"64-bit OS: {Environment.Is64BitOperatingSystem}")
+                .AppendLine($"64-bit process: {Environment.Is64BitProcess}")
+                .AppendLine($"Runtime: {Environment.Version}")
+                .AppendLine()
+                .AppendLine(exception.ToString())
+                .ToString();
+            File.WriteAllText(path, text, Encoding.UTF8);
+            return path;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+}
+''', encoding='utf-8')
+
+          main = Path('desktop/KakaoMacro.Windows/MainWindow.xaml.cs')
+          s = main.read_text(encoding='utf-8')
+          s = s.replace('    private string _roomFilter = "ALL";\n', '    private string _roomFilter = "ALL";\n    private bool _uiReady;\n', 1)
+          s = s.replace('        RoomList.ItemsSource = _roomView;\n        RoomFilterBox.SelectedIndex = 0;\n\n        _identity = new InstallIdentity();', '        RoomList.ItemsSource = _roomView;\n\n        _identity = new InstallIdentity();', 1)
+          anchor = '        _tray.ExitRequested += () => Dispatcher.BeginInvoke(Close);\n\n        Loaded += async (_, _) => await InitializeAsync();'
+          repl = '        _tray.ExitRequested += () => Dispatcher.BeginInvoke(Close);\n\n        _uiReady = true;\n        RoomFilterBox.SelectedIndex = 0;\n\n        Loaded += async (_, _) => await InitializeAsync();'
+          if anchor not in s:
+              raise SystemExit('tray/startup anchor not found')
+          s = s.replace(anchor, repl, 1)
+          s = s.replace('    private void UpdateDashboard()\n    {\n        if (DashboardText is null || RuntimeStatusText is null) return;', '    private void UpdateDashboard()\n    {\n        if (!_uiReady || DashboardText is null || RuntimeStatusText is null) return;', 1)
+          main.write_text(s, encoding='utf-8')
+      - name: Verify release
+        run: dotnet build desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -warnaserror
+      - name: Publish self-contained x64
+        run: dotnet publish desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o desktop/publish-hotfix
+      - name: Commit startup hotfix
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add desktop/KakaoMacro.Windows/App.xaml desktop/KakaoMacro.Windows/App.xaml.cs desktop/KakaoMacro.Windows/MainWindow.xaml.cs desktop/KakaoMacro.Windows/Services/CrashReporter.cs
+          git commit -m 'fix(windows): prevent silent startup crash and log fatal errors'
+          git push origin HEAD:feat/windows-client-v1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KakaoMacro-PC-v1.2.1-startup-hotfix
+          path: desktop/publish-hotfix/KakaoMacro.Windows.exe
