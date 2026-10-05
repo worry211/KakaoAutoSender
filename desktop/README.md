@@ -1,4 +1,4 @@
-# KakaoMacro PC — Windows v1 Preview
+# KakaoMacro PC — Windows v1.2 Preview
 
 KakaoMacro PC is the Windows companion to the Android KakaoMacro product. It reuses the existing commercial entitlement service while using a Windows-only KakaoTalk desktop delivery adapter.
 
@@ -16,7 +16,7 @@ Pairing is live-window based:
 
 Two separate open chat windows can therefore remain distinct even if their visible titles are identical. A KakaoTalk restart deliberately invalidates live bindings instead of guessing.
 
-## Implemented in the first PC slice
+## v1.2 operations
 
 - Windows 10/11 WPF client
 - persistent non-exportable P-256 Windows CNG installation identity
@@ -26,12 +26,23 @@ Two separate open chat windows can therefore remain distinct even if their visib
 - multi-room profiles
 - interval schedules and fixed daily times
 - daily send limits
-- explicit start / global stop
+- explicit global start / stop fence
 - global `Ctrl+Shift+F8` safe room pairing
 - live-window/process/focus fail-closed validation
-- Unicode/Korean text delivery using Windows `SendInput` (no clipboard text leakage)
-- user-activity guard: scheduled sends wait while the keyboard/mouse is being actively used
-- local-only configuration and diagnostic logs that never send room names or message bodies to the license backend
+- Unicode/Korean text delivery using Windows `SendInput` without clipboard text leakage
+- user-activity guard for scheduled sends
+- redesigned dashboard + room list + editor + bulk editor + diagnostics
+- multi-select start / stop / enable / disable / validate / delete
+- selected-room one-shot send with confirmation for large batches
+- bulk message/schedule/daily-limit/enabled-state editing
+- copy first-selected room settings to the rest
+- one-level latest bulk-change undo; restored rooms stay stopped until explicitly restarted
+- search plus state filters: all / running / enabled / needs pairing / needs attention
+- system tray show / start / stop / exit
+- debounced search and settings persistence
+- settings JSON/disk writes moved off the WPF UI thread
+- low-overhead 1-second scheduler polling while preserving serialized Kakao dispatch and focus-safety delays
+- local-only configuration and diagnostics that never send room names or message bodies to the license backend
 
 ## Deliberately locked for this preview
 
@@ -43,8 +54,12 @@ The current license database binds one redeem key to one installation public key
 
 ```powershell
 dotnet restore .\desktop\KakaoMacro.Windows\KakaoMacro.Windows.csproj
-dotnet build .\desktop\KakaoMacro.Windows\KakaoMacro.Windows.csproj -c Release
+dotnet build .\desktop\KakaoMacro.Windows\KakaoMacro.Windows.csproj -c Release -warnaserror
 dotnet publish .\desktop\KakaoMacro.Windows\KakaoMacro.Windows.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 ```
+
+## Current verified preview artifact
+
+See `docs/WINDOWS_V1_2_RELEASE_GATE.md` for the exact workflow runs, hashes and physical QA checklist.
 
 Do not treat this client as a Kakao-official integration. It does not reverse engineer Kakao network protocols or use a private Kakao API. KakaoTalk UI changes can still require adapter updates, so physical QA against the current supported Windows KakaoTalk build remains a release gate.
