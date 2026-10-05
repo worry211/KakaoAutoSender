@@ -96,6 +96,20 @@ final class MultiRoomStore {
         }
     }
 
+
+    static final class BulkPatch {
+        boolean applyMessage;
+        String message = "";
+        boolean applySchedule;
+        String scheduleMode = MODE_INTERVAL;
+        int intervalMinutes = 60;
+        String dailyTimes = "09:00";
+        boolean applyDailyLimit;
+        int dailyLimit = 8;
+        boolean applyEnabled;
+        boolean enabled = true;
+    }
+
     private MultiRoomStore() {}
 
     static synchronized void ensureMigrated(Context context) {
@@ -141,6 +155,21 @@ final class MultiRoomStore {
         return result;
     }
 
+    static synchronized ArrayList<Profile> getMany(Context context, List<String> rooms) {
+        ArrayList<Profile> result = new ArrayList<>();
+        if (rooms == null || rooms.isEmpty()) return result;
+        java.util.HashMap<String, Profile> byAlias = new java.util.HashMap<>();
+        for (Profile profile : list(context)) byAlias.put(normalize(profile.room), profile);
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+        for (String room : rooms) {
+            String key = normalize(room);
+            if (key.isEmpty() || !seen.add(key)) continue;
+            Profile profile = byAlias.get(key);
+            if (profile != null) result.add(profile.copy());
+        }
+        return result;
+    }
+
     static synchronized Profile get(Context context, String room) {
         if (room == null || room.trim().isEmpty()) return null;
         String wanted = normalize(room);
@@ -180,6 +209,62 @@ final class MultiRoomStore {
         }
         if (!replaced) profiles.add(incoming);
         writeRaw(context, profiles);
+    }
+
+
+    static synchronized int applyBulkPatch(Context context, List<String> rooms, BulkPatch patch) {
+        if (patch == null || rooms == null || rooms.isEmpty()) return 0;
+        ensureMigrated(context);
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        for (String room : rooms) {
+            String normalized = normalize(room);
+            if (!normalized.isEmpty()) targets.add(normalized);
+        }
+        if (targets.isEmpty()) return 0;
+
+        ArrayList<Profile> profiles = readRaw(context);
+        boolean active = Prefs.p(context).getBoolean(Prefs.KEY_ACTIVE, false);
+        long now = System.currentTimeMillis();
+        int changed = 0;
+        for (Profile profile : profiles) {
+            if (!targets.contains(normalize(profile.room))) continue;
+            if (patch.applyMessage) profile.message = safe(patch.message);
+            if (patch.applySchedule) {
+                if (MODE_TIMES.equals(patch.scheduleMode)) {
+                    profile.scheduleMode = MODE_TIMES;
+                    String canonical = canonicalTimes(patch.dailyTimes);
+                    profile.dailyTimes = canonical.isEmpty() ? "09:00" : canonical;
+                } else {
+                    profile.scheduleMode = MODE_INTERVAL;
+                    profile.intervalMinutes = Math.max(SendScheduler.MIN_INTERVAL_MINUTES, patch.intervalMinutes);
+                }
+            }
+            if (patch.applyDailyLimit) profile.dailyLimit = Math.max(0, patch.dailyLimit);
+            if (patch.applyEnabled) profile.enabled = patch.enabled;
+            sanitize(profile);
+            normalizeDailyCount(profile);
+            profile.nextAt = active && isRunnable(context, profile) ? computeNextAt(profile, now) : 0L;
+            changed++;
+        }
+        if (changed > 0) writeRaw(context, profiles);
+        return changed;
+    }
+
+    static synchronized int removeMany(Context context, List<String> rooms) {
+        if (rooms == null || rooms.isEmpty()) return 0;
+        ensureMigrated(context);
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        for (String room : rooms) {
+            String normalized = normalize(room);
+            if (!normalized.isEmpty()) targets.add(normalized);
+        }
+        if (targets.isEmpty()) return 0;
+        ArrayList<Profile> profiles = readRaw(context);
+        int before = profiles.size();
+        profiles.removeIf(profile -> targets.contains(normalize(profile.room)));
+        int removed = before - profiles.size();
+        if (removed > 0) writeRaw(context, profiles);
+        return removed;
     }
 
     static synchronized boolean remove(Context context, String room) {

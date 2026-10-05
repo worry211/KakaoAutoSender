@@ -14,6 +14,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -21,6 +23,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -29,7 +32,10 @@ import android.widget.Toast;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 public class MainActivityV4 extends Activity {
@@ -56,9 +62,24 @@ public class MainActivityV4 extends Activity {
     private Button startButton;
     private Button stopButton;
     private boolean receiverRegistered;
+    private static final int REQUEST_BULK_EDIT = 4302;
+    private static final int ROOM_PAGE_SIZE = 30;
+    private EditText roomSearch;
+    private LinearLayout bulkBar;
+    private TextView bulkSelectionLabel;
+    private final LinkedHashSet<String> selectedRooms = new LinkedHashSet<>();
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private final Runnable refreshRunnable = this::refreshUi;
+    private String roomQuery = "";
+    private String roomFilter = RoomDashboardPolicy.FILTER_ALL;
+    private String roomSort = RoomDashboardPolicy.SORT_STATUS;
+    private Button roomFilterButton;
+    private Button roomSortButton;
+    private String lastRoomRenderFingerprint = "";
+    private int roomRenderLimit = ROOM_PAGE_SIZE;
 
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
-        @Override public void onReceive(Context context, Intent intent) { refreshUi(); }
+        @Override public void onReceive(Context context, Intent intent) { scheduleRefresh(); }
     };
 
     @Override protected void onCreate(Bundle savedInstanceState) {
@@ -76,13 +97,14 @@ public class MainActivityV4 extends Activity {
 
     @Override protected void onStop() {
         unregisterUpdates();
+        uiHandler.removeCallbacks(refreshRunnable);
         super.onStop();
     }
 
     @Override protected void onResume() {
         super.onResume();
         KakaoNotificationListener.requestRefresh();
-        refreshUi();
+        scheduleRefresh();
     }
 
     private View buildUi() {
@@ -93,7 +115,7 @@ public class MainActivityV4 extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(22), dp(18), dp(42));
+        applyScrollableInsets(scroll, root, 18, 22, 18, 20);
         scroll.addView(root);
 
         LinearLayout header = new LinearLayout(this);
@@ -167,6 +189,110 @@ public class MainActivityV4 extends Activity {
         Button add = primaryButton("＋  새 방 연결");
         add.setOnClickListener(v -> showAddCandidates());
         root.addView(add, top(12));
+
+        LinearLayout roomTools = new LinearLayout(this);
+        roomTools.setOrientation(LinearLayout.HORIZONTAL);
+        roomTools.setGravity(Gravity.CENTER_VERTICAL);
+        roomSearch = new EditText(this);
+        roomSearch.setSingleLine(true);
+        roomSearch.setHint("방 검색");
+        roomSearch.setHintTextColor(Color.rgb(102, 114, 137));
+        roomSearch.setTextColor(TEXT);
+        roomSearch.setTextSize(13);
+        roomSearch.setPadding(dp(13), dp(10), dp(13), dp(10));
+        roomSearch.setBackground(roundStroke(FIELD, BORDER, 12));
+        roomTools.addView(roomSearch, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        Button selectAll = tertiaryButton("선택");
+        LinearLayout.LayoutParams selectLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(48));
+        selectLp.leftMargin = dp(8);
+        roomTools.addView(selectAll, selectLp);
+        root.addView(roomTools, top(9));
+
+        roomSearch.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                roomQuery = s == null ? "" : s.toString();
+                resetRoomRenderLimit();
+                invalidateRoomList();
+                scheduleRefresh();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        selectAll.setOnClickListener(v -> selectVisibleRooms());
+
+        LinearLayout filterTools = new LinearLayout(this);
+        filterTools.setOrientation(LinearLayout.HORIZONTAL);
+        filterTools.setGravity(Gravity.CENTER_VERTICAL);
+        roomFilterButton = tertiaryButton("필터 · 전체");
+        roomFilterButton.setTextSize(11);
+        roomFilterButton.setMinWidth(0);
+        roomFilterButton.setOnClickListener(v -> showRoomFilterMenu());
+        filterTools.addView(roomFilterButton, new LinearLayout.LayoutParams(0, dp(42), 1f));
+        roomSortButton = tertiaryButton("정렬 · 상태");
+        roomSortButton.setTextSize(11);
+        roomSortButton.setMinWidth(0);
+        roomSortButton.setOnClickListener(v -> cycleRoomSort());
+        LinearLayout.LayoutParams sortLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        sortLp.leftMargin = dp(7);
+        filterTools.addView(roomSortButton, sortLp);
+        root.addView(filterTools, top(7));
+        renderRoomFilters();
+
+        bulkBar = card(Color.rgb(23, 29, 42), Color.rgb(66, 84, 133), 16);
+        bulkBar.setVisibility(View.GONE);
+        LinearLayout bulkHeader = new LinearLayout(this);
+        bulkHeader.setOrientation(LinearLayout.HORIZONTAL);
+        bulkHeader.setGravity(Gravity.CENTER_VERTICAL);
+        bulkSelectionLabel = text("", 13, true, Color.rgb(196, 207, 238));
+        bulkHeader.addView(bulkSelectionLabel, weight());
+        Button clearSelection = tertiaryButton("해제");
+        clearSelection.setMinHeight(dp(38));
+        clearSelection.setOnClickListener(v -> {
+            selectedRooms.clear();
+            invalidateRoomList();
+            refreshUi();
+        });
+        bulkHeader.addView(clearSelection);
+        bulkBar.addView(bulkHeader);
+
+        LinearLayout bulkActions = new LinearLayout(this);
+        bulkActions.setOrientation(LinearLayout.HORIZONTAL);
+        bulkActions.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button bulkEdit = smallButton("일괄 편집");
+        bulkEdit.setTextSize(10);
+        bulkEdit.setMinWidth(0);
+        bulkEdit.setOnClickListener(v -> openBulkEditor());
+        bulkActions.addView(bulkEdit, new LinearLayout.LayoutParams(0, dp(42), 1f));
+
+        Button bulkEnable = smallButton("사용 켜기");
+        bulkEnable.setTextSize(10);
+        bulkEnable.setMinWidth(0);
+        bulkEnable.setOnClickListener(v -> applySelectedEnabled(true));
+        LinearLayout.LayoutParams bulkEnableLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        bulkEnableLp.leftMargin = dp(5);
+        bulkActions.addView(bulkEnable, bulkEnableLp);
+
+        Button bulkPause = smallButton("일시정지");
+        bulkPause.setTextSize(10);
+        bulkPause.setMinWidth(0);
+        bulkPause.setOnClickListener(v -> applySelectedEnabled(false));
+        LinearLayout.LayoutParams bulkPauseLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        bulkPauseLp.leftMargin = dp(5);
+        bulkActions.addView(bulkPause, bulkPauseLp);
+
+        Button bulkDelete = dangerSecondaryButton("삭제");
+        bulkDelete.setTextSize(10);
+        bulkDelete.setMinWidth(0);
+        bulkDelete.setMinHeight(dp(42));
+        bulkDelete.setOnClickListener(v -> confirmDeleteSelected());
+        LinearLayout.LayoutParams bulkDeleteLp = new LinearLayout.LayoutParams(0, dp(42), 0.86f);
+        bulkDeleteLp.leftMargin = dp(5);
+        bulkActions.addView(bulkDelete, bulkDeleteLp);
+
+        bulkBar.addView(bulkActions, top(9));
+        root.addView(bulkBar, top(8));
 
         roomList = new LinearLayout(this);
         roomList.setOrientation(LinearLayout.VERTICAL);
@@ -250,15 +376,23 @@ public class MainActivityV4 extends Activity {
         boolean listener = KakaoNotificationListener.isListenerConnected();
         boolean exact = SendScheduler.canUseExact(this);
         ArrayList<MultiRoomStore.Profile> profiles = MultiRoomStore.list(this);
-        int enabled = MultiRoomStore.enabledCount(this);
-        int ready = MultiRoomStore.readyCount(this);
+        int enabled = 0;
+        int ready = 0;
         int usable = 0;
         for (MultiRoomStore.Profile p : profiles) {
-            if (p.enabled && RoomMediaStore.hasPayload(this, p)) usable++;
+            if (p.enabled) enabled++;
+            if (p.enabled && RoomMediaStore.hasPayload(this, p)) {
+                usable++;
+                if (KakaoNotificationListener.hasLiveSession(p.room)) ready++;
+            }
         }
 
-        if (active && usable > 0 && ready < usable) {
-            masterStatus.setText("자동전송 실행 중 · 연결 대기");
+        if (active && usable < enabled) {
+            masterStatus.setText("자동전송 실행 중 · 일부 방 설정 필요");
+            masterStatus.setTextColor(AMBER);
+            stylePill(masterBadge, "CHECK", Color.rgb(55, 45, 27), AMBER);
+        } else if (active && usable > 0 && ready < usable) {
+            masterStatus.setText("자동전송 실행 중 · 일부 방 대기");
             masterStatus.setTextColor(AMBER);
             stylePill(masterBadge, "WAIT", Color.rgb(55, 45, 27), AMBER);
         } else if (active) {
@@ -286,11 +420,11 @@ public class MainActivityV4 extends Activity {
         StringBuilder system = new StringBuilder();
         system.append("라이선스 ").append(LicenseManager.shortStatus(this));
         system.append("  ·  알림 접근 ").append(access ? "정상" : "권한 필요");
-        system.append("\n카카오 연결 ").append(listener ? "정상" : "대기");
+        system.append("\n카카오 서비스 ").append(listener ? "정상" : "대기");
         if (Build.VERSION.SDK_INT >= 31) {
             system.append("  ·  예약 정확도 ").append(exact ? "정확 시각" : "근사 시각");
         }
-        system.append("  ·  연결 방 ").append(profiles.size()).append("개");
+        system.append("  ·  전송 가능 방 ").append(ready).append("/").append(usable);
         String notice = LicenseManager.updateNotice(this);
         if (notice != null && !notice.trim().isEmpty()) system.append("\n").append(notice.trim());
         systemStatus.setText(system.toString());
@@ -305,28 +439,70 @@ public class MainActivityV4 extends Activity {
         startButton.setAlpha(startButton.isEnabled() ? 1f : 0.46f);
         stopButton.setAlpha(active ? 1f : 0.46f);
 
-        roomList.removeAllViews();
-        if (profiles.isEmpty()) {
-            LinearLayout empty = card(SURFACE, BORDER, 18);
-            TextView emptyBadge = pill("GET STARTED", Color.rgb(29, 38, 65), Color.rgb(180, 195, 255));
-            empty.addView(emptyBadge, wrap());
-            empty.addView(text("첫 자동전송 방을 연결하세요", 18, true, TEXT), top(13));
-            TextView guide = text("카카오톡에서 대상 방의 새 메시지를 하나 받은 뒤 ‘새 방 연결’에서 방을 선택하세요.", 13, false, Color.rgb(166, 177, 198));
-            guide.setLineSpacing(0, 1.15f);
-            empty.addView(guide, top(7));
-            LinearLayout path = card(Color.rgb(14, 18, 27), Color.rgb(35, 44, 61), 12);
-            TextView steps = text("01  새 메시지 받기   →   02  방 연결   →   03  1회 테스트", 11, true, Color.rgb(153, 170, 209));
-            steps.setGravity(Gravity.CENTER);
-            path.addView(steps);
-            empty.addView(path, top(11));
-            TextView safe = text("방 이름과 답장 세션이 함께 확인된 경우에만 연결됩니다.", 11, false, Color.rgb(112, 126, 151));
-            empty.addView(safe, top(10));
-            roomList.addView(empty, top(7));
-        } else {
-            for (MultiRoomStore.Profile p : profiles) roomList.addView(roomCard(p), top(8));
+        ArrayList<MultiRoomStore.Profile> displayProfiles = RoomDashboardPolicy.sorted(profiles, roomSort);
+        LinkedHashSet<String> existingAliases = new LinkedHashSet<>();
+        Map<String, Integer> titleCounts = new HashMap<>();
+        int visibleRooms = 0;
+        for (MultiRoomStore.Profile p : profiles) {
+            existingAliases.add(p.room);
+            String titleKey = RoomRouting.normalizeTitle(p.actualRoomName);
+            titleCounts.put(titleKey, titleCounts.getOrDefault(titleKey, 0) + 1);
+            if (matchesRoomView(p)) visibleRooms++;
         }
+        if (selectedRooms.retainAll(existingAliases)) invalidateRoomList();
+        String renderFingerprint = buildRoomRenderFingerprint(profiles);
+        if (!renderFingerprint.equals(lastRoomRenderFingerprint)) {
+            roomList.removeAllViews();
+            if (profiles.isEmpty()) {
+                LinearLayout empty = card(SURFACE, BORDER, 18);
+                TextView emptyBadge = pill("GET STARTED", Color.rgb(29, 38, 65), Color.rgb(180, 195, 255));
+                empty.addView(emptyBadge, wrap());
+                empty.addView(text("첫 자동전송 방을 연결하세요", 18, true, TEXT), top(13));
+                TextView guide = text("카카오톡에서 대상 방의 새 메시지를 하나 받은 뒤 ‘새 방 연결’에서 방을 선택하세요.", 13, false, Color.rgb(166, 177, 198));
+                guide.setLineSpacing(0, 1.15f);
+                empty.addView(guide, top(7));
+                LinearLayout path = card(Color.rgb(14, 18, 27), Color.rgb(35, 44, 61), 12);
+                TextView steps = text("01  새 메시지 받기   →   02  방 연결   →   03  1회 테스트", 11, true, Color.rgb(153, 170, 209));
+                steps.setGravity(Gravity.CENTER);
+                path.addView(steps);
+                empty.addView(path, top(11));
+                TextView safe = text("방 이름과 답장 세션이 함께 확인된 경우에만 연결됩니다.", 11, false, Color.rgb(112, 126, 151));
+                empty.addView(safe, top(10));
+                roomList.addView(empty, top(7));
+            } else if (visibleRooms == 0) {
+                LinearLayout empty = card(SURFACE, BORDER, 18);
+                empty.addView(text("조건에 맞는 방이 없습니다", 16, true, TEXT));
+                empty.addView(text("검색어 또는 상태 필터를 바꿔 보세요.", 11, false, MUTED), top(6));
+                roomList.addView(empty, top(7));
+            } else {
+                int rendered = 0;
+                for (MultiRoomStore.Profile p : displayProfiles) {
+                    if (!matchesRoomView(p)) continue;
+                    if (rendered >= roomRenderLimit) break;
+                    int sameTitle = titleCounts.getOrDefault(RoomRouting.normalizeTitle(p.actualRoomName), 0);
+                    roomList.addView(roomCard(p, sameTitle), top(8));
+                    rendered++;
+                }
+                if (visibleRooms > rendered) {
+                    int remaining = visibleRooms - rendered;
+                    Button more = tertiaryButton("더 보기 · " + remaining + "개 남음");
+                    more.setOnClickListener(v -> {
+                        roomRenderLimit += ROOM_PAGE_SIZE;
+                        invalidateRoomList();
+                        refreshUi();
+                    });
+                    roomList.addView(more, top(10));
+                }
+            }
+            lastRoomRenderFingerprint = renderFingerprint;
+        }
+        updateBulkBar();
 
-        long next = MultiRoomStore.nextDueAt(this);
+        long next = 0L;
+        for (MultiRoomStore.Profile p : profiles) {
+            if (!p.enabled || !RoomMediaStore.hasPayload(this, p) || p.nextAt <= 0L) continue;
+            if (next == 0L || p.nextAt < next) next = p.nextAt;
+        }
         summaryRooms.setText(String.valueOf(profiles.size()));
         summaryEnabled.setText(String.valueOf(enabled));
         summaryReady.setText(String.valueOf(ready));
@@ -343,9 +519,12 @@ public class MainActivityV4 extends Activity {
             note = "첫 방을 연결하면 메시지·스케줄·전송 상태를 여기서 한눈에 확인할 수 있습니다.";
         } else if (enabled == 0) {
             note = "연결된 방은 있지만 현재 사용 중인 자동전송 방이 없습니다.";
-        } else if (ready < enabled) {
+        } else if (usable < enabled) {
             warning = true;
-            note = "사용 중인 방 중 " + (enabled - ready) + "개가 연결 대기 중입니다. 해당 방의 새 메시지를 받으면 복구됩니다.";
+            note = "사용 중인 방 중 " + (enabled - usable) + "개는 메시지 또는 사진 설정을 확인해 주세요.";
+        } else if (ready < usable) {
+            warning = true;
+            note = "사용 중인 방 중 " + (usable - ready) + "개가 답장 세션 대기 중입니다. 해당 방의 새 메시지를 받으면 복구됩니다.";
         } else if (active && next > 0) {
             note = "다음 전송 예정  ·  " + formatDateTime(next);
         } else {
@@ -355,25 +534,36 @@ public class MainActivityV4 extends Activity {
         summaryNote.setTextColor(warning ? AMBER : Color.rgb(142, 155, 180));
     }
 
-    private View roomCard(MultiRoomStore.Profile p) {
+    private View roomCard(MultiRoomStore.Profile p, int sameTitleCount) {
         boolean live = KakaoNotificationListener.hasLiveSession(p.room);
         boolean stored = KakaoNotificationListener.hasStoredBinding(this, p.room);
 
-        LinearLayout card = card(SURFACE, BORDER, 18);
-        card.setOnClickListener(v -> openEditor(p.room));
+        boolean selected = selectedRooms.contains(p.room);
+        LinearLayout card = card(selected ? Color.rgb(22, 29, 48) : SURFACE, selected ? ACCENT : BORDER, 18);
+        card.setOnClickListener(v -> {
+            if (!selectedRooms.isEmpty()) toggleSelection(p.room);
+            else openEditor(p.room);
+        });
+        card.setOnLongClickListener(v -> {
+            toggleSelection(p.room);
+            return true;
+        });
 
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView roomTitle = text(p.title(), 17, true, TEXT);
+        String roomTitleText = p.title();
+        TextView roomTitle = text(roomTitleText, roomTitleText.length() > 28 ? 15 : 17, true, TEXT);
         roomTitle.setMaxLines(2);
+        roomTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
         titleRow.addView(roomTitle, weight());
+        if (selected) titleRow.addView(pill("✓ 선택", Color.rgb(39, 51, 89), Color.rgb(190, 202, 255)));
         titleRow.addView(pill(p.enabled ? "사용 중" : "일시정지",
                 p.enabled ? Color.rgb(28, 54, 44) : Color.rgb(45, 49, 59),
                 p.enabled ? Color.rgb(130, 232, 180) : Color.rgb(162, 171, 190)));
         card.addView(titleRow);
 
-        if (MultiRoomStore.sameTitleCount(this, p.actualRoomName) > 1) {
+        if (sameTitleCount > 1) {
             String hint = Prefs.bindingHintForAlias(this, p.room);
             card.addView(text(hint.isEmpty() ? "같은 제목의 별도 방 · 현재 세션으로 구분"
                             : "같은 제목의 별도 방 · 구분 #" + hint,
@@ -434,8 +624,259 @@ public class MainActivityV4 extends Activity {
         LinearLayout.LayoutParams gLp = weight();
         gLp.leftMargin = dp(6);
         actions.addView(toggle, gLp);
-        card.addView(actions, top(12));
+        if (selectedRooms.isEmpty()) card.addView(actions, top(9));
         return card;
+    }
+
+    private void scheduleRefresh() {
+        uiHandler.removeCallbacks(refreshRunnable);
+        uiHandler.postDelayed(refreshRunnable, 90L);
+    }
+
+    private void invalidateRoomList() {
+        lastRoomRenderFingerprint = "";
+    }
+
+    private boolean matchesRoomView(MultiRoomStore.Profile p) {
+        boolean live = KakaoNotificationListener.hasLiveSession(p.room);
+        boolean stored = KakaoNotificationListener.hasStoredBinding(this, p.room);
+        if (!RoomDashboardPolicy.matches(p, roomFilter, live, stored)) return false;
+        String query = RoomRouting.normalizeTitle(roomQuery);
+        if (query.isEmpty()) return true;
+        String title = RoomRouting.normalizeTitle(p.title());
+        String actual = RoomRouting.normalizeTitle(p.actualRoomName);
+        return title.contains(query) || actual.contains(query);
+    }
+
+    private String buildRoomRenderFingerprint(ArrayList<MultiRoomStore.Profile> profiles) {
+        StringBuilder fp = new StringBuilder(RoomRouting.normalizeTitle(roomQuery)).append('|')
+                .append(roomFilter).append('|').append(roomSort).append('|')
+                .append(roomRenderLimit).append('|');
+        for (String selected : selectedRooms) fp.append("S:").append(selected).append('|');
+        for (MultiRoomStore.Profile p : profiles) {
+            if (!matchesRoomView(p)) continue;
+            fp.append(p.room).append('|').append(p.title()).append('|').append(p.enabled).append('|')
+                    .append(p.message).append('|').append(p.scheduleMode).append('|').append(p.intervalMinutes).append('|')
+                    .append(p.dailyTimes).append('|').append(p.dailyLimit).append('|').append(p.todayCount).append('|')
+                    .append(p.nextAt).append('|').append(p.failureStreak).append('|').append(p.lastSuccessAt).append('|')
+                    .append(KakaoNotificationListener.hasLiveSession(p.room)).append('|')
+                    .append(KakaoNotificationListener.hasStoredBinding(this, p.room)).append(';');
+        }
+        return fp.toString();
+    }
+
+    private void renderRoomFilters() {
+        updateRoomFilterButton();
+        updateRoomSortButton();
+    }
+
+    private void updateRoomFilterButton() {
+        if (roomFilterButton == null) return;
+        String label = RoomDashboardPolicy.FILTER_ENABLED.equals(roomFilter) ? "사용 중"
+                : RoomDashboardPolicy.FILTER_PAUSED.equals(roomFilter) ? "일시정지"
+                : RoomDashboardPolicy.FILTER_NEEDS_CONNECTION.equals(roomFilter) ? "연결 필요"
+                : RoomDashboardPolicy.FILTER_ERROR.equals(roomFilter) ? "오류" : "전체";
+        roomFilterButton.setText("필터 · " + label);
+    }
+
+    private void showRoomFilterMenu() {
+        String[] labels = {"전체", "사용 중", "일시정지", "연결 필요", "오류"};
+        String[] keys = {
+                RoomDashboardPolicy.FILTER_ALL,
+                RoomDashboardPolicy.FILTER_ENABLED,
+                RoomDashboardPolicy.FILTER_PAUSED,
+                RoomDashboardPolicy.FILTER_NEEDS_CONNECTION,
+                RoomDashboardPolicy.FILTER_ERROR
+        };
+        int checked = 0;
+        for (int i = 0; i < keys.length; i++) {
+            if (keys[i].equals(roomFilter)) { checked = i; break; }
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("방 필터")
+                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                    roomFilter = keys[which];
+                    selectedRooms.clear();
+                    resetRoomRenderLimit();
+                    renderRoomFilters();
+                    invalidateRoomList();
+                    refreshUi();
+                    dialog.dismiss();
+                })
+                .setNegativeButton("닫기", null)
+                .show();
+    }
+
+    private void cycleRoomSort() {
+        if (RoomDashboardPolicy.SORT_STATUS.equals(roomSort)) roomSort = RoomDashboardPolicy.SORT_NEXT;
+        else if (RoomDashboardPolicy.SORT_NEXT.equals(roomSort)) roomSort = RoomDashboardPolicy.SORT_NAME;
+        else roomSort = RoomDashboardPolicy.SORT_STATUS;
+        updateRoomSortButton();
+        resetRoomRenderLimit();
+        invalidateRoomList();
+        refreshUi();
+    }
+
+    private void updateRoomSortButton() {
+        if (roomSortButton == null) return;
+        String label = RoomDashboardPolicy.SORT_NEXT.equals(roomSort) ? "다음 전송"
+                : RoomDashboardPolicy.SORT_NAME.equals(roomSort) ? "이름" : "상태";
+        roomSortButton.setText("정렬 · " + label);
+    }
+
+    private void toggleSelection(String room) {
+        if (room == null || room.trim().isEmpty()) return;
+        if (!selectedRooms.add(room)) selectedRooms.remove(room);
+        invalidateRoomList();
+        refreshUi();
+    }
+
+    private void selectVisibleRooms() {
+        ArrayList<MultiRoomStore.Profile> profiles = MultiRoomStore.list(this);
+        boolean anyUnselected = false;
+        for (MultiRoomStore.Profile p : profiles) {
+            if (matchesRoomView(p) && !selectedRooms.contains(p.room)) { anyUnselected = true; break; }
+        }
+        if (anyUnselected) {
+            for (MultiRoomStore.Profile p : profiles) if (matchesRoomView(p)) selectedRooms.add(p.room);
+        } else {
+            for (MultiRoomStore.Profile p : profiles) if (matchesRoomView(p)) selectedRooms.remove(p.room);
+        }
+        invalidateRoomList();
+        refreshUi();
+    }
+
+    private void updateBulkBar() {
+        if (bulkBar == null || bulkSelectionLabel == null) return;
+        int count = selectedRooms.size();
+        bulkBar.setVisibility(count == 0 ? View.GONE : View.VISIBLE);
+        bulkSelectionLabel.setText(count + "개 선택 · 탭/길게 눌러 변경");
+    }
+
+    private void resetRoomRenderLimit() {
+        roomRenderLimit = ROOM_PAGE_SIZE;
+    }
+
+    private void confirmDeleteSelected() {
+        if (selectedRooms.isEmpty()) { toast("먼저 방을 선택해 주세요."); return; }
+        ArrayList<MultiRoomStore.Profile> profiles = MultiRoomStore.list(this);
+        StringBuilder preview = new StringBuilder();
+        int shown = 0;
+        for (MultiRoomStore.Profile p : profiles) {
+            if (!selectedRooms.contains(p.room)) continue;
+            if (shown < 4) {
+                if (preview.length() > 0) preview.append("\n");
+                preview.append("• ").append(p.title());
+            }
+            shown++;
+        }
+        if (shown > 4) preview.append("\n외 ").append(shown - 4).append("개");
+        new AlertDialog.Builder(this)
+                .setTitle(selectedRooms.size() + "개 방 삭제")
+                .setMessage(preview + "\n\n메시지, 사진, 스케줄, 카카오 연결 정보가 함께 삭제됩니다. 이 작업은 되돌릴 수 없습니다.")
+                .setPositiveButton("삭제", (d, w) -> deleteSelectedRooms())
+                .setNegativeButton("취소", null)
+                .show();
+    }
+
+    private void deleteSelectedRooms() {
+        ArrayList<String> targets = new ArrayList<>();
+        HashMap<String, RoomMediaStore.Media> mediaByRoom = new HashMap<>();
+        for (MultiRoomStore.Profile p : MultiRoomStore.list(this)) {
+            if (!selectedRooms.contains(p.room)) continue;
+            targets.add(p.room);
+            mediaByRoom.put(p.room, RoomMediaStore.get(this, p.room));
+        }
+        if (targets.isEmpty()) {
+            selectedRooms.clear();
+            invalidateRoomList();
+            refreshUi();
+            toast("삭제할 방이 더 이상 존재하지 않습니다.");
+            return;
+        }
+
+        final int removed;
+        try {
+            // Persist the authoritative profile removal first. If this fails, do not
+            // destroy media grants or Kakao bindings and leave the user's data intact.
+            removed = MultiRoomStore.removeMany(this, targets);
+        } catch (Throwable t) {
+            Prefs.appendLog(this, "일괄 방 삭제 저장 실패: " + t.getClass().getSimpleName());
+            Prefs.setStatus(this, "선택 방 삭제 실패 · 설정 저장 오류");
+            toast("삭제 정보를 안전하게 저장하지 못했습니다. 기존 방 설정은 유지했습니다.");
+            return;
+        }
+        if (removed <= 0) {
+            selectedRooms.clear();
+            invalidateRoomList();
+            refreshUi();
+            toast("삭제할 방이 더 이상 존재하지 않습니다.");
+            return;
+        }
+
+        int cleanupFailures = 0;
+        for (String room : targets) {
+            RoomMediaStore.Media media = mediaByRoom.get(room);
+            try {
+                RoomMediaStore.clear(this, room);
+                if (media != null) releasePersistedReadPermission(media.uri);
+                KakaoNotificationListener.unbindRoom(this, room);
+            } catch (Throwable t) {
+                cleanupFailures++;
+                Prefs.appendLog(this, "삭제 후 방 정리 실패: " + t.getClass().getSimpleName());
+            }
+        }
+        selectedRooms.clear();
+        resetRoomRenderLimit();
+        invalidateRoomList();
+        if (Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false)) SendScheduler.scheduleNext(this);
+        Prefs.setStatus(this, cleanupFailures == 0
+                ? "선택 방 삭제 · " + removed + "개"
+                : "선택 방 삭제 · " + removed + "개 · 후처리 확인 " + cleanupFailures + "건");
+        refreshUi();
+        toast(cleanupFailures == 0
+                ? removed + "개 방을 삭제했습니다."
+                : removed + "개 방을 삭제했습니다. 일부 연결 정리는 진단 정보에서 확인해 주세요.");
+    }
+
+    private void releasePersistedReadPermission(String rawUri) {
+        if (rawUri == null || rawUri.trim().isEmpty()) return;
+        try {
+            Uri uri = Uri.parse(rawUri);
+            if ("content".equals(uri.getScheme())) {
+                getContentResolver().releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    private void openBulkEditor() {
+        if (selectedRooms.isEmpty()) { toast("먼저 방을 선택해 주세요."); return; }
+        Intent intent = new Intent(this, BulkRoomEditActivity.class);
+        intent.putStringArrayListExtra(BulkRoomEditActivity.EXTRA_ROOMS, new ArrayList<>(selectedRooms));
+        startActivityForResult(intent, REQUEST_BULK_EDIT);
+    }
+
+    private void applySelectedEnabled(boolean enabled) {
+        if (selectedRooms.isEmpty()) return;
+        MultiRoomStore.BulkPatch patch = new MultiRoomStore.BulkPatch();
+        patch.applyEnabled = true;
+        patch.enabled = enabled;
+        int changed = MultiRoomStore.applyBulkPatch(this, new ArrayList<>(selectedRooms), patch);
+        if (Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false)) SendScheduler.scheduleNext(this);
+        Prefs.setStatus(this, (enabled ? "선택 방 사용 켬 · " : "선택 방 일시정지 · ") + changed + "개");
+        selectedRooms.clear();
+        invalidateRoomList();
+        refreshUi();
+        toast(changed + "개 방을 " + (enabled ? "사용 상태로 변경했습니다." : "일시정지했습니다."));
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_BULK_EDIT && resultCode == RESULT_OK) {
+            selectedRooms.clear();
+            invalidateRoomList();
+            refreshUi();
+        }
     }
 
     private void showAddCandidates() {
@@ -1119,6 +1560,29 @@ public class MainActivityV4 extends Activity {
     private LinearLayout.LayoutParams wrap() {
         return new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+    }
+
+    private void applyScrollableInsets(ScrollView scroll, View content, int leftDp, int topDp, int rightDp, int bottomDp) {
+        final int left = dp(leftDp);
+        final int top = dp(topDp);
+        final int right = dp(rightDp);
+        final int bottom = dp(bottomDp);
+
+        // Keep app spacing on the scrolling content, but keep system-bar insets on
+        // the ScrollView viewport itself. If the top inset lives on the content,
+        // it scrolls away and cards can slide under the status bar.
+        content.setPadding(left, top, right, bottom);
+        scroll.setClipToPadding(true);
+        scroll.setOnApplyWindowInsetsListener((v, insets) -> {
+            content.setPadding(left, top, right, bottom);
+            v.setPadding(
+                    insets.getSystemWindowInsetLeft(),
+                    insets.getSystemWindowInsetTop(),
+                    insets.getSystemWindowInsetRight(),
+                    insets.getSystemWindowInsetBottom());
+            return insets;
+        });
+        scroll.requestApplyInsets();
     }
 
     private int dp(int v) {
