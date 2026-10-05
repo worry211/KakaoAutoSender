@@ -1,0 +1,41 @@
+name: Windows warning cleanup
+on:
+  push:
+    branches: [feat/windows-client-v1]
+    paths:
+      - '.github/workflows/windows-warning-cleanup.yml'
+permissions:
+  contents: write
+jobs:
+  clean:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/windows-client-v1
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Mark fire-and-forget dispatcher operation intentionally discarded
+        shell: pwsh
+        run: |
+          $path = 'desktop/KakaoMacro.Windows/MainWindow.xaml.cs'
+          $text = [IO.File]::ReadAllText($path)
+          $old = "                Dispatcher.BeginInvoke(() =>`r`n                {`r`n                    QueueSaveSettings();"
+          if (-not $text.Contains($old)) {
+            $old = "                Dispatcher.BeginInvoke(() =>`n                {`n                    QueueSaveSettings();"
+          }
+          if (-not $text.Contains($old)) { throw 'Expected scheduler dispatcher block not found' }
+          $new = $old.Replace('Dispatcher.BeginInvoke', '_ = Dispatcher.BeginInvoke')
+          $text = $text.Replace($old, $new)
+          [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
+      - name: Verify Release with warnings as errors
+        run: dotnet build desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -warnaserror
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add desktop/KakaoMacro.Windows/MainWindow.xaml.cs
+          git commit -m 'fix(windows): make scheduler dispatcher discard explicit'
+          git push origin HEAD:feat/windows-client-v1
