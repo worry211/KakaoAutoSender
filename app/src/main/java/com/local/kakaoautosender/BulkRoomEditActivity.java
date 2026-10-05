@@ -86,8 +86,8 @@ public class BulkRoomEditActivity extends Activity {
         root.addView(header);
 
         LinearLayout info = card(Color.rgb(14, 18, 27), Color.rgb(35, 44, 61), 16);
-        info.addView(text("체크한 항목만 선택한 모든 방에 적용됩니다.", 13, true, TEXT));
-        info.addView(text("사진 첨부와 카카오 방 연결 정보는 방마다 고유하므로 일괄 변경하지 않습니다.", 11, false, Color.rgb(127, 141, 166)), top(6));
+        info.addView(text("첫 번째 선택 방의 현재 설정을 기본값으로 불러왔습니다.", 13, true, TEXT));
+        info.addView(text("체크한 항목만 모든 선택 방에 적용됩니다. 사진과 카카오 연결 정보는 방마다 고유하게 유지됩니다.", 11, false, Color.rgb(127, 141, 166)), top(6));
         root.addView(info, top(18));
 
         root.addView(section("메시지", "여러 방에 같은 문구를 한 번에 적용합니다."), top(24));

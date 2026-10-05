@@ -23,6 +23,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -69,6 +70,10 @@ public class MainActivityV4 extends Activity {
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable refreshRunnable = this::refreshUi;
     private String roomQuery = "";
+    private String roomFilter = RoomDashboardPolicy.FILTER_ALL;
+    private String roomSort = RoomDashboardPolicy.SORT_STATUS;
+    private LinearLayout roomFilterRow;
+    private Button roomSortButton;
     private String lastRoomRenderFingerprint = "";
 
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
@@ -212,6 +217,24 @@ public class MainActivityV4 extends Activity {
             @Override public void afterTextChanged(Editable s) {}
         });
         selectAll.setOnClickListener(v -> selectVisibleRooms());
+
+        LinearLayout filterTools = new LinearLayout(this);
+        filterTools.setOrientation(LinearLayout.HORIZONTAL);
+        filterTools.setGravity(Gravity.CENTER_VERTICAL);
+        HorizontalScrollView filterScroll = new HorizontalScrollView(this);
+        filterScroll.setHorizontalScrollBarEnabled(false);
+        roomFilterRow = new LinearLayout(this);
+        roomFilterRow.setOrientation(LinearLayout.HORIZONTAL);
+        filterScroll.addView(roomFilterRow);
+        filterTools.addView(filterScroll, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        roomSortButton = tertiaryButton("정렬 · 상태");
+        roomSortButton.setOnClickListener(v -> cycleRoomSort());
+        LinearLayout.LayoutParams sortLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(44));
+        sortLp.leftMargin = dp(7);
+        filterTools.addView(roomSortButton, sortLp);
+        root.addView(filterTools, top(7));
+        renderRoomFilters();
 
         bulkBar = card(Color.rgb(23, 29, 42), Color.rgb(66, 84, 133), 16);
         bulkBar.setVisibility(View.GONE);
@@ -383,6 +406,7 @@ public class MainActivityV4 extends Activity {
         startButton.setAlpha(startButton.isEnabled() ? 1f : 0.46f);
         stopButton.setAlpha(active ? 1f : 0.46f);
 
+        ArrayList<MultiRoomStore.Profile> displayProfiles = RoomDashboardPolicy.sorted(profiles, roomSort);
         LinkedHashSet<String> existingAliases = new LinkedHashSet<>();
         Map<String, Integer> titleCounts = new HashMap<>();
         int visibleRooms = 0;
@@ -390,7 +414,7 @@ public class MainActivityV4 extends Activity {
             existingAliases.add(p.room);
             String titleKey = RoomRouting.normalizeTitle(p.actualRoomName);
             titleCounts.put(titleKey, titleCounts.getOrDefault(titleKey, 0) + 1);
-            if (matchesRoomQuery(p)) visibleRooms++;
+            if (matchesRoomView(p)) visibleRooms++;
         }
         if (selectedRooms.retainAll(existingAliases)) invalidateRoomList();
         String renderFingerprint = buildRoomRenderFingerprint(profiles);
@@ -414,12 +438,12 @@ public class MainActivityV4 extends Activity {
                 roomList.addView(empty, top(7));
             } else if (visibleRooms == 0) {
                 LinearLayout empty = card(SURFACE, BORDER, 18);
-                empty.addView(text("검색 결과가 없습니다", 16, true, TEXT));
-                empty.addView(text("다른 방 이름으로 검색해 보세요.", 11, false, MUTED), top(6));
+                empty.addView(text("조건에 맞는 방이 없습니다", 16, true, TEXT));
+                empty.addView(text("검색어 또는 상태 필터를 바꿔 보세요.", 11, false, MUTED), top(6));
                 roomList.addView(empty, top(7));
             } else {
-                for (MultiRoomStore.Profile p : profiles) {
-                    if (!matchesRoomQuery(p)) continue;
+                for (MultiRoomStore.Profile p : displayProfiles) {
+                    if (!matchesRoomView(p)) continue;
                     int sameTitle = titleCounts.getOrDefault(RoomRouting.normalizeTitle(p.actualRoomName), 0);
                     roomList.addView(roomCard(p, sameTitle), top(8));
                 }
@@ -562,7 +586,10 @@ public class MainActivityV4 extends Activity {
         lastRoomRenderFingerprint = "";
     }
 
-    private boolean matchesRoomQuery(MultiRoomStore.Profile p) {
+    private boolean matchesRoomView(MultiRoomStore.Profile p) {
+        boolean live = KakaoNotificationListener.hasLiveSession(p.room);
+        boolean stored = KakaoNotificationListener.hasStoredBinding(this, p.room);
+        if (!RoomDashboardPolicy.matches(p, roomFilter, live, stored)) return false;
         String query = RoomRouting.normalizeTitle(roomQuery);
         if (query.isEmpty()) return true;
         String title = RoomRouting.normalizeTitle(p.title());
@@ -571,10 +598,11 @@ public class MainActivityV4 extends Activity {
     }
 
     private String buildRoomRenderFingerprint(ArrayList<MultiRoomStore.Profile> profiles) {
-        StringBuilder fp = new StringBuilder(RoomRouting.normalizeTitle(roomQuery)).append('|');
+        StringBuilder fp = new StringBuilder(RoomRouting.normalizeTitle(roomQuery)).append('|')
+                .append(roomFilter).append('|').append(roomSort).append('|');
         for (String selected : selectedRooms) fp.append("S:").append(selected).append('|');
         for (MultiRoomStore.Profile p : profiles) {
-            if (!matchesRoomQuery(p)) continue;
+            if (!matchesRoomView(p)) continue;
             fp.append(p.room).append('|').append(p.title()).append('|').append(p.enabled).append('|')
                     .append(p.message).append('|').append(p.scheduleMode).append('|').append(p.intervalMinutes).append('|')
                     .append(p.dailyTimes).append('|').append(p.dailyLimit).append('|').append(p.todayCount).append('|')
@@ -583,6 +611,55 @@ public class MainActivityV4 extends Activity {
                     .append(KakaoNotificationListener.hasStoredBinding(this, p.room)).append(';');
         }
         return fp.toString();
+    }
+
+    private void renderRoomFilters() {
+        if (roomFilterRow == null) return;
+        roomFilterRow.removeAllViews();
+        addRoomFilterButton("전체", RoomDashboardPolicy.FILTER_ALL);
+        addRoomFilterButton("사용 중", RoomDashboardPolicy.FILTER_ENABLED);
+        addRoomFilterButton("일시정지", RoomDashboardPolicy.FILTER_PAUSED);
+        addRoomFilterButton("연결 필요", RoomDashboardPolicy.FILTER_NEEDS_CONNECTION);
+        addRoomFilterButton("오류", RoomDashboardPolicy.FILTER_ERROR);
+    }
+
+    private void addRoomFilterButton(String label, String key) {
+        boolean active = key.equals(roomFilter);
+        Button button = button(label,
+                active ? Color.rgb(39, 51, 89) : Color.rgb(24, 30, 43),
+                active ? Color.rgb(203, 212, 255) : Color.rgb(164, 176, 199),
+                active ? ACCENT : BORDER);
+        button.setTextSize(11);
+        button.setMinHeight(0);
+        button.setPadding(dp(10), dp(8), dp(10), dp(8));
+        button.setOnClickListener(v -> {
+            if (key.equals(roomFilter)) return;
+            roomFilter = key;
+            selectedRooms.clear();
+            renderRoomFilters();
+            invalidateRoomList();
+            refreshUi();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        if (roomFilterRow.getChildCount() > 0) lp.leftMargin = dp(5);
+        roomFilterRow.addView(button, lp);
+    }
+
+    private void cycleRoomSort() {
+        if (RoomDashboardPolicy.SORT_STATUS.equals(roomSort)) roomSort = RoomDashboardPolicy.SORT_NEXT;
+        else if (RoomDashboardPolicy.SORT_NEXT.equals(roomSort)) roomSort = RoomDashboardPolicy.SORT_NAME;
+        else roomSort = RoomDashboardPolicy.SORT_STATUS;
+        updateRoomSortButton();
+        invalidateRoomList();
+        refreshUi();
+    }
+
+    private void updateRoomSortButton() {
+        if (roomSortButton == null) return;
+        String label = RoomDashboardPolicy.SORT_NEXT.equals(roomSort) ? "다음 전송"
+                : RoomDashboardPolicy.SORT_NAME.equals(roomSort) ? "이름" : "상태";
+        roomSortButton.setText("정렬 · " + label);
     }
 
     private void toggleSelection(String room) {
@@ -596,12 +673,12 @@ public class MainActivityV4 extends Activity {
         ArrayList<MultiRoomStore.Profile> profiles = MultiRoomStore.list(this);
         boolean anyUnselected = false;
         for (MultiRoomStore.Profile p : profiles) {
-            if (matchesRoomQuery(p) && !selectedRooms.contains(p.room)) { anyUnselected = true; break; }
+            if (matchesRoomView(p) && !selectedRooms.contains(p.room)) { anyUnselected = true; break; }
         }
         if (anyUnselected) {
-            for (MultiRoomStore.Profile p : profiles) if (matchesRoomQuery(p)) selectedRooms.add(p.room);
+            for (MultiRoomStore.Profile p : profiles) if (matchesRoomView(p)) selectedRooms.add(p.room);
         } else {
-            for (MultiRoomStore.Profile p : profiles) if (matchesRoomQuery(p)) selectedRooms.remove(p.room);
+            for (MultiRoomStore.Profile p : profiles) if (matchesRoomView(p)) selectedRooms.remove(p.room);
         }
         invalidateRoomList();
         refreshUi();
