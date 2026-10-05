@@ -5,12 +5,15 @@ namespace KakaoMacro.Windows.Services;
 
 internal sealed class SettingsStore
 {
+    private readonly object _gate = new();
     private readonly string _directory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "KakaoMacro",
         "Windows");
+    private string? _lastSerialized;
 
     private string SettingsPath => Path.Combine(_directory, "settings.json");
+    public string DirectoryPath => _directory;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -23,9 +26,11 @@ internal sealed class SettingsStore
         try
         {
             if (!File.Exists(SettingsPath)) return new AppSettings();
-            var value = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath), JsonOptions)
+            var raw = File.ReadAllText(SettingsPath);
+            var value = JsonSerializer.Deserialize<AppSettings>(raw, JsonOptions)
                         ?? new AppSettings();
             Sanitize(value);
+            _lastSerialized = JsonSerializer.Serialize(value, JsonOptions);
             return value;
         }
         catch
@@ -37,15 +42,23 @@ internal sealed class SettingsStore
     public void Save(AppSettings value)
     {
         Sanitize(value);
-        Directory.CreateDirectory(_directory);
-        var temp = SettingsPath + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(value, JsonOptions));
-        File.Move(temp, SettingsPath, true);
+        var serialized = JsonSerializer.Serialize(value, JsonOptions);
+        lock (_gate)
+        {
+            if (string.Equals(serialized, _lastSerialized, StringComparison.Ordinal)) return;
+            Directory.CreateDirectory(_directory);
+            var temp = SettingsPath + ".tmp";
+            File.WriteAllText(temp, serialized);
+            File.Move(temp, SettingsPath, true);
+            _lastSerialized = serialized;
+        }
     }
+
+    public void EnsureDirectory() => Directory.CreateDirectory(_directory);
 
     private static void Sanitize(AppSettings value)
     {
-        value.SchemaVersion = 1;
+        value.SchemaVersion = 2;
         value.Rooms ??= new List<RoomProfile>();
         foreach (var room in value.Rooms)
         {
