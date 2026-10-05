@@ -37,6 +37,10 @@
             android:name=".RoomEditorActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".BulkRoomEditActivity"
+            android:exported="false" />
+
         <service
             android:name=".KakaoNotificationListener"
             android:label="카톡매크로 알림 접근"
