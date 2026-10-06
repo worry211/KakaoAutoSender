@@ -1,0 +1,66 @@
+name: Windows v1.6 visual polish
+
+on:
+  push:
+    branches:
+      - feat/windows-v1-6-premium-workspace
+
+permissions:
+  contents: write
+
+jobs:
+  polish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/windows-v1-6-premium-workspace
+          fetch-depth: 0
+      - name: Apply restrained commercial design system
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('desktop/KakaoMacro.Windows/App.xaml')
+          s = p.read_text(encoding='utf-8')
+          replacements = {
+              'Color="#090D13"': 'Color="#090C11"',
+              'Color="#0F151E"': 'Color="#10151C"',
+              'Color="#141C28"': 'Color="#141A22"',
+              'Color="#1A2432"': 'Color="#1A2230"',
+              'Color="#0B111A"': 'Color="#0D1218"',
+              'Color="#253247"': 'Color="#222C3A"',
+              'Color="#3A4960"': 'Color="#344154"',
+              'Color="#5F79FF"': 'Color="#6878F4"',
+              'Color="#748AFF"': 'Color="#7C8AF7"',
+              'Color="#1A254D"': 'Color="#1B2440"',
+              'Color="#292608"': 'Color="#211F0A"',
+              '<Setter Property="MinHeight" Value="40"/>': '<Setter Property="MinHeight" Value="38"/>',
+              '<Setter Property="CornerRadius" Value="14"/>\n            <Setter Property="Padding" Value="16"/>': '<Setter Property="CornerRadius" Value="14"/>\n            <Setter Property="Padding" Value="16"/>',
+              '<Setter Property="BorderThickness" Value="1"/>\n            <Setter Property="CornerRadius" Value="14"/>': '<Setter Property="BorderThickness" Value="0"/>\n            <Setter Property="CornerRadius" Value="14"/>',
+              '<Setter Property="BorderThickness" Value="1"/>\n            <Setter Property="CornerRadius" Value="12"/>\n            <Setter Property="Padding" Value="14"/>': '<Setter Property="BorderThickness" Value="0"/>\n            <Setter Property="CornerRadius" Value="12"/>\n            <Setter Property="Padding" Value="14"/>',
+              '<Setter Property="Background" Value="#173326"/>': '<Setter Property="Background" Value="#162A22"/>',
+              '<Setter Property="Foreground" Value="#A7F0CB"/>': '<Setter Property="Foreground" Value="#A7E7C8"/>',
+              '<Setter Property="BorderBrush" Value="#32694C"/>': '<Setter Property="BorderBrush" Value="#28513D"/>',
+              '<Setter Property="Background" Value="#311A20"/>': '<Setter Property="Background" Value="#2A171C"/>',
+              '<Setter Property="Foreground" Value="#FFD4D9"/>': '<Setter Property="Foreground" Value="#F6C3C9"/>',
+              '<Setter Property="BorderBrush" Value="#66343E"/>': '<Setter Property="BorderBrush" Value="#503039"/>',
+              '<Setter Property="Background" Value="#121A25"/>': '<Setter Property="Background" Value="#141A22"/>',
+              '<Setter Property="BorderBrush" Value="#273448"/>': '<Setter Property="BorderBrush" Value="#222C38"/>',
+              '<Setter TargetName="TabChrome" Property="Background" Value="#1C2748"/>': '<Setter TargetName="TabChrome" Property="Background" Value="#1A2234"/>',
+              '<Setter TargetName="TabChrome" Property="BorderBrush" Value="#40539C"/>': '<Setter TargetName="TabChrome" Property="BorderBrush" Value="Transparent"/>',
+              '<Setter TargetName="ItemChrome" Property="Background" Value="#17213B"/>': '<Setter TargetName="ItemChrome" Property="Background" Value="#171E2D"/>',
+          }
+          for old, new in replacements.items():
+              s = s.replace(old, new)
+          p.write_text(s, encoding='utf-8')
+      - name: Commit visual system
+        run: |
+          if git diff --quiet -- desktop/KakaoMacro.Windows/App.xaml; then
+            echo "No visual changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add desktop/KakaoMacro.Windows/App.xaml
+          git commit -m "style(windows): quiet v1.6 visual hierarchy"
+          git push origin HEAD:feat/windows-v1-6-premium-workspace
