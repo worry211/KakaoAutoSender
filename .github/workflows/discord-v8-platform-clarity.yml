@@ -20,6 +20,7 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+
           p = Path('backend/src/discordV2.ts')
           s = p.read_text(encoding='utf-8')
           pairs = [
@@ -30,28 +31,41 @@ jobs:
           ]
           for old, new in pairs:
               if old not in s:
-                  raise SystemExit(f'missing fragment: {old[:90]}')
+                  raise SystemExit(f'missing source fragment: {old[:90]}')
               s = s.replace(old, new, 1)
+
           anchor = '''            {\n              name: "🌐 라이선스 정책",\n              value: `확인 주기 **${result.heartbeat_seconds}초**\\n오프라인 유예 **${result.grace_seconds}초**`,\n              inline: true,\n            },\n'''
           insert = anchor + '''            {\n              name: "🖥️ Windows 정책",\n              value:\n                "Android versionCode 강제업데이트와 **분리**되어 있습니다.\\n점검 모드 · 긴급 중단 · 실제 라이선스 상태는 Android/Windows에 공통 적용됩니다.",\n              inline: false,\n            },\n'''
           if anchor not in s:
               raise SystemExit('system status policy field anchor missing')
           s = s.replace(anchor, insert, 1)
           p.write_text(s, encoding='utf-8')
+
+          for test_path in [
+              Path('backend/test/seller-console-v7.test.ts'),
+              Path('backend/test/seller-ops-v6.test.ts'),
+          ]:
+              t = test_path.read_text(encoding='utf-8')
+              t = t.replace('"서비스 상태"', '"서비스 · 배포"')
+              t = t.replace('"최소 버전"', '"Android 최소 버전"')
+              t = t.replace('"최신 버전"', '"Android 최신 버전"')
+              test_path.write_text(t, encoding='utf-8')
+
+          Path('backend/test/seller-console-v8.test.ts').write_text('''import { describe, expect, it } from "vitest";\nimport { renderDiscordPanel } from "../src/discordV2";\n\ndescribe("seller console v8 platform clarity", () => {\n  it("makes Android version controls explicit and explains Windows isolation", () => {\n    const message = renderDiscordPanel({\n      kind: "system_status",\n      kill_switch: 0,\n      maintenance: 0,\n      min_version: 34,\n      latest_version: 34,\n      heartbeat_seconds: 60,\n      grace_seconds: 600,\n      download_url: "https://example.com/app.apk",\n      release_notes: "",\n      message: "",\n    });\n\n    const labels = message.components\n      .flatMap((row: any) => row.components)\n      .map((item: any) => item.label);\n    expect(labels).toContain("Android 최소 버전");\n    expect(labels).toContain("Android 최신 버전");\n\n    const windowsPolicy = message.embeds[0].fields.find((field: any) =>\n      field.name.includes("Windows 정책"),\n    );\n    expect(windowsPolicy?.value).toContain("분리");\n    expect(windowsPolicy?.value).toContain("Android/Windows에 공통 적용");\n  });\n\n  it("labels the seller-home system entry as service and deployment", () => {\n    const message = renderDiscordPanel({ kind: "license_help" });\n    const labels = message.components\n      .flatMap((row: any) => row.components)\n      .map((item: any) => item.label);\n    expect(labels).toContain("서비스 · 배포");\n  });\n});\n''', encoding='utf-8')
       - name: Format and verify
         working-directory: backend
         run: |
           npm ci
-          npx prettier --write src/discordV2.ts
+          npx prettier --write src/discordV2.ts test/seller-console-v7.test.ts test/seller-ops-v6.test.ts test/seller-console-v8.test.ts
           npm run typecheck
           npm run lint
           npm test
           npm audit --audit-level=moderate
-      - name: Commit console copy polish
+      - name: Commit console platform clarity
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/src/discordV2.ts
+          git add backend/src/discordV2.ts backend/test/seller-console-v7.test.ts backend/test/seller-ops-v6.test.ts backend/test/seller-console-v8.test.ts
           git diff --cached --quiet && exit 0
           git commit -m "feat(discord): clarify platform-scoped operator controls"
           git push origin HEAD:feat/discord-seller-console-v8-platform-clarity
