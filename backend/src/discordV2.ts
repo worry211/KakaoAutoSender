@@ -602,7 +602,11 @@ function renderDiscordPanelCore(result: any, command?: Command) {
 }
 
 export function renderDiscordPanel(result: any, command?: Command) {
-  return polishSellerPanel(renderDiscordPanelCore(result, command), result, command);
+  return polishSellerPanel(
+    renderDiscordPanelCore(result, command),
+    result,
+    command,
+  );
 }
 
 /** Text fallback kept for tests/diagnostics; live Discord uses embeds above. */

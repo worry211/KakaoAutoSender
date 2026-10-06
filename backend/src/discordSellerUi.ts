@@ -1,4 +1,8 @@
-type CommandLike = { group?: string; action?: string; params?: Record<string, any> };
+type CommandLike = {
+  group?: string;
+  action?: string;
+  params?: Record<string, any>;
+};
 
 type DiscordMessage = {
   content: string;
@@ -135,7 +139,9 @@ const polishHome = (message: DiscordMessage) => {
   if (
     firstRow?.components &&
     firstRow.components.length < 5 &&
-    !firstRow.components.some((item: any) => item.custom_id === "nav:system:status")
+    !firstRow.components.some(
+      (item: any) => item.custom_id === "nav:system:status",
+    )
   ) {
     firstRow.components.push(button("서비스 상태", "nav:system:status", 2));
   }
@@ -172,7 +178,11 @@ const polishStats = (message: DiscordMessage, result: any) => {
   embed.footer = { text: "KakaoMacro Seller · 판매/고객지원 우선순위" };
 };
 
-const polishList = (message: DiscordMessage, result: any, command?: CommandLike) => {
+const polishList = (
+  message: DiscordMessage,
+  result: any,
+  command?: CommandLike,
+) => {
   const embed = message.embeds[0];
   const licenses = Array.isArray(result?.licenses) ? result.licenses : [];
   if (!embed) return;
@@ -186,7 +196,8 @@ const polishList = (message: DiscordMessage, result: any, command?: CommandLike)
   embed.footer = { text: "KakaoMacro Seller · 항목 버튼으로 상세 열기" };
 
   if (licenses.length === 0) {
-    embed.description = `${embed.description ?? ""}\n\n조건에 맞는 항목이 없습니다.`.trim();
+    embed.description =
+      `${embed.description ?? ""}\n\n조건에 맞는 항목이 없습니다.`.trim();
     return;
   }
 
@@ -222,7 +233,9 @@ const polishIssued = (message: DiscordMessage, result: any[]) => {
     "구매자에게는 **KM 키만 전달**하고, 주문 기록에는 LIC ID와 고객 메모를 남기세요.",
     "이 화면을 닫기 전에 필요한 키를 전달했는지 확인하세요.",
   ].join("\n");
-  embed.footer = { text: "KakaoMacro Seller · KM 키 원문은 발급/교체 순간에만 표시" };
+  embed.footer = {
+    text: "KakaoMacro Seller · KM 키 원문은 발급/교체 순간에만 표시",
+  };
 };
 
 const polishSystem = (message: DiscordMessage, result: any) => {
@@ -236,7 +249,11 @@ const polishSystem = (message: DiscordMessage, result: any) => {
     : maintenance
       ? "점검 모드가 켜져 있습니다. 고객 안내와 복구 시점을 확인하세요."
       : "서비스 제어 상태가 정상입니다. 위험 변경은 항상 최종 확인을 거칩니다.";
-  embed.color = blocked ? COLORS.red : maintenance ? COLORS.yellow : COLORS.green;
+  embed.color = blocked
+    ? COLORS.red
+    : maintenance
+      ? COLORS.yellow
+      : COLORS.green;
   embed.footer = { text: "KakaoMacro Seller · 전체 고객 영향 설정" };
 };
 

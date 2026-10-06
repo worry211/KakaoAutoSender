@@ -151,7 +151,9 @@ describe("Discord seller console v3", () => {
     expect(message.embeds[0].title).toContain("LIC-…49BA8838");
     expect(message.embeds[0].fields[0].name).toBe("다음 추천 작업");
     expect(message.embeds[0].fields[0].value).toContain("/license extend");
-    expect(message.embeds[0].fields[0].value).toContain("/license reset-device");
+    expect(message.embeds[0].fields[0].value).toContain(
+      "/license reset-device",
+    );
   });
 
   it("renders system status as a service control center", () => {
