@@ -29,18 +29,26 @@ jobs:
       - name: Publish self-contained x64
         run: dotnet publish desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o desktop/artifacts/win-x64
       - name: Prepare sale executable
+        id: package
         shell: pwsh
         run: |
           $source = 'desktop/artifacts/win-x64/KakaoMacro.Windows.exe'
-          $target = 'desktop/artifacts/KakaoMacro-PC-v1.4.0.exe'
           if (-not (Test-Path $source)) { throw "Published executable not found: $source" }
+
+          $fileVersion = (Get-Item $source).VersionInfo.FileVersion
+          $parts = $fileVersion -split '\.'
+          if ($parts.Count -lt 3) { throw "Unexpected file version: $fileVersion" }
+          $version = ($parts[0..2] -join '.')
+          $target = "desktop/artifacts/KakaoMacro-PC-v$version.exe"
+
           Copy-Item $source $target -Force
-          $version = (Get-Item $target).VersionInfo.FileVersion
-          if ($version -notlike '1.4.0*') { throw "Unexpected file version: $version" }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "path=$target" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Sale artifact: $target"
           Get-FileHash $target -Algorithm SHA256 | Format-List
       - uses: actions/upload-artifact@v4
         with:
-          name: KakaoMacro-PC-v1.4.0-sale
-          path: desktop/artifacts/KakaoMacro-PC-v1.4.0.exe
+          name: KakaoMacro-PC-v${{ steps.package.outputs.version }}-sale
+          path: ${{ steps.package.outputs.path }}
           if-no-files-found: error
           retention-days: 30
