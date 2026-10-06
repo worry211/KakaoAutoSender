@@ -254,45 +254,48 @@ const button = (
 const detailActionRows = (license: any) => {
   const licenseId = String(license?.license_id ?? "");
   const state = String(license?.state ?? "");
-  const primary: any[] = [];
+
+  // Customer-support actions stay in the first row for mobile speed.
+  const support: any[] = [];
   if (["ACTIVE", "UNUSED", "EXPIRED"].includes(state))
-    primary.push(button("기간 연장", `modal:extend:${licenseId}`, 3));
-  primary.push(
-    button("고객 메모", `modal:customer:${licenseId}`, 1),
+    support.push(button("기간 연장", `modal:extend:${licenseId}`, 3));
+  support.push(button("고객 메모", `modal:customer:${licenseId}`, 1));
+  if (state === "ACTIVE")
+    support.push(button("기기 초기화", `modal:reset:${licenseId}`, 1));
+  if (state === "SUSPENDED")
+    support.push(button("정지 해제", `act:resume:${licenseId}`, 3));
+  if (state === "UNUSED")
+    support.push(button("미사용 키 교체", `act:replace:${licenseId}`, 1));
+  support.push(button("새로고침", `nav:info:${licenseId}`, 2));
+
+  // Seller-only context is visually separated from customer-support work.
+  const adminRow = [
     button("관리 메모", `modal:admin:${licenseId}`, 2),
     button("변경 이력", `nav:hist:${licenseId}:1`, 2),
-    button("새로고침", `nav:info:${licenseId}`, 2),
-  );
+    button("판매자 홈", "nav:home", 2),
+  ];
 
-  const operations: any[] = [];
+  // Access-changing actions get their own final row.
+  const danger: any[] = [];
   if (state === "ACTIVE") {
-    operations.push(
+    danger.push(
       button("일시 정지", `modal:suspend:${licenseId}`, 2),
-      button("기기 초기화", `modal:reset:${licenseId}`, 1),
       button("라이선스 취소", `modal:revoke:${licenseId}`, 4),
     );
-  } else if (state === "SUSPENDED") {
-    operations.push(
-      button("정지 해제", `act:resume:${licenseId}`, 3),
-      button("라이선스 취소", `modal:revoke:${licenseId}`, 4),
-    );
-  } else if (state === "UNUSED") {
-    operations.push(
-      button("미사용 키 교체", `act:replace:${licenseId}`, 1),
-      button("라이선스 취소", `modal:revoke:${licenseId}`, 4),
-    );
-  } else if (state === "EXPIRED") {
-    operations.push(button("라이선스 취소", `modal:revoke:${licenseId}`, 4));
+  } else if (
+    state === "SUSPENDED" ||
+    state === "UNUSED" ||
+    state === "EXPIRED"
+  ) {
+    danger.push(button("라이선스 취소", `modal:revoke:${licenseId}`, 4));
   } else if (state === "REVOKED") {
-    operations.push(button("삭제 / 차단", `modal:delete:${licenseId}`, 4));
+    danger.push(button("삭제 / 차단", `modal:delete:${licenseId}`, 4));
   }
-  operations.push(button("판매자 홈", "nav:home", 2));
 
   return [
-    ...(primary.length ? [{ type: 1, components: primary.slice(0, 5) }] : []),
-    ...(operations.length
-      ? [{ type: 1, components: operations.slice(0, 5) }]
-      : []),
+    ...(support.length ? [{ type: 1, components: support.slice(0, 5) }] : []),
+    { type: 1, components: adminRow },
+    ...(danger.length ? [{ type: 1, components: danger.slice(0, 5) }] : []),
   ];
 };
 
@@ -383,33 +386,32 @@ export function renderDiscordPanel(result: any, command?: Command) {
       "",
       [
         {
-          title: "🧭 KakaoMacro 판매자 콘솔",
+          title: "🧭 KakaoMacro 판매자 콘솔 · 홈",
           description: [
-            "판매와 고객지원을 **버튼만으로 빠르게 처리**할 수 있는 운영 홈입니다.",
-            "가장 많이 쓰는 30일·영구 판매는 바로 시작하고, 고객지원은 고객 메모로 먼저 찾습니다.",
+            "판매와 고객지원을 **버튼 중심으로 처리하는 운영 홈**입니다.",
+            "새 판매는 왼쪽부터, 기존 고객 문제는 **고객 찾기**에서 시작하세요.",
           ].join("\n"),
           color: COLORS.brand,
           fields: [
             {
-              name: "판매",
-              value:
-                "**30일 발급** 또는 **영구 발급**으로 바로 시작하세요. 다른 기간은 **기타 기간 발급**에서 선택합니다.",
+              name: "① 새 판매",
+              value: "가장 많이 쓰는 **30일 / 영구 발급**을 바로 시작합니다.",
               inline: true,
             },
             {
-              name: "고객지원",
+              name: "② 고객지원",
               value:
-                "**고객 찾기** → 상세 화면 → 기간 연장·기기 초기화·메모 변경 순으로 처리합니다.",
+                "**고객 찾기** → 상세 → 연장·기기 초기화·메모 변경 순으로 처리합니다.",
               inline: true,
             },
             {
-              name: "운영 인박스",
+              name: "③ 오늘 운영",
               value:
-                "만료 임박·오래된 미사용 키·장기 미접속·정지 고객은 **오늘 처리할 일**에서 우선순위로 확인합니다.",
+                "**처리할 일**에서 만료 임박·장기 미사용·미접속·정지 고객을 먼저 확인합니다.",
               inline: true,
             },
           ],
-          footer: footer("판매자 전용 · 버튼 우선 · 위험 작업은 이중 확인"),
+          footer: footer("판매자 전용 · 위험 작업은 별도 확인"),
           timestamp: stamp(),
         },
       ],
@@ -512,6 +514,12 @@ export function renderDiscordPanel(result: any, command?: Command) {
               inline: true,
             },
             {
+              name: "🖥️ Windows 정책",
+              value:
+                "Android versionCode 기준과 **분리됨**\nPC 라이선스는 플랫폼 정책으로 별도 확인",
+              inline: true,
+            },
+            {
               name: "🌐 라이선스 정책",
               value: `확인 주기 **${result.heartbeat_seconds}초**\n오프라인 유예 **${result.grace_seconds}초**`,
               inline: true,
@@ -586,12 +594,13 @@ export function renderDiscordPanel(result: any, command?: Command) {
 
   if (Array.isArray(result)) {
     const fields = result.map((license: Row, index: number) => ({
-      name: `#${index + 1} · ${customerLabel(license)}`,
+      name: `#${index + 1} · ${customerLabel(license)} · 구매자 전달`,
       value: [
         `**사용 기간**  ${licenseTerm(license)}`,
         "**구매자에게 전달할 KM 키**",
         `\`${license.key}\``,
-        `**판매 기록용 LIC ID**  ${license.license_id}`,
+        "**판매자 기록용 LIC ID · 구매자 전달 불필요**",
+        `${license.license_id}`,
       ].join("\n"),
       inline: false,
     }));
@@ -602,12 +611,12 @@ export function renderDiscordPanel(result: any, command?: Command) {
           title: "✅ 판매용 라이선스 발급 완료",
           description: [
             `총 **${result.length}개**를 발급했습니다.`,
-            "구매자에게는 **KM 키만 전달**하고 판매 기록에는 LIC ID를 남겨두세요.",
-            "키 원문은 이 응답을 닫기 전에 필요한 곳에 안전하게 전달하세요.",
+            "구매자에게는 **KM 키만 전달**하고 LIC ID는 고객지원용 판매 기록으로 보관하세요.",
+            "KM 키 원문은 이 응답을 닫기 전에 필요한 곳에 안전하게 전달하세요.",
           ].join("\n"),
           color: COLORS.green,
           fields,
-          footer: footer("민감 정보 · KM 키는 지금 한 번만 표시"),
+          footer: footer("민감 정보 · KM 키는 발급 응답에서만 표시"),
           timestamp: stamp(),
         },
       ],
@@ -805,7 +814,7 @@ export function renderDiscordPanel(result: any, command?: Command) {
       "",
       [
         {
-          title: "📊 라이선스 현황",
+          title: "📊 라이선스 현황 · 운영 대시보드",
           description: [
             `전체 **${Number(result.total) || 0}개**`,
             Number(result.expiring_7d) ||
