@@ -1,0 +1,57 @@
+name: Seller console v8 platform clarity
+
+on:
+  push:
+    branches:
+      - feat/discord-seller-console-v8-platform-clarity
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/discord-seller-console-v8-platform-clarity
+          fetch-depth: 0
+      - name: Clarify Android and Windows operator scope
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('backend/src/discordV2.ts')
+          s = p.read_text(encoding='utf-8')
+          pairs = [
+            ('return "기준보다 낮은 앱 버전은 업데이트 전까지 사용이 차단될 수 있습니다.";', 'return "Android 전용 기준입니다. 기준보다 낮은 Android 앱은 업데이트 전까지 차단되며 Windows 고객에는 적용되지 않습니다.";'),
+            ('button("서비스 상태", "nav:system:status", 2)', 'button("서비스 · 배포", "nav:system:status", 2)'),
+            ('button(\n              "최소 버전",', 'button(\n              "Android 최소 버전",'),
+            ('button(\n              "최신 버전",', 'button(\n              "Android 최신 버전",'),
+          ]
+          for old, new in pairs:
+              if old not in s:
+                  raise SystemExit(f'missing fragment: {old[:90]}')
+              s = s.replace(old, new, 1)
+          anchor = '''            {\n              name: "🌐 라이선스 정책",\n              value: `확인 주기 **${result.heartbeat_seconds}초**\\n오프라인 유예 **${result.grace_seconds}초**`,\n              inline: true,\n            },\n'''
+          insert = anchor + '''            {\n              name: "🖥️ Windows 정책",\n              value:\n                "Android versionCode 강제업데이트와 **분리**되어 있습니다.\\n점검 모드 · 긴급 중단 · 실제 라이선스 상태는 Android/Windows에 공통 적용됩니다.",\n              inline: false,\n            },\n'''
+          if anchor not in s:
+              raise SystemExit('system status policy field anchor missing')
+          s = s.replace(anchor, insert, 1)
+          p.write_text(s, encoding='utf-8')
+      - name: Format and verify
+        working-directory: backend
+        run: |
+          npm ci
+          npx prettier --write src/discordV2.ts
+          npm run typecheck
+          npm run lint
+          npm test
+          npm audit --audit-level=moderate
+      - name: Commit console copy polish
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/discordV2.ts
+          git diff --cached --quiet && exit 0
+          git commit -m "feat(discord): clarify platform-scoped operator controls"
+          git push origin HEAD:feat/discord-seller-console-v8-platform-clarity
