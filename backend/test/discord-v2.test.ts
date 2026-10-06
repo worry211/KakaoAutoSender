@@ -64,6 +64,35 @@ describe("Discord seller console v2", () => {
     expect(message.components[0].components[2].label).toContain("다음");
   });
 
+  it("renders seller help as a navigable operations console", () => {
+    const message = renderDiscordPanel({ kind: "license_help" });
+    expect(message.embeds[0].title).toContain("라이선스 관리");
+    const labels = message.components[0].components.map(
+      (item: any) => item.label,
+    );
+    expect(labels).toContain("판매 현황");
+    expect(labels).toContain("7일 만료");
+  });
+
+  it("renders newly issued keys as customer handoff cards", () => {
+    const message = renderDiscordPanel([
+      {
+        license_id: "LIC-26faf17a-3175-4322-868e-fafa49ba8838",
+        key: "KM-EXAMPLE-KEY",
+        activated_at: null,
+        expires_at: null,
+        duration_seconds: 30 * 86400,
+        customer_memo: "주문 #42",
+      },
+    ]);
+    expect(message.embeds[0].title).toContain("판매용 라이선스 발급 완료");
+    expect(message.embeds[0].fields[0].value).toContain(
+      "구매자에게 전달할 KM 키",
+    );
+    expect(message.embeds[0].fields[0].value).toContain("주문 #42");
+    expect(message.components[0].components[0].label).toBe("판매 현황");
+  });
+
   it("keeps a readable text fallback for diagnostics", () => {
     const text = renderDiscord({
       total: 0,
