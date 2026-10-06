@@ -1,13 +1,12 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using WpfTabControl = System.Windows.Controls.TabControl;
 
 namespace KakaoMacro.Windows;
 
 public partial class MainWindow
 {
-    private WpfTabControl? _qualityWorkspaceTabs;
+    private System.Windows.Controls.TabControl? _qualityWorkspaceTabs;
     private bool _qualitySelectionHooked;
 
     protected override void OnContentRendered(EventArgs e)
@@ -15,7 +14,7 @@ public partial class MainWindow
         base.OnContentRendered(e);
         if (_qualitySelectionHooked) return;
 
-        _qualityWorkspaceTabs = FindVisualChild<WpfTabControl>(this);
+        _qualityWorkspaceTabs = FindVisualChild<System.Windows.Controls.TabControl>(this);
         RoomList.SelectionChanged += QualityRoomSelectionChanged;
         _qualitySelectionHooked = true;
         RouteSelectionToWorkspace();
@@ -29,7 +28,7 @@ public partial class MainWindow
         var tabs = _qualityWorkspaceTabs;
         if (tabs is null || tabs.Items.Count < 3) return;
 
-        // Do not pull operators out of diagnostics if they intentionally opened it.
+        // Respect a user who intentionally opened Operations / Diagnostics.
         if (tabs.SelectedIndex >= 2) return;
 
         var count = RoomList.SelectedItems.Count;

@@ -29,27 +29,18 @@ jobs:
       - name: Publish self-contained x64
         run: dotnet publish desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o desktop/artifacts/win-x64
       - name: Prepare sale executable
-        id: package
         shell: pwsh
         run: |
-          [xml]$project = Get-Content 'desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj'
-          $saleVersion = [string]$project.Project.PropertyGroup.Version
-          if ([string]::IsNullOrWhiteSpace($saleVersion)) { throw 'Project version is missing' }
           $source = 'desktop/artifacts/win-x64/KakaoMacro.Windows.exe'
-          $target = "desktop/artifacts/KakaoMacro-PC-v$saleVersion.exe"
+          $target = 'desktop/artifacts/KakaoMacro-PC-v1.4.0.exe'
           if (-not (Test-Path $source)) { throw "Published executable not found: $source" }
           Copy-Item $source $target -Force
-          $fileVersion = (Get-Item $target).VersionInfo.FileVersion
-          if ($fileVersion -notlike "$saleVersion*") { throw "Unexpected file version: $fileVersion (expected $saleVersion)" }
-          $hash = (Get-FileHash $target -Algorithm SHA256).Hash.ToLowerInvariant()
-          Write-Host "Sale version: $saleVersion"
-          Write-Host "SHA256: $hash"
-          "version=$saleVersion" >> $env:GITHUB_OUTPUT
-          "path=$target" >> $env:GITHUB_OUTPUT
-          "sha256=$hash" >> $env:GITHUB_OUTPUT
+          $version = (Get-Item $target).VersionInfo.FileVersion
+          if ($version -notlike '1.4.0*') { throw "Unexpected file version: $version" }
+          Get-FileHash $target -Algorithm SHA256 | Format-List
       - uses: actions/upload-artifact@v4
         with:
-          name: KakaoMacro-PC-v${{ steps.package.outputs.version }}-sale
-          path: ${{ steps.package.outputs.path }}
+          name: KakaoMacro-PC-v1.4.0-sale
+          path: desktop/artifacts/KakaoMacro-PC-v1.4.0.exe
           if-no-files-found: error
           retention-days: 30
