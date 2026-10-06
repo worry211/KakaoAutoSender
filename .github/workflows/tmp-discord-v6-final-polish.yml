@@ -27,6 +27,9 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: npm ci
+      - name: Format touched files
+        working-directory: backend
+        run: npx prettier --write src/discord.ts src/discordV2.ts test/seller-console-v6-final-polish.test.ts
       - name: Secret scan
         run: node scripts/secret-scan.mjs
       - name: Typecheck
