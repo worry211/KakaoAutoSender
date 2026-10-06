@@ -30,6 +30,10 @@ jobs:
         working-directory: backend
         run: npm ci
 
+      - name: Format changed backend files
+        working-directory: backend
+        run: npx prettier --write src/discord.ts src/discordV2.ts src/sellerConsoleModals.ts test/seller-ops-v5.test.ts
+
       - name: Secret scan
         run: node scripts/secret-scan.mjs
 
