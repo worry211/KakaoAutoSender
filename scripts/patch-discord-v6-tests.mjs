@@ -1,5 +1,6 @@
 import fs from "node:fs";
 
+// Temporary one-shot migration for regression expectations; removed after the verified commit.
 function replaceExact(path, before, after, label) {
   let source = fs.readFileSync(path, "utf8");
   if (!source.includes(before)) throw new Error(`Missing test patch anchor: ${label}`);
