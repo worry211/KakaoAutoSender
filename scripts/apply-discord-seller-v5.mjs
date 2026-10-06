@@ -35,7 +35,7 @@ const replaceOnce = (text, before, after, label) => {
 
   const commandAnchor = `  match = customId.match(/^form:customer:(LIC-[a-f0-9-]{36})$/i);\n  if (match && LICENSE_ID.test(match[1]))\n    return {\n      group: "license",\n      action: "customer-memo",\n      params: {\n        "key-or-id": match[1],\n        memo: String(values.memo ?? "").slice(0, 500),\n      },\n    };\n\n  throw new ApiError("INVALID_COMMAND");`;
 
-  const commandReplacement = `  match = customId.match(/^form:customer:(LIC-[a-f0-9-]{36})$/i);\n  if (match && LICENSE_ID.test(match[1]))\n    return {\n      group: "license",\n      action: "customer-memo",\n      params: {\n        "key-or-id": match[1],\n        memo: String(values.memo ?? "").slice(0, 500),\n      },\n    };\n\n  match = customId.match(/^form:admin:(LIC-[a-f0-9-]{36})$/i);\n  if (match && LICENSE_ID.test(match[1]))\n    return {\n      group: "license",\n      action: "note",\n      params: {\n        "key-or-id": match[1],\n        memo: String(values.memo ?? "").slice(0, 500),\n      },\n    };\n\n  const reasonCommand = (action, pattern) => {\n    const reasonMatch = customId.match(pattern);\n    if (!reasonMatch || !LICENSE_ID.test(reasonMatch[1])) return null;\n    const reason = String(values.reason ?? "").trim().slice(0, 500);\n    if (reason.length < 2) throw new ApiError("INVALID_COMMAND");\n    return {\n      group: "license",\n      action,\n      params: { "key-or-id": reasonMatch[1], reason },\n    };\n  };\n\n  const actionCommand =\n    reasonCommand("suspend", /^form:suspend:(LIC-[a-f0-9-]{36})$/i) ??\n    reasonCommand("reset-device", /^form:reset:(LIC-[a-f0-9-]{36})$/i) ??\n    reasonCommand("revoke", /^form:revoke:(LIC-[a-f0-9-]{36})$/i) ??\n    reasonCommand("delete", /^form:delete:(LIC-[a-f0-9-]{36})$/i);\n  if (actionCommand) return actionCommand;\n\n  throw new ApiError("INVALID_COMMAND");`;
+  const commandReplacement = `  match = customId.match(/^form:customer:(LIC-[a-f0-9-]{36})$/i);\n  if (match && LICENSE_ID.test(match[1]))\n    return {\n      group: "license",\n      action: "customer-memo",\n      params: {\n        "key-or-id": match[1],\n        memo: String(values.memo ?? "").slice(0, 500),\n      },\n    };\n\n  match = customId.match(/^form:admin:(LIC-[a-f0-9-]{36})$/i);\n  if (match && LICENSE_ID.test(match[1]))\n    return {\n      group: "license",\n      action: "note",\n      params: {\n        "key-or-id": match[1],\n        memo: String(values.memo ?? "").slice(0, 500),\n      },\n    };\n\n  const reasonCommand = (action: string, pattern: RegExp): SellerConsoleCommand | null => {\n    const reasonMatch = customId.match(pattern);\n    if (!reasonMatch || !LICENSE_ID.test(reasonMatch[1])) return null;\n    const reason = String(values.reason ?? "").trim().slice(0, 500);\n    if (reason.length < 2) throw new ApiError("INVALID_COMMAND");\n    return {\n      group: "license",\n      action,\n      params: { "key-or-id": reasonMatch[1], reason },\n    };\n  };\n\n  const actionCommand =\n    reasonCommand("suspend", /^form:suspend:(LIC-[a-f0-9-]{36})$/i) ??\n    reasonCommand("reset-device", /^form:reset:(LIC-[a-f0-9-]{36})$/i) ??\n    reasonCommand("revoke", /^form:revoke:(LIC-[a-f0-9-]{36})$/i) ??\n    reasonCommand("delete", /^form:delete:(LIC-[a-f0-9-]{36})$/i);\n  if (actionCommand) return actionCommand;\n\n  throw new ApiError("INVALID_COMMAND");`;
   text = replaceOnce(text, commandAnchor, commandReplacement, "seller modal commands");
   write(path, text);
 }
@@ -50,29 +50,14 @@ const replaceOnce = (text, before, after, label) => {
   text = replaceOnce(text, buttonAnchor, helper, "detail action helper");
 
   const oldDetailRows = `      [\n        {\n          type: 1,\n          components: [\n            button("기간 연장", \`modal:extend:\${result.license_id}\`, 3),\n            button("고객 메모", \`modal:customer:\${result.license_id}\`, 1),\n            button("변경 이력", \`nav:hist:\${result.license_id}:1\`, 2),\n            button("새로고침", \`nav:info:\${result.license_id}\`, 2),\n            button("판매자 홈", "nav:home", 2),\n          ],\n        },\n      ],`;
-  text = replaceOnce(
-    text,
-    oldDetailRows,
-    `      detailActionRows(result),`,
-    "license detail button rows",
-  );
+  text = replaceOnce(text, oldDetailRows, `      detailActionRows(result),`, "license detail button rows");
 
   const navAnchor = `  m = custom.match(/^nav:info:(LIC-[a-f0-9-]{36})$/i);\n  if (m)\n    return {\n      group: "license",\n      action: "info",\n      params: { "key-or-id": m[1] },\n    };`;
   const navReplacement = `${navAnchor}\n  m = custom.match(/^act:resume:(LIC-[a-f0-9-]{36})$/i);\n  if (m)\n    return {\n      group: "license",\n      action: "resume",\n      params: { "key-or-id": m[1] },\n    };\n  m = custom.match(/^act:replace:(LIC-[a-f0-9-]{36})$/i);\n  if (m)\n    return {\n      group: "license",\n      action: "replace-unused-key",\n      params: { "key-or-id": m[1] },\n    };`;
   text = replaceOnce(text, navAnchor, navReplacement, "state action navigation");
 
-  text = replaceOnce(
-    text,
-    `  let command: Command;\n`,
-    `  let command: Command;\n  let confirmed = false;\n`,
-    "confirmation state variable",
-  );
-  text = replaceOnce(
-    text,
-    `      command = JSON.parse(record.payload);\n`,
-    `      command = JSON.parse(record.payload);\n      confirmed = true;\n`,
-    "confirmation completion state",
-  );
+  text = replaceOnce(text, `  let command: Command;\n`, `  let command: Command;\n  let confirmed = false;\n`, "confirmation state variable");
+  text = replaceOnce(text, `      command = JSON.parse(record.payload);\n`, `      command = JSON.parse(record.payload);\n      confirmed = true;\n`, "confirmation completion state");
 
   const confirmationMarker = `    if (needsConfirmation(command.group, command.action, command.params)) {`;
   const markerIndex = text.indexOf(confirmationMarker);
