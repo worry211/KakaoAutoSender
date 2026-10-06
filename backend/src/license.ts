@@ -89,7 +89,8 @@ function stateFor(
 ) {
   const state = effective(l);
   if (state !== "ACTIVE") return state;
-  if (platform === "android" && version < c.min_version) return "UPDATE_REQUIRED";
+  if (platform === "android" && version < c.min_version)
+    return "UPDATE_REQUIRED";
   return c.kill_switch || c.maintenance ? "MAINTENANCE" : "ACTIVE";
 }
 export async function activate(

@@ -33,8 +33,7 @@ async function boundedBody(req: Request) {
 
 function parseEntitlementQuery(url: URL) {
   const entries = [...url.searchParams];
-  if (entries.length < 1 || entries.length > 2)
-    throw new ApiError("INVALID");
+  if (entries.length < 1 || entries.length > 2) throw new ApiError("INVALID");
   const seen = new Set<string>();
   for (const [key] of entries) {
     if (!["app_version", "client_platform"].includes(key) || seen.has(key))
