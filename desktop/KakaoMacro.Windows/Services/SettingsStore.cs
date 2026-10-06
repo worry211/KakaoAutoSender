@@ -13,6 +13,8 @@ internal sealed class SettingsStore
     private string? _lastSerialized;
 
     private string SettingsPath => Path.Combine(_directory, "settings.json");
+    private string BackupPath => Path.Combine(_directory, "settings.json.bak");
+    private string TempPath => Path.Combine(_directory, "settings.json.tmp");
     public string DirectoryPath => _directory;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -23,18 +25,37 @@ internal sealed class SettingsStore
 
     public AppSettings Load()
     {
-        try
+        lock (_gate)
         {
-            if (!File.Exists(SettingsPath)) return new AppSettings();
-            var raw = File.ReadAllText(SettingsPath);
-            var value = JsonSerializer.Deserialize<AppSettings>(raw, JsonOptions)
-                        ?? new AppSettings();
-            Sanitize(value);
-            _lastSerialized = JsonSerializer.Serialize(value, JsonOptions);
-            return value;
-        }
-        catch
-        {
+            Directory.CreateDirectory(_directory);
+
+            if (TryRead(SettingsPath, out var primary, out var primarySerialized))
+            {
+                _lastSerialized = primarySerialized;
+                EnsureBackupExists();
+                CleanupTemp();
+                return primary;
+            }
+
+            if (File.Exists(SettingsPath)) PreserveCorrupt(SettingsPath, "settings.corrupt");
+
+            if (TryRead(TempPath, out var pending, out var pendingSerialized))
+            {
+                TryPromote(pendingSerialized);
+                _lastSerialized = pendingSerialized;
+                return pending;
+            }
+            CleanupTemp();
+
+            if (TryRead(BackupPath, out var backup, out var backupSerialized))
+            {
+                TryPromote(backupSerialized);
+                _lastSerialized = backupSerialized;
+                return backup;
+            }
+
+            if (File.Exists(BackupPath)) PreserveCorrupt(BackupPath, "settings.backup.corrupt");
+            _lastSerialized = null;
             return new AppSettings();
         }
     }
@@ -47,14 +68,96 @@ internal sealed class SettingsStore
         {
             if (string.Equals(serialized, _lastSerialized, StringComparison.Ordinal)) return;
             Directory.CreateDirectory(_directory);
-            var temp = SettingsPath + ".tmp";
-            File.WriteAllText(temp, serialized);
-            File.Move(temp, SettingsPath, true);
-            _lastSerialized = serialized;
+            try
+            {
+                File.WriteAllText(TempPath, serialized);
+                if (!TryRead(TempPath, out _, out _))
+                    throw new InvalidDataException("Temporary settings validation failed.");
+
+                File.Move(TempPath, SettingsPath, true);
+                File.Copy(SettingsPath, BackupPath, true);
+                _lastSerialized = serialized;
+            }
+            catch
+            {
+                CleanupTemp();
+            }
         }
     }
 
     public void EnsureDirectory() => Directory.CreateDirectory(_directory);
+
+    private bool TryRead(string path, out AppSettings value, out string serialized)
+    {
+        value = new AppSettings();
+        serialized = "";
+        try
+        {
+            if (!File.Exists(path)) return false;
+            var raw = File.ReadAllText(path);
+            var parsed = JsonSerializer.Deserialize<AppSettings>(raw, JsonOptions);
+            if (parsed is null) return false;
+            Sanitize(parsed);
+            serialized = JsonSerializer.Serialize(parsed, JsonOptions);
+            value = parsed;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void EnsureBackupExists()
+    {
+        try
+        {
+            if (!File.Exists(BackupPath) && File.Exists(SettingsPath))
+                File.Copy(SettingsPath, BackupPath, false);
+        }
+        catch
+        {
+        }
+    }
+
+    private void TryPromote(string serialized)
+    {
+        try
+        {
+            File.WriteAllText(TempPath, serialized);
+            File.Move(TempPath, SettingsPath, true);
+            File.Copy(SettingsPath, BackupPath, true);
+        }
+        catch
+        {
+            CleanupTemp();
+        }
+    }
+
+    private void PreserveCorrupt(string path, string prefix)
+    {
+        try
+        {
+            if (!File.Exists(path)) return;
+            var stamp = DateTimeOffset.Now.ToString("yyyyMMdd-HHmmssfff");
+            var target = Path.Combine(_directory, $"{prefix}-{stamp}.json");
+            File.Move(path, target, true);
+        }
+        catch
+        {
+        }
+    }
+
+    private void CleanupTemp()
+    {
+        try
+        {
+            if (File.Exists(TempPath)) File.Delete(TempPath);
+        }
+        catch
+        {
+        }
+    }
 
     private static void Sanitize(AppSettings value)
     {
