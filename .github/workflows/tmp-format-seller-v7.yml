@@ -1,0 +1,42 @@
+name: Temporary seller v7 formatter
+
+on:
+  push:
+    branches:
+      - feat/seller-console-v7-sale-polish-main
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/seller-console-v7-sale-polish-main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Format v7 regression test
+        working-directory: backend
+        run: npx prettier --write test/seller-console-v7.test.ts
+      - name: Commit formatting if needed
+        shell: bash
+        run: |
+          if git diff --quiet -- backend/test/seller-console-v7.test.ts; then
+            echo 'Already formatted.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/test/seller-console-v7.test.ts
+          git commit -m 'test(discord): apply Prettier to seller v7 coverage'
+          git push origin HEAD:feat/seller-console-v7-sale-polish-main
