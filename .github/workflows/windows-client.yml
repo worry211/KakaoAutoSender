@@ -1,0 +1,46 @@
+name: Windows client
+
+on:
+  push:
+    branches: [main, feat/windows-client-v1]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/windows-client.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/windows-client.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore win-x64
+        run: dotnet restore desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -r win-x64
+      - name: Release build with warnings as errors
+        run: dotnet build desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --no-restore -warnaserror
+      - name: Publish self-contained x64
+        run: dotnet publish desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o desktop/artifacts/win-x64
+      - name: Prepare sale executable
+        shell: pwsh
+        run: |
+          $source = 'desktop/artifacts/win-x64/KakaoMacro.Windows.exe'
+          $target = 'desktop/artifacts/KakaoMacro-PC-v1.4.0.exe'
+          if (-not (Test-Path $source)) { throw "Published executable not found: $source" }
+          Copy-Item $source $target -Force
+          $version = (Get-Item $target).VersionInfo.FileVersion
+          if ($version -notlike '1.4.0*') { throw "Unexpected file version: $version" }
+          Get-FileHash $target -Algorithm SHA256 | Format-List
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KakaoMacro-PC-v1.4.0-sale
+          path: desktop/artifacts/KakaoMacro-PC-v1.4.0.exe
+          if-no-files-found: error
+          retention-days: 30
