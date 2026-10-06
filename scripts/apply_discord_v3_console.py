@@ -244,6 +244,11 @@ test = test.replace(
     '    expect(labels).toContain("＋ 새 라이선스");\n    expect(labels).toContain("고객 찾기");\n    expect(labels).toContain("판매 현황");\n    expect(message.components[1].components.map((item: any) => item.label)).toContain("7일 내 만료");\n',
     1,
 )
+test = test.replace(
+    '    expect(message.components[0].components[0].label).toBe("판매 현황");\n',
+    '    const createLabels = message.components[0].components.map((item: any) => item.label);\n    expect(createLabels).toContain("다시 발급");\n    expect(createLabels).toContain("판매 현황");\n',
+    1,
+)
 
 addition = r'''
 
