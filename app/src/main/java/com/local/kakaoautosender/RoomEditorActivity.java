@@ -8,7 +8,10 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.text.Editable;
 import android.text.InputType;
@@ -65,9 +68,13 @@ public class RoomEditorActivity extends Activity {
     private TextView messageCount;
     private TextView dirtyStatus;
     private Button saveButton;
+    private int lastFiniteDailyLimit = 8;
     private android.widget.ImageView imagePreview;
     private boolean loading;
     private boolean dirty;
+    private MultiRoomStore.Profile cachedProfile;
+    private final Handler previewHandler = new Handler(Looper.getMainLooper());
+    private final Runnable previewRunnable = this::refreshNextPreview;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -104,7 +111,7 @@ public class RoomEditorActivity extends Activity {
         scroll.setBackgroundColor(BG);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(22), dp(18), dp(44));
+        applyScrollableInsets(scroll, root, 18, 22, 18, 20);
         scroll.addView(root);
 
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
@@ -115,8 +122,9 @@ public class RoomEditorActivity extends Activity {
         header.setGravity(Gravity.TOP);
         LinearLayout titleBox = new LinearLayout(this);
         titleBox.setOrientation(LinearLayout.VERTICAL);
-        TextView roomTitle = text(roomName, 25, true, TEXT);
+        TextView roomTitle = text(roomName, roomName.length() > 28 ? 21 : 25, true, TEXT);
         roomTitle.setMaxLines(2);
+        roomTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
         roomTitle.setLetterSpacing(-0.01f);
         titleBox.addView(roomTitle);
         TextView headerSub = text("ROOM AUTOMATION SETTINGS", 9, true, Color.rgb(121, 136, 166));
@@ -238,7 +246,7 @@ public class RoomEditorActivity extends Activity {
 
         modes.setOnCheckedChangeListener((group, checkedId) -> {
             updateScheduleVisibility();
-            refreshNextPreview();
+            scheduleNextPreview();
             markDirty();
         });
 
@@ -260,7 +268,21 @@ public class RoomEditorActivity extends Activity {
         unlimitedCheck.setText("무제한");
         unlimitedCheck.setTextColor(TEXT);
         unlimitedCheck.setOnCheckedChangeListener((b, checked) -> {
-            dailyLimitInput.setEnabled(!checked);
+            if (checked) {
+                int current = parseInt(dailyLimitInput.getText().toString(), lastFiniteDailyLimit);
+                if (current > 0) lastFiniteDailyLimit = current;
+                dailyLimitInput.setText("");
+                dailyLimitInput.setHint("제한 없음");
+                dailyLimitInput.setEnabled(false);
+                dailyLimitInput.setAlpha(0.55f);
+            } else {
+                dailyLimitInput.setEnabled(true);
+                dailyLimitInput.setAlpha(1f);
+                dailyLimitInput.setHint("하루 최대 횟수");
+                if (dailyLimitInput.getText().toString().trim().isEmpty()) {
+                    dailyLimitInput.setText(String.valueOf(Math.max(1, lastFiniteDailyLimit)));
+                }
+            }
             markDirty();
         });
         LinearLayout.LayoutParams uLp = new LinearLayout.LayoutParams(
@@ -306,13 +328,24 @@ public class RoomEditorActivity extends Activity {
     private void loadProfile() {
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
         if (p == null) { finish(); return; }
+        cachedProfile = p.copy();
         messageInput.setText(p.message);
         intervalInput.setText(String.valueOf(p.intervalMinutes));
         timesInput.setText(p.dailyTimes);
         if (p.fixedTimes()) timesRadio.setChecked(true); else intervalRadio.setChecked(true);
+        lastFiniteDailyLimit = p.unlimited() ? 8 : Math.max(1, p.dailyLimit);
         unlimitedCheck.setChecked(p.unlimited());
-        dailyLimitInput.setText(p.unlimited() ? "8" : String.valueOf(p.dailyLimit));
-        dailyLimitInput.setEnabled(!p.unlimited());
+        if (p.unlimited()) {
+            dailyLimitInput.setText("");
+            dailyLimitInput.setHint("제한 없음");
+            dailyLimitInput.setEnabled(false);
+            dailyLimitInput.setAlpha(0.55f);
+        } else {
+            dailyLimitInput.setText(String.valueOf(p.dailyLimit));
+            dailyLimitInput.setHint("하루 최대 횟수");
+            dailyLimitInput.setEnabled(true);
+            dailyLimitInput.setAlpha(1f);
+        }
         enabledCheck.setChecked(p.enabled);
         updateScheduleVisibility();
         refreshConnection();
@@ -471,6 +504,7 @@ public class RoomEditorActivity extends Activity {
         }
 
         MultiRoomStore.upsert(this, p);
+        cachedProfile = p.copy();
         if (active) SendScheduler.scheduleNext(this);
         Prefs.setStatus(this, "방 설정 저장: " + p.title() + " · " + MultiRoomStore.scheduleSummary(p));
         refreshNextPreview();
@@ -588,7 +622,7 @@ public class RoomEditorActivity extends Activity {
 
     private void refreshNextPreview() {
         if (nextPreview == null) return;
-        MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
+        MultiRoomStore.Profile p = cachedProfile == null ? MultiRoomStore.get(this, routeAlias) : cachedProfile.copy();
         if (p == null) return;
         MultiRoomStore.Profile temp = p.copy();
         if (timesRadio != null && timesRadio.isChecked()) {
@@ -609,21 +643,48 @@ public class RoomEditorActivity extends Activity {
     }
 
     private void installDirtyTracking() {
-        TextWatcher watcher = new TextWatcher() {
+        TextWatcher messageWatcher = new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
                 updateMessageCount();
-                refreshNextPreview();
                 markDirty();
             }
             @Override public void afterTextChanged(Editable s) {}
         };
-        messageInput.addTextChangedListener(watcher);
-        intervalInput.addTextChangedListener(watcher);
-        timesInput.addTextChangedListener(watcher);
-        dailyLimitInput.addTextChangedListener(watcher);
+        TextWatcher scheduleWatcher = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                scheduleNextPreview();
+                markDirty();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        };
+        messageInput.addTextChangedListener(messageWatcher);
+        intervalInput.addTextChangedListener(scheduleWatcher);
+        timesInput.addTextChangedListener(scheduleWatcher);
+        dailyLimitInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                if (unlimitedCheck != null && !unlimitedCheck.isChecked()) {
+                    int parsed = parseInt(s == null ? "" : s.toString(), lastFiniteDailyLimit);
+                    if (parsed > 0) lastFiniteDailyLimit = parsed;
+                }
+                markDirty();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
         enabledCheck.setOnCheckedChangeListener((b, checked) -> markDirty());
         updateMessageCount();
+    }
+
+    private void scheduleNextPreview() {
+        previewHandler.removeCallbacks(previewRunnable);
+        previewHandler.postDelayed(previewRunnable, 140L);
+    }
+
+    @Override protected void onDestroy() {
+        previewHandler.removeCallbacks(previewRunnable);
+        super.onDestroy();
     }
 
     private void updateMessageCount() {
@@ -645,8 +706,10 @@ public class RoomEditorActivity extends Activity {
             dirtyStatus.setTextColor(value ? AMBER : Color.rgb(119, 132, 156));
         }
         if (saveButton != null) {
-            saveButton.setText(value ? "변경 사항 저장" : "설정 저장됨");
-            saveButton.setAlpha(value ? 1f : 0.72f);
+            saveButton.setText("변경 사항 저장");
+            saveButton.setVisibility(value ? View.VISIBLE : View.GONE);
+            saveButton.setEnabled(value);
+            saveButton.setAlpha(value ? 1f : 0f);
         }
     }
 
@@ -787,6 +850,29 @@ public class RoomEditorActivity extends Activity {
 
     private LinearLayout.LayoutParams weight() {
         return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+    }
+
+    private void applyScrollableInsets(ScrollView scroll, View content, int leftDp, int topDp, int rightDp, int bottomDp) {
+        final int left = dp(leftDp);
+        final int top = dp(topDp);
+        final int right = dp(rightDp);
+        final int bottom = dp(bottomDp);
+
+        // Keep app spacing on the scrolling content, but keep system-bar insets on
+        // the ScrollView viewport itself. If the top inset lives on the content,
+        // it scrolls away and cards can slide under the status bar.
+        content.setPadding(left, top, right, bottom);
+        scroll.setClipToPadding(true);
+        scroll.setOnApplyWindowInsetsListener((v, insets) -> {
+            content.setPadding(left, top, right, bottom);
+            v.setPadding(
+                    insets.getSystemWindowInsetLeft(),
+                    insets.getSystemWindowInsetTop(),
+                    insets.getSystemWindowInsetRight(),
+                    insets.getSystemWindowInsetBottom());
+            return insets;
+        });
+        scroll.requestApplyInsets();
     }
 
     private int dp(int v) {

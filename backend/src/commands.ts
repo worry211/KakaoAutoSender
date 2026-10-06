@@ -84,7 +84,14 @@ export const commands = [
       ]),
       sub("replace-unused-key", "분실한 미사용 키 교체", [ref()]),
       sub("delete", "삭제 표시 / 사용 차단 (확인 필요)", [ref(), reason()]),
-      sub("note", "판매자 관리 메모 수정", [ref(), string("memo", "메모")]),
+      sub("note", "판매자 관리 메모 수정", [
+        ref(),
+        string("memo", "관리 메모"),
+      ]),
+      sub("customer-memo", "구매자 / 주문 식별 메모 수정", [
+        ref(),
+        string("memo", "고객 메모"),
+      ]),
       sub("stats", "판매 / 라이선스 현황 요약"),
     ],
   },
@@ -106,6 +113,7 @@ export const commands = [
       sub("latest-version", "최신 versionCode / 다운로드 URL", [
         integer("version", "Android versionCode", true, 20, 99999999),
         string("url", "HTTPS 다운로드 URL"),
+        string("notes", "릴리즈 노트", false),
       ]),
       sub("kill-switch", "전체 자동전송 긴급 중단 (확인 필요)", [
         bool("enabled"),

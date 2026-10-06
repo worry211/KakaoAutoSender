@@ -836,3 +836,78 @@ describe("Discord administration", () => {
     ).toBe(0);
   });
 });
+
+describe("seller operations v3", () => {
+  it("updates customer memo independently from private operator notes", async () => {
+    const issued = await issue();
+    await mutate("note", issued.license_id, { memo: "내부 메모" });
+    const updated = await mutate("customer-memo", issued.license_id, {
+      memo: "주문 #A-1024",
+    });
+    expect(updated.customer_memo).toBe("주문 #A-1024");
+    expect(updated.admin_memo).toBe("내부 메모");
+  });
+
+  it("keeps version metadata coherent without blocking emergency minimums", async () => {
+    await env.DB.prepare(
+      "UPDATE config SET min_version=20,latest_version=34 WHERE id=1",
+    ).run();
+    const emergency = await admin(
+      env,
+      seller,
+      "system",
+      "min-version",
+      { version: 35 },
+      requestId(),
+    );
+    expect(emergency.min_version).toBe(35);
+    await expect(
+      admin(
+        env,
+        seller,
+        "system",
+        "latest-version",
+        { version: 34, url: "https://example.com/app.apk" },
+        requestId(),
+      ),
+    ).rejects.toMatchObject({ state: "LATEST_VERSION_BELOW_MIN" });
+    const updated = await admin(
+      env,
+      seller,
+      "system",
+      "latest-version",
+      {
+        version: 35,
+        url: "https://example.com/app.apk",
+        notes: "Android v2.3.3 판매판",
+      },
+      requestId(),
+    );
+    expect(updated.release_notes).toBe("Android v2.3.3 판매판");
+  });
+
+  it("preserves exact irreversible license states for support diagnostics", async () => {
+    const a = await active();
+    await mutate("revoke", a.l.license_id, { reason: "환불" });
+    expect((await heartbeat(a)).state).toBe("REVOKED");
+  });
+
+  it("includes suspended customers in upcoming-expiry support", async () => {
+    const a = await active("30d");
+    await mutate("suspend", a.l.license_id, { reason: "지원 확인" });
+    await env.DB.prepare("UPDATE licenses SET expires_at=? WHERE license_id=?")
+      .bind(now() + 60, a.l.license_id)
+      .run();
+    const result = await admin(
+      env,
+      seller,
+      "license",
+      "expiring",
+      { days: 31 },
+      requestId(),
+    );
+    expect(
+      result.licenses.some((l: any) => l.license_id === a.l.license_id),
+    ).toBe(true);
+  });
+});

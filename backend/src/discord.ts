@@ -31,10 +31,16 @@ export async function verifyDiscord(req: Request, raw: string, env: Env) {
   }
 }
 
-export const needsConfirmation = (group: string, action: string) =>
+export const needsConfirmation = (
+  group: string,
+  action: string,
+  params: Row = {},
+) =>
   group === "license"
     ? ["revoke", "delete", "reset-device"].includes(action)
-    : action === "kill-switch";
+    : action === "kill-switch" ||
+      action === "min-version" ||
+      (action === "maintenance" && params.enabled === true);
 
 const response = (content: string, components: any[] = []) => ({
   content,
@@ -77,6 +83,7 @@ const actionLabel = (action: any) => {
     RESET_DEVICE: "기기 초기화",
     REPLACE_UNUSED_KEY: "미사용 키 교체",
     NOTE: "관리 메모 변경",
+    CUSTOMER_MEMO: "고객 메모 변경",
     ACTIVATE: "활성화",
     MAINTENANCE_CHANGE: "점검 모드 변경",
     KILL_SWITCH_CHANGE: "긴급 중단 변경",
@@ -99,6 +106,10 @@ export function friendlyError(state: string) {
     INVALID_PAGE: "페이지 번호가 올바르지 않습니다.",
     INVALID_STATUS: "지원하지 않는 라이선스 상태입니다.",
     INVALID_VERSION: "versionCode 값이 올바르지 않습니다.",
+    MIN_VERSION_ABOVE_LATEST:
+      "최소 지원 버전이 최신 버전보다 높습니다. /system latest-version을 먼저 올리세요.",
+    LATEST_VERSION_BELOW_MIN:
+      "최신 버전은 현재 최소 지원 버전보다 낮게 설정할 수 없습니다.",
     INVALID_URL: "다운로드 주소는 유효한 HTTPS URL이어야 합니다.",
     INVALID_POLICY:
       "확인 주기는 30~300초, 오프라인 유예는 0~600초로 설정하세요.",
@@ -279,6 +290,8 @@ export function renderDiscord(result: any) {
       `• 오늘 활성화 **${Number(result.activated_today) || 0}**`,
       `• 7일 내 만료 **${Number(result.expiring_7d) || 0}**`,
       `• 최근 24시간 확인 **${Number(result.recently_seen) || 0}**`,
+      `• 30일+ 미사용 키 **${Number(result.unused_30d) || 0}**`,
+      `• 7일+ 미접속 활성 고객 **${Number(result.inactive_7d) || 0}**`,
     ].join("\n");
   }
 
