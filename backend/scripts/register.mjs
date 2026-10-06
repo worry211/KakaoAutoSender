@@ -96,4 +96,6 @@ console.log(
 );
 console.log(`/license: ${license.join(", ")}`);
 console.log(`/system: ${system.join(", ")}`);
-console.log(`/system latest-version options: ${latestVersionOptions.join(", ")}`);
+console.log(
+  `/system latest-version options: ${latestVersionOptions.join(", ")}`,
+);
