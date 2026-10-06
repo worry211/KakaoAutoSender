@@ -32,9 +32,18 @@ jobs:
       - name: Format touched seller-console files
         working-directory: backend
         run: npx prettier --write src/discordV2.ts src/discordOperatorUx.ts test/discord-v3-quality.test.ts
-      - name: Verify backend commercial gate
+      - name: Typecheck
         working-directory: backend
-        run: npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
+        run: npm run typecheck
+      - name: Prettier gate
+        working-directory: backend
+        run: npm run lint
+      - name: Backend tests
+        working-directory: backend
+        run: npm test
+      - name: Dependency audit
+        working-directory: backend
+        run: npm audit --audit-level=moderate
       - name: Confirm intended product diff
         run: |
           git diff --check
