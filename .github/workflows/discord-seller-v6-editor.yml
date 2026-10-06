@@ -40,7 +40,7 @@ jobs:
         working-directory: backend
         run: npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
       - name: Remove one-shot editor files
-        run: git rm scripts/apply-discord-seller-v6.mjs scripts/fix-discord-v6-script.mjs scripts/patch-discord-v6-tests.mjs .github/workflows/discord-seller-v6-editor.yml
+        run: git rm -f scripts/apply-discord-seller-v6.mjs scripts/fix-discord-v6-script.mjs scripts/patch-discord-v6-tests.mjs .github/workflows/discord-seller-v6-editor.yml
       - name: Commit verified product changes only
         shell: bash
         run: |
