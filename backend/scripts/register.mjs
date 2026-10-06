@@ -60,12 +60,26 @@ const registered = await put(
 const command = (name) => registered.find((c) => c.name === name);
 const subcommands = (name) =>
   (command(name)?.options ?? []).filter((o) => o.type === 1).map((o) => o.name);
+const subcommand = (group, name) =>
+  (command(group)?.options ?? []).find((o) => o.type === 1 && o.name === name);
+const optionNames = (group, name) =>
+  (subcommand(group, name)?.options ?? []).map((o) => o.name);
+
 const license = subcommands("license");
 const system = subcommands("system");
+const latestVersionOptions = optionNames("system", "latest-version");
 
-if (!license.includes("help") || !system.includes("help")) {
+const missing = [];
+if (!license.includes("help")) missing.push("/license help");
+if (!license.includes("customer-memo")) missing.push("/license customer-memo");
+if (!system.includes("help")) missing.push("/system help");
+if (!system.includes("latest-version")) missing.push("/system latest-version");
+if (!latestVersionOptions.includes("notes"))
+  missing.push("/system latest-version notes");
+
+if (missing.length) {
   throw new Error(
-    `Discord accepted the request but verification failed. license=[${license.join(", ")}], system=[${system.join(", ")}]`,
+    `Discord accepted the request but schema verification failed. Missing: ${missing.join(", ")}. license=[${license.join(", ")}], system=[${system.join(", ")}]`,
   );
 }
 
@@ -82,3 +96,4 @@ console.log(
 );
 console.log(`/license: ${license.join(", ")}`);
 console.log(`/system: ${system.join(", ")}`);
+console.log(`/system latest-version options: ${latestVersionOptions.join(", ")}`);
