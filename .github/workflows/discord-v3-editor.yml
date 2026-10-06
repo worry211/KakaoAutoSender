@@ -1,0 +1,64 @@
+name: Discord seller console v3 editor
+
+on:
+  push:
+    branches:
+      - feat/discord-seller-console-v3-commercial
+    paths:
+      - .github/workflows/discord-v3-editor.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/discord-seller-console-v3-commercial
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Apply seller console v3 patch
+        run: python3 scripts/apply_discord_v3_console.py
+
+      - name: Secret scan
+        run: node scripts/secret-scan.mjs
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: backend
+        run: npm run typecheck
+
+      - name: Format and lint gate
+        working-directory: backend
+        run: npm run lint
+
+      - name: Tests
+        working-directory: backend
+        run: npm test -- --run
+
+      - name: Production dependency audit
+        working-directory: backend
+        run: npm audit --omit=dev --audit-level=moderate
+
+      - name: Diff sanity
+        run: git diff --check
+
+      - name: Commit verified product changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/discordV2.ts backend/test/discord-v2.test.ts
+          git diff --cached --quiet && exit 0
+          git commit -m "feat(discord): turn seller console into button-first operations UI"
+          git push origin HEAD:feat/discord-seller-console-v3-commercial
