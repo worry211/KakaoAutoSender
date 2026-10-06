@@ -1,5 +1,6 @@
 import fs from "node:fs";
 
+// One-shot repair shim used only by the temporary v6 editor workflow.
 const path = "scripts/apply-discord-seller-v6.mjs";
 let source = fs.readFileSync(path, "utf8");
 
