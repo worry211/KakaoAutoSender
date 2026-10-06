@@ -24,10 +24,11 @@ jobs:
           node-version: '24'
       - name: Apply seller console v8 UX patch
         run: node scripts/patch_discord_seller_v8.mjs
-      - name: Verify formatting and tests
+      - name: Format and verify backend
         working-directory: backend
         run: |
           npm ci
+          npx prettier --write src/discordV2.ts
           npm run typecheck
           npm run lint
           npm test
