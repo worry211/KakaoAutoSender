@@ -2,6 +2,7 @@ import { ApiError, Env, Row, duration, id, json, now } from "./core";
 import { admin, authorize } from "./admin";
 import { parseCommand } from "./commands";
 import { friendlyError, needsConfirmation, verifyDiscord } from "./discord";
+import { polishSellerPanel } from "./discordSellerUi";
 
 type Command = { group: string; action: string; params: Row };
 
@@ -228,7 +229,7 @@ function listEmbed(result: any, command?: Command) {
   };
 }
 
-export function renderDiscordPanel(result: any, command?: Command) {
+function renderDiscordPanelCore(result: any, command?: Command) {
   if (result?.kind === "license_help")
     return response(
       "",
@@ -600,6 +601,10 @@ export function renderDiscordPanel(result: any, command?: Command) {
   ]);
 }
 
+export function renderDiscordPanel(result: any, command?: Command) {
+  return polishSellerPanel(renderDiscordPanelCore(result, command), result, command);
+}
+
 /** Text fallback kept for tests/diagnostics; live Discord uses embeds above. */
 export function renderDiscord(result: any, command?: Command) {
   const message = renderDiscordPanel(result, command);
@@ -691,6 +696,8 @@ function navCommand(custom: string): Command | null {
       action: "info",
       params: { "key-or-id": m[1] },
     };
+  if (custom === "nav:home")
+    return { group: "license", action: "help", params: {} };
   if (custom === "nav:stats")
     return { group: "license", action: "stats", params: {} };
   if (custom === "nav:license:help")
