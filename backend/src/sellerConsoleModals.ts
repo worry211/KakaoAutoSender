@@ -43,11 +43,19 @@ const modal = (customId: string, title: string, components: unknown[]) => ({
 });
 
 export function sellerModalFor(customId: string) {
-  if (customId === "modal:create")
-    return modal("form:create", "새 라이선스 발급", [
+  const createPreset = customId.match(/^modal:create(?::(30d|permanent))?$/);
+  if (createPreset) {
+    const preset = createPreset[1] ?? "30d";
+    const title =
+      preset === "permanent"
+        ? "영구 라이선스 발급"
+        : customId === "modal:create:30d"
+          ? "30일 라이선스 발급"
+          : "새 라이선스 발급";
+    return modal("form:create", title, [
       textInput("duration", "사용 기간", {
-        placeholder: "30d · 7d/30d/90d/180d/365d/permanent",
-        value: "30d",
+        placeholder: "7d / 30d / 90d / 180d / 365d / permanent",
+        value: preset,
         maxLength: 9,
       }),
       textInput("quantity", "수량", {
@@ -61,6 +69,7 @@ export function sellerModalFor(customId: string) {
         maxLength: 500,
       }),
     ]);
+  }
 
   if (customId === "modal:search")
     return modal("form:search", "고객 · 라이선스 찾기", [

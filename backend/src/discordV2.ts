@@ -34,6 +34,17 @@ const oneLine = (value: any, max = 180) => {
   return text.length > max ? text.slice(0, max - 1) + "…" : text;
 };
 
+const compactLicenseId = (value: any) => {
+  const text = String(value ?? "");
+  if (!/^LIC-[a-f0-9-]{36}$/i.test(text)) return oneLine(text, 28);
+  return `LIC-…${text.slice(-8)}`;
+};
+
+const customerLabel = (license: any, fallback = "고객 메모 없음") => {
+  const memo = oneLine(license?.customer_memo, 72);
+  return memo === "—" ? fallback : memo;
+};
+
 const discordDate = (value: any) => {
   const n = Number(value);
   return value == null || !Number.isFinite(n) ? "—" : `<t:${n}:f> · <t:${n}:R>`;
@@ -97,20 +108,21 @@ const mutationTitle = (command?: Command) => {
 const recommendedNextAction = (state: any) => {
   const recommendations: Record<string, string> = {
     ACTIVE:
-      "기간이 부족하면 **기간 연장**, 기기 변경 문의라면 **기기 초기화**, 일시적으로 막아야 하면 `/license suspend`를 사용하세요.",
+      "필요한 작업을 아래 버튼에서 바로 선택하세요. 기간은 **기간 연장**, PC 교체는 **기기 초기화**, 잠시 막을 때는 **일시 정지**를 사용합니다.",
     UNUSED:
-      "구매자에게 KM 키를 전달하세요. 키를 분실했다면 `/license replace-unused-key`, 고객 식별은 **고객 메모**로 보강하세요.",
-    EXPIRED: "계속 사용할 고객이면 **기간 연장** 후 상태를 다시 확인하세요.",
+      "구매자에게 KM 키를 전달하세요. 키를 잃어버렸다면 **미사용 키 교체**, 주문 식별이 부족하면 **고객 메모**를 사용합니다.",
+    EXPIRED:
+      "계속 사용할 고객이면 **기간 연장**을 누른 뒤 갱신된 만료일을 확인하세요.",
     SUSPENDED:
-      "정지 사유가 해결됐다면 `/license resume`, 기간이 부족하면 **기간 연장**을 먼저 확인하세요.",
+      "정지 사유가 해결됐다면 **정지 해제**를 사용하세요. 필요하면 변경 이력에서 기존 사유도 확인할 수 있습니다.",
     REVOKED:
-      "취소된 라이선스입니다. 새 판매가 필요하면 새 라이선스를 발급하세요.",
+      "취소된 라이선스입니다. 완전 차단이 필요하면 **삭제 / 차단**, 새 판매라면 홈에서 새 라이선스를 발급하세요.",
     DELETED:
       "삭제 / 차단된 라이선스입니다. 기존 키를 재사용하지 말고 새 판매는 새 라이선스로 처리하세요.",
   };
   return (
     recommendations[String(state)] ??
-    "현재 상태와 변경 이력을 확인한 뒤 작업하세요."
+    "현재 상태를 확인하고 아래에 표시된 가능한 작업만 사용하세요."
   );
 };
 
@@ -169,15 +181,15 @@ const stamp = () => new Date().toISOString();
 
 const recoveryHint = (state: string) => {
   const hints: Record<string, string> = {
-    NOT_FOUND: "`/license search`로 고객 메모나 LIC ID 일부를 검색해 보세요.",
+    NOT_FOUND:
+      "아래 **고객 찾기**에서 고객 메모나 LIC ID 일부를 검색해 보세요.",
     ILLEGAL_STATE:
-      "`/license info`로 현재 상태를 먼저 확인한 뒤 가능한 작업을 선택하세요.",
+      "상세 화면을 **새로고침**한 뒤 현재 상태에 표시되는 작업만 선택하세요.",
     INVALID_COMMAND:
       "`/license help` 또는 `/system help`에서 입력 형식을 확인하세요.",
     INVALID_DURATION:
       "7d / 30d / 90d / 180d / 365d / permanent 중 하나를 사용하세요.",
-    CONFLICT:
-      "`새로고침` 또는 `/license info`로 최신 상태를 확인한 뒤 다시 시도하세요.",
+    CONFLICT: "**새로고침**으로 최신 상태를 불러온 뒤 다시 시도하세요.",
     CONFIRMATION_EXPIRED:
       "원래 명령을 다시 실행하면 새 2분 확인창이 생성됩니다.",
     RATE_LIMITED: "잠시 기다린 뒤 같은 작업을 다시 시도하세요.",
@@ -202,6 +214,32 @@ const confirmationImpact = (group: string, action: string) => {
   if (action === "reset-device")
     return "기존 기기 세션을 끊고 새 기기 등록을 준비합니다.";
   return "대상 상태가 즉시 변경됩니다.";
+};
+
+const requestedChange = (group: string, action: string, params: Row) => {
+  if (group === "system") {
+    if (action === "maintenance")
+      return `점검 모드 → ${params.enabled ? "켜기" : "끄기"}`;
+    if (action === "kill-switch")
+      return `전체 긴급 중단 → ${params.enabled ? "켜기" : "끄기"}`;
+    if (action === "min-version")
+      return `Android 최소 versionCode → ${params.version}`;
+    if (action === "latest-version")
+      return `Android 최신 versionCode → ${params.version}`;
+    if (action === "policy")
+      return `서버 확인 ${params.heartbeat}초 · 오프라인 유예 ${params.grace}초`;
+  }
+  if (action === "extend")
+    return `기간 연장 → ${String(params.duration ?? "")}`;
+  if (action === "suspend") return "사용 일시 정지";
+  if (action === "resume") return "정지 해제";
+  if (action === "reset-device")
+    return "기존 기기 연결 해제 · 새 기기 등록 준비";
+  if (action === "replace-unused-key")
+    return "기존 미사용 키 폐기 · 새 키 발급";
+  if (action === "revoke") return "라이선스 사용 권한 취소";
+  if (action === "delete") return "라이선스 삭제 상태 · 사용 차단";
+  return actionLabel(action.toUpperCase().replaceAll("-", "_"));
 };
 
 const button = (
@@ -308,11 +346,11 @@ function listEmbed(result: any, command?: Command) {
   const fields = licenses.map((license: Row) => {
     const meta = stateMeta(license.state);
     return {
-      name: `${meta.label} · ${license.license_id}`,
+      name: `${meta.label} · ${customerLabel(license)}`,
       value: [
+        `**관리 ID**  ${compactLicenseId(license.license_id)}`,
         `**기간 / 만료**  ${licenseTerm(license)}`,
-        `**고객**  ${oneLine(license.customer_memo, 100)}`,
-        `**기기 등록**  ${license.device_bound ? "등록됨" : "미등록"}`,
+        `**기기**  ${license.device_bound ? "등록됨" : "미등록"}`,
       ].join("\n"),
       inline: false,
     };
@@ -345,34 +383,28 @@ export function renderDiscordPanel(result: any, command?: Command) {
         {
           title: "🧭 KakaoMacro 판매자 콘솔",
           description: [
-            "판매·고객지원에 자주 쓰는 작업을 버튼 중심으로 모았습니다.",
-            "키 원문은 발급/교체 순간에만 표시되고, 이후 운영은 **LIC ID** 기준으로 처리합니다.",
+            "판매와 고객지원을 **버튼만으로 빠르게 처리**할 수 있는 운영 홈입니다.",
+            "가장 많이 쓰는 30일·영구 판매는 바로 시작하고, 고객지원은 고객 메모로 먼저 찾습니다.",
           ].join("\n"),
           color: COLORS.brand,
           fields: [
             {
-              name: "빠른 판매",
+              name: "판매",
               value:
-                "**새 라이선스 발급**에서 기간·수량·고객 메모를 입력하면 바로 고객 전달용 키가 만들어집니다.",
+                "**30일 발급** 또는 **영구 발급**으로 바로 시작하세요. 다른 기간은 **기타 기간 발급**에서 선택합니다.",
               inline: true,
             },
             {
               name: "고객지원",
               value:
-                "**고객 찾기**로 고객 메모나 LIC ID 일부를 검색한 뒤 상세 화면에서 기간 연장·메모 수정을 처리할 수 있습니다.",
+                "**고객 찾기** → 상세 화면 → 기간 연장·기기 초기화·메모 변경 순으로 처리합니다.",
               inline: true,
             },
             {
-              name: "오늘 확인할 것",
+              name: "운영 인박스",
               value:
-                "만료 임박 / 오래된 미사용 키 / 장기 미접속 고객은 **판매 현황**에서 바로 확인합니다.",
+                "만료 임박·오래된 미사용 키·장기 미접속·정지 고객은 **오늘 처리할 일**에서 우선순위로 확인합니다.",
               inline: true,
-            },
-            {
-              name: "고급 명령",
-              value:
-                "정지·기기 초기화·취소·삭제 같은 위험 작업은 기존 `/license ...` 명령과 최종 확인창을 유지합니다.",
-              inline: false,
             },
           ],
           footer: footer("판매자 전용 · 버튼 우선 · 위험 작업은 이중 확인"),
@@ -383,19 +415,20 @@ export function renderDiscordPanel(result: any, command?: Command) {
         {
           type: 1,
           components: [
-            button("＋ 새 라이선스", "modal:create", 3),
+            button("＋ 30일 발급", "modal:create:30d", 3),
+            button("＋ 영구 발급", "modal:create:permanent", 3),
             button("고객 찾기", "modal:search", 1),
-            button("판매 현황", "nav:stats", 2),
-            button("서비스 상태", "nav:system:status", 2),
             button("오늘 처리할 일", "nav:attention", 1),
+            button("판매 현황", "nav:stats", 2),
           ],
         },
         {
           type: 1,
           components: [
+            button("기타 기간 발급", "modal:create", 2),
             button("7일 내 만료", "nav:exp:7:1", 2),
             button("미사용 키", "nav:list:UNUSED:1", 2),
-            button("사용 중", "nav:list:ACTIVE:1", 2),
+            button("서비스 상태", "nav:system:status", 2),
           ],
         },
       ],
@@ -462,7 +495,7 @@ export function renderDiscordPanel(result: any, command?: Command) {
               inline: true,
             },
             {
-              name: "📦 앱 버전",
+              name: "📦 Android versionCode",
               value: `최소 **${result.min_version}**\n최신 **${result.latest_version}**`,
               inline: true,
             },
@@ -507,12 +540,12 @@ export function renderDiscordPanel(result: any, command?: Command) {
 
   if (Array.isArray(result)) {
     const fields = result.map((license: Row, index: number) => ({
-      name: `#${index + 1} · ${licenseTerm(license)}`,
+      name: `#${index + 1} · ${customerLabel(license)}`,
       value: [
+        `**사용 기간**  ${licenseTerm(license)}`,
         "**구매자에게 전달할 KM 키**",
         `\`${license.key}\``,
-        `**관리 ID**  ${license.license_id}`,
-        `**고객 메모**  ${oneLine(license.customer_memo, 100)}`,
+        `**판매 기록용 LIC ID**  ${license.license_id}`,
       ].join("\n"),
       inline: false,
     }));
@@ -536,9 +569,9 @@ export function renderDiscordPanel(result: any, command?: Command) {
         {
           type: 1,
           components: [
-            button("다시 발급", "modal:create", 3),
-            button("판매 현황", "nav:stats", 1),
-            button("미사용 키", "nav:list:UNUSED:1", 2),
+            button("＋ 30일 재발급", "modal:create:30d", 3),
+            button("고객 찾기", "modal:search", 1),
+            button("판매 현황", "nav:stats", 2),
             button("판매자 홈", "nav:home", 2),
           ],
         },
@@ -579,9 +612,9 @@ export function renderDiscordPanel(result: any, command?: Command) {
     const fields: any[] = licenses.map((license: Row, index: number) => {
       const attention = attentionMeta(license.attention_kind);
       return {
-        name: `#${index + 1} · ${attention.label} · ${license.license_id}`,
+        name: `#${index + 1} · ${attention.label} · ${customerLabel(license)}`,
         value: [
-          `**고객**  ${oneLine(license.customer_memo, 100)}`,
+          `**관리 ID**  ${compactLicenseId(license.license_id)}`,
           `**상태 / 기간**  ${stateMeta(license.state).label} · ${licenseTerm(license)}`,
           `**다음 행동**  ${attention.action}`,
         ].join("\n"),
@@ -704,11 +737,11 @@ export function renderDiscordPanel(result: any, command?: Command) {
       [
         {
           title: completed
-            ? `✅ ${completed}`
-            : `${meta.label} · 라이선스 상세`,
+            ? `✅ ${completed} · ${customerLabel(result)}`
+            : `${meta.label} · ${customerLabel(result)}`,
           description: completed
-            ? `${meta.label} · **${result.license_id}**\n변경된 상태를 아래에서 바로 확인하세요.`
-            : `**${result.license_id}**`,
+            ? `관리 ID **${result.license_id}**\n변경된 상태를 아래에서 바로 확인하세요.`
+            : `관리 ID **${result.license_id}**`,
           color: completed ? COLORS.green : meta.color,
           fields,
           footer: footer(
@@ -1036,6 +1069,11 @@ export async function executeDiscordV2(
               )} · ${mode}**`,
               inline: false,
             },
+            {
+              name: "변경 내용",
+              value: `**${requestedChange(command.group, command.action, command.params)}**`,
+              inline: false,
+            },
             { name: "대상", value: `**${target}**`, inline: false },
             ...(command.group === "license"
               ? [
@@ -1056,11 +1094,15 @@ export async function executeDiscordV2(
               value: confirmationImpact(command.group, command.action),
               inline: false,
             },
-            {
-              name: "사유",
-              value: oneLine(command.params.reason, 300),
-              inline: false,
-            },
+            ...(String(command.params.reason ?? "").trim()
+              ? [
+                  {
+                    name: "사유",
+                    value: oneLine(command.params.reason, 300),
+                    inline: false,
+                  },
+                ]
+              : []),
           ],
           footer: footer("2분 후 확인 요청 만료"),
           timestamp: stamp(),
