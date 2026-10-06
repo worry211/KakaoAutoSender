@@ -72,6 +72,7 @@ const latestVersionOptions = optionNames("system", "latest-version");
 const missing = [];
 if (!license.includes("help")) missing.push("/license help");
 if (!license.includes("customer-memo")) missing.push("/license customer-memo");
+if (!license.includes("attention")) missing.push("/license attention");
 if (!system.includes("help")) missing.push("/system help");
 if (!system.includes("latest-version")) missing.push("/system latest-version");
 if (!latestVersionOptions.includes("notes"))

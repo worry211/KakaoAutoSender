@@ -93,6 +93,7 @@ export const commands = [
         string("memo", "고객 메모"),
       ]),
       sub("stats", "판매 / 라이선스 현황 요약"),
+      sub("attention", "오늘 처리할 고객 / 라이선스"),
     ],
   },
   {

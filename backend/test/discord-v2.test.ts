@@ -172,3 +172,58 @@ describe("Discord seller console v3 interaction UX", () => {
     expect(labels).toContain("판매자 홈");
   });
 });
+
+describe("Discord seller console v4 operations inbox", () => {
+  const activeLicense = {
+    license_id: "LIC-26faf17a-3175-4322-868e-fafa49ba8838",
+    state: "ACTIVE",
+    created_at: 1_791_000_000,
+    activated_at: 1_791_000_100,
+    expires_at: 1_793_592_000,
+    duration_seconds: 30 * 86400,
+    last_seen_at: 1_791_000_200,
+    device_bound: true,
+    device_reset_count: 0,
+    customer_memo: "테스트 고객",
+    admin_memo: "",
+  };
+
+  it("renders an action-first seller attention inbox", () => {
+    const message = renderDiscordPanel(
+      {
+        kind: "attention",
+        total_attention: 3,
+        expiring_7d: 1,
+        unused_30d: 1,
+        inactive_7d: 1,
+        suspended: 0,
+        licenses: [{ ...activeLicense, attention_kind: "EXPIRING" }],
+      },
+      { group: "license", action: "attention", params: {} } as any,
+    );
+    expect(message.embeds[0].title).toContain("오늘 처리할 일");
+    expect(message.embeds[0].description).toContain(
+      "확인 대상 라이선스 **3개**",
+    );
+    expect(message.embeds[0].fields[0].value).toContain("다음 행동");
+    expect(
+      message.components
+        .flatMap((row: any) => row.components)
+        .map((b: any) => b.label),
+    ).toContain("↻ 새로고침");
+  });
+
+  it("labels mutation results as completed and recommends the next action", () => {
+    const message = renderDiscordPanel(activeLicense, {
+      group: "license",
+      action: "extend",
+      params: { duration: "30d" },
+    } as any);
+    expect(message.embeds[0].title).toContain("기간 연장 완료");
+    expect(
+      message.embeds[0].fields.some((field: any) =>
+        field.name.includes("추천 다음 작업"),
+      ),
+    ).toBe(true);
+  });
+});
