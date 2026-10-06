@@ -1,0 +1,56 @@
+name: tmp-discord-v6-final-polish
+
+on:
+  push:
+    branches:
+      - feat/discord-v6-final-commercial-polish
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    if: ${{ !contains(github.event.head_commit.message, '[skip patch]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/discord-v6-final-commercial-polish
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Apply final polish
+        run: python scripts/patch_discord_v6_final_polish.py
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Secret scan
+        working-directory: backend
+        run: |
+          if grep -RInE '(DISCORD_BOT_TOKEN|SESSION_PEPPER|LICENSE_PEPPER|PRIVATE KEY|BEGIN PRIVATE)' src test scripts --exclude='*.test.ts'; then
+            echo 'Potential secret-like material found' >&2
+            exit 1
+          fi
+      - name: Typecheck
+        working-directory: backend
+        run: npm run typecheck
+      - name: Formatting gate
+        working-directory: backend
+        run: npx prettier --check src test scripts
+      - name: Full backend tests
+        working-directory: backend
+        run: npm test
+      - name: Dependency audit
+        working-directory: backend
+        run: npm audit --audit-level=moderate
+      - name: Remove one-shot files and commit product changes
+        run: |
+          rm -f scripts/patch_discord_v6_final_polish.py .github/workflows/tmp-discord-v6-final-polish.yml
+          git config user.name 'worry211'
+          git config user.email 'bin0000021@gmail.com'
+          git add -A
+          git commit -m 'feat(discord): finish seller console v6 commercial polish [skip patch]'
+          git push origin HEAD:feat/discord-v6-final-commercial-polish
