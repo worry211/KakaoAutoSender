@@ -78,6 +78,69 @@ const actionLabel = (action: any) => {
   return labels[String(action)] ?? String(action ?? "처리");
 };
 
+const mutationTitle = (command?: Command) => {
+  if (command?.group !== "license") return null;
+  const titles: Record<string, string> = {
+    extend: "기간 연장 완료",
+    suspend: "라이선스 일시 정지 완료",
+    resume: "라이선스 정지 해제 완료",
+    revoke: "라이선스 취소 완료",
+    delete: "라이선스 삭제 / 차단 완료",
+    "reset-device": "기기 초기화 완료",
+    "replace-unused-key": "미사용 키 교체 완료",
+    note: "관리 메모 변경 완료",
+    "customer-memo": "고객 메모 변경 완료",
+  };
+  return titles[command.action] ?? null;
+};
+
+const recommendedNextAction = (state: any) => {
+  const recommendations: Record<string, string> = {
+    ACTIVE:
+      "기간이 부족하면 **기간 연장**, 기기 변경 문의라면 **기기 초기화**, 일시적으로 막아야 하면 `/license suspend`를 사용하세요.",
+    UNUSED:
+      "구매자에게 KM 키를 전달하세요. 키를 분실했다면 `/license replace-unused-key`, 고객 식별은 **고객 메모**로 보강하세요.",
+    EXPIRED: "계속 사용할 고객이면 **기간 연장** 후 상태를 다시 확인하세요.",
+    SUSPENDED:
+      "정지 사유가 해결됐다면 `/license resume`, 기간이 부족하면 **기간 연장**을 먼저 확인하세요.",
+    REVOKED:
+      "취소된 라이선스입니다. 새 판매가 필요하면 새 라이선스를 발급하세요.",
+    DELETED:
+      "삭제 / 차단된 라이선스입니다. 기존 키를 재사용하지 말고 새 판매는 새 라이선스로 처리하세요.",
+  };
+  return (
+    recommendations[String(state)] ??
+    "현재 상태와 변경 이력을 확인한 뒤 작업하세요."
+  );
+};
+
+const attentionMeta = (kind: any) => {
+  const map: Record<string, { label: string; action: string }> = {
+    EXPIRING: {
+      label: "⏳ 7일 내 만료",
+      action: "연장 여부를 고객에게 확인하세요.",
+    },
+    UNUSED_OLD: {
+      label: "📦 30일+ 미사용",
+      action: "미전달 / 취소 주문인지 확인하고 필요하면 키를 교체하세요.",
+    },
+    INACTIVE: {
+      label: "🌙 7일+ 미접속",
+      action: "사용 중단인지 장애인지 고객 상태를 확인하세요.",
+    },
+    SUSPENDED: {
+      label: "⏸️ 정지 상태",
+      action: "정지 사유가 해결됐는지 확인하세요.",
+    },
+  };
+  return (
+    map[String(kind)] ?? {
+      label: "확인 필요",
+      action: "상세 상태를 확인하세요.",
+    }
+  );
+};
+
 const durationText = (seconds: any) => {
   if (seconds == null) return "영구";
   const n = Number(seconds);
@@ -279,6 +342,7 @@ export function renderDiscordPanel(result: any, command?: Command) {
             button("고객 찾기", "modal:search", 1),
             button("판매 현황", "nav:stats", 2),
             button("서비스 상태", "nav:system:status", 2),
+            button("오늘 처리할 일", "nav:attention", 1),
           ],
         },
         {
@@ -465,6 +529,67 @@ export function renderDiscordPanel(result: any, command?: Command) {
     );
   }
 
+  if (result?.kind === "attention") {
+    const licenses = Array.isArray(result.licenses) ? result.licenses : [];
+    const fields: any[] = licenses.map((license: Row, index: number) => {
+      const attention = attentionMeta(license.attention_kind);
+      return {
+        name: `#${index + 1} · ${attention.label} · ${license.license_id}`,
+        value: [
+          `**고객**  ${oneLine(license.customer_memo, 100)}`,
+          `**상태 / 기간**  ${stateMeta(license.state).label} · ${licenseTerm(license)}`,
+          `**다음 행동**  ${attention.action}`,
+        ].join("\n"),
+        inline: false,
+      };
+    });
+    if (!fields.length)
+      fields.push({
+        name: "✅ 오늘 처리할 항목 없음",
+        value:
+          "만료 임박, 오래된 미사용 키, 장기 미접속, 정지 상태 중 즉시 확인할 항목이 없습니다.",
+        inline: false,
+      });
+    const detailButtons = licenses
+      .slice(0, 5)
+      .map((license: Row, index: number) =>
+        button(`${index + 1} 상세`, `nav:info:${license.license_id}`, 2),
+      );
+    return response(
+      "",
+      [
+        {
+          title: "🧭 오늘 처리할 일",
+          description: [
+            `확인 대상 라이선스 **${Number(result.total_attention) || 0}개** · 우선순위 상위 **${licenses.length}개** 표시`,
+            `⏳ 7일 내 만료 **${Number(result.expiring_7d) || 0}** · 📦 30일+ 미사용 **${Number(result.unused_30d) || 0}** · 🌙 7일+ 미접속 **${Number(result.inactive_7d) || 0}** · ⏸️ 정지 **${Number(result.suspended) || 0}**`,
+          ].join("\n"),
+          color: licenses.length ? COLORS.yellow : COLORS.green,
+          fields,
+          footer: footer(
+            "운영 인박스 · 같은 라이선스가 여러 조건에 해당할 수 있음",
+          ),
+          timestamp: stamp(),
+        },
+      ],
+      [
+        ...(detailButtons.length
+          ? [{ type: 1, components: detailButtons }]
+          : []),
+        {
+          type: 1,
+          components: [
+            button("↻ 새로고침", "nav:attention", 1),
+            button("고객 찾기", "modal:search", 2),
+            button("7일 내 만료", "nav:exp:7:1", 2),
+            button("미사용 키", "nav:list:UNUSED:1", 2),
+            button("판매자 홈", "nav:home", 2),
+          ],
+        },
+      ],
+    );
+  }
+
   if (result?.licenses) {
     const detailButtons = (result.licenses as Row[])
       .slice(0, 5)
@@ -516,6 +641,11 @@ export function renderDiscordPanel(result: any, command?: Command) {
         value: oneLine(result.admin_memo, 500),
         inline: false,
       },
+      {
+        name: "🧭 추천 다음 작업",
+        value: recommendedNextAction(result.state),
+        inline: false,
+      },
     ];
     if (result.key)
       fields.push({
@@ -523,15 +653,22 @@ export function renderDiscordPanel(result: any, command?: Command) {
         value: `\`${result.key}\``,
         inline: false,
       });
+    const completed = mutationTitle(command);
     return response(
       "",
       [
         {
-          title: `${meta.label} · 라이선스 상세`,
-          description: `**${result.license_id}**`,
-          color: meta.color,
+          title: completed
+            ? `✅ ${completed}`
+            : `${meta.label} · 라이선스 상세`,
+          description: completed
+            ? `${meta.label} · **${result.license_id}**\n변경된 상태를 아래에서 바로 확인하세요.`
+            : `**${result.license_id}**`,
+          color: completed ? COLORS.green : meta.color,
           fields,
-          footer: footer("고객지원용 상세 정보"),
+          footer: footer(
+            completed ? "처리 완료 · 최신 상태" : "고객지원용 상세 정보",
+          ),
           timestamp: stamp(),
         },
       ],
@@ -598,8 +735,8 @@ export function renderDiscordPanel(result: any, command?: Command) {
             button("＋ 새 라이선스", "modal:create", 3),
             button("고객 찾기", "modal:search", 1),
             button("↻ 새로고침", "nav:stats", 2),
+            button("오늘 처리할 일", "nav:attention", 1),
             button("7일 만료", "nav:exp:7:1", 2),
-            button("판매자 홈", "nav:home", 2),
           ],
         },
       ],
@@ -709,6 +846,8 @@ function navCommand(custom: string): Command | null {
     };
   if (custom === "nav:stats")
     return { group: "license", action: "stats", params: {} };
+  if (custom === "nav:attention")
+    return { group: "license", action: "attention", params: {} };
   if (custom === "nav:home")
     return { group: "license", action: "help", params: {} };
   if (custom === "nav:license:help")
@@ -808,6 +947,8 @@ export async function executeDiscordV2(
           interaction.id,
         );
         command.params["key-or-id"] = info.license_id;
+        command.params.__confirm_state = info.state;
+        command.params.__confirm_customer = String(info.customer_memo ?? "");
       }
       const confirmation = id("CFM-");
       await env.DB.prepare(
@@ -842,6 +983,20 @@ export async function executeDiscordV2(
                 inline: false,
               },
               { name: "대상", value: `**${target}**`, inline: false },
+              ...(command.group === "license"
+                ? [
+                    {
+                      name: "현재 상태",
+                      value: stateMeta(command.params.__confirm_state).label,
+                      inline: true,
+                    },
+                    {
+                      name: "고객 확인",
+                      value: oneLine(command.params.__confirm_customer, 180),
+                      inline: true,
+                    },
+                  ]
+                : []),
               {
                 name: "영향",
                 value: confirmationImpact(command.group, command.action),

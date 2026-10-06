@@ -36,6 +36,9 @@ describe("seller command quality", () => {
       ).action,
     ).toBe("history");
     expect(parseCommand(interaction("system", "help")).action).toBe("help");
+    expect(parseCommand(interaction("license", "attention")).action).toBe(
+      "attention",
+    );
   });
 
   it("allows maintenance and kill-switch to be disabled without filler text", () => {
