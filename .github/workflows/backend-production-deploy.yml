@@ -1,0 +1,109 @@
+name: Backend production deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: '검증만 또는 production 배포 범위'
+        required: true
+        default: verify
+        type: choice
+        options:
+          - verify
+          - deploy_worker
+          - deploy_and_register
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kakaomacro-backend-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Secret scan
+        run: node scripts/secret-scan.mjs
+      - name: Backend quality gate
+        working-directory: backend
+        run: npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
+
+  deploy:
+    needs: verify
+    if: github.event.inputs.action != 'verify'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Refuse non-main production deploys
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo 'Production deployment must be dispatched from main.' >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Check Cloudflare deployment credentials
+        shell: bash
+        run: |
+          test -n "${CLOUDFLARE_API_TOKEN}" || { echo 'Missing CLOUDFLARE_API_TOKEN production secret.' >&2; exit 1; }
+          test -n "${CLOUDFLARE_ACCOUNT_ID}" || { echo 'Missing CLOUDFLARE_ACCOUNT_ID production secret.' >&2; exit 1; }
+      - name: Deploy Worker
+        working-directory: backend
+        run: npm run deploy
+      - name: Smoke public client config
+        shell: bash
+        run: |
+          node <<'NODE'
+          const url = 'https://kakaomacro-license.ei3921163.workers.dev/api/v1/client-config';
+          const response = await fetch(url, { headers: { 'Cache-Control': 'no-cache' } });
+          if (!response.ok) throw new Error(`client-config HTTP ${response.status}`);
+          const body = await response.json();
+          if (body.state !== 'CONFIG') throw new Error(`unexpected state: ${body.state}`);
+          for (const key of ['maintenance', 'kill_switch', 'min_version', 'latest_version']) {
+            if (!(key in body)) throw new Error(`client-config missing ${key}`);
+          }
+          console.log(`Worker smoke PASS · state=${body.state} min=${body.min_version} latest=${body.latest_version}`);
+          NODE
+      - name: Check Discord registration credentials
+        if: github.event.inputs.action == 'deploy_and_register'
+        env:
+          DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
+        shell: bash
+        run: |
+          test -n "${DISCORD_APPLICATION_ID}" || { echo 'Missing DISCORD_APPLICATION_ID production secret.' >&2; exit 1; }
+          test -n "${DISCORD_BOT_TOKEN}" || { echo 'Missing DISCORD_BOT_TOKEN production secret.' >&2; exit 1; }
+          test -n "${DISCORD_GUILD_ID}" || { echo 'Missing DISCORD_GUILD_ID production secret.' >&2; exit 1; }
+      - name: Register and verify seller Discord commands
+        if: github.event.inputs.action == 'deploy_and_register'
+        working-directory: backend
+        env:
+          DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
+        run: npm run register
