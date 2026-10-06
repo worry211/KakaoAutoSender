@@ -2,6 +2,7 @@ import { ApiError, Env, Row, duration, id, json, now } from "./core";
 import { admin, authorize } from "./admin";
 import { parseCommand } from "./commands";
 import { friendlyError, needsConfirmation, verifyDiscord } from "./discord";
+import { commandFromSellerModal, sellerModalFor } from "./sellerConsoleModals";
 
 type Command = { group: string; action: string; params: Row };
 
@@ -234,46 +235,39 @@ export function renderDiscordPanel(result: any, command?: Command) {
       "",
       [
         {
-          title: "🔑 라이선스 관리",
-          description: "판매·고객지원에 필요한 명령어를 역할별로 정리했습니다.",
+          title: "🧭 KakaoMacro 판매자 콘솔",
+          description: [
+            "판매·고객지원에 자주 쓰는 작업을 버튼 중심으로 모았습니다.",
+            "키 원문은 발급/교체 순간에만 표시되고, 이후 운영은 **LIC ID** 기준으로 처리합니다.",
+          ].join("\n"),
           color: COLORS.brand,
           fields: [
             {
-              name: "🛒 발급 / 현황",
-              value: "`/license create` 새 키 발급\n`/license stats` 전체 현황",
-              inline: true,
-            },
-            {
-              name: "🔎 조회 / 지원",
+              name: "빠른 판매",
               value:
-                "`/license info` 상세\n`/license search` 검색\n`/license list` 목록\n`/license expiring` 만료 예정\n`/license history` 변경 이력\n`/license customer-memo` 고객/주문 메모",
+                "**새 라이선스 발급**에서 기간·수량·고객 메모를 입력하면 바로 고객 전달용 키가 만들어집니다.",
               inline: true,
             },
             {
-              name: "🛠️ 상태 / 기간",
+              name: "고객지원",
               value:
-                "`/license extend` 연장\n`/license suspend` 정지\n`/license resume` 해제",
+                "**고객 찾기**로 고객 메모나 LIC ID 일부를 검색한 뒤 상세 화면에서 기간 연장·메모 수정을 처리할 수 있습니다.",
               inline: true,
             },
             {
-              name: "📱 기기 / 키",
+              name: "오늘 확인할 것",
               value:
-                "`/license reset-device` 기기 변경\n`/license replace-unused-key` 미사용 키 교체",
+                "만료 임박 / 오래된 미사용 키 / 장기 미접속 고객은 **판매 현황**에서 바로 확인합니다.",
               inline: true,
             },
             {
-              name: "⛔ 영구 조치",
-              value: "`/license revoke` 취소\n`/license delete` 삭제/차단",
-              inline: true,
-            },
-            {
-              name: "🔐 운영 원칙",
+              name: "고급 명령",
               value:
-                "KM 키 원문은 발급/교체 순간에만 표시됩니다. 고객 기록에는 **LIC ID**를 사용하세요.",
+                "정지·기기 초기화·취소·삭제 같은 위험 작업은 기존 `/license ...` 명령과 최종 확인창을 유지합니다.",
               inline: false,
             },
           ],
-          footer: footer("판매자 전용 · 키 원문은 발급/교체 순간에만 표시"),
+          footer: footer("판매자 전용 · 버튼 우선 · 위험 작업은 이중 확인"),
           timestamp: stamp(),
         },
       ],
@@ -281,10 +275,18 @@ export function renderDiscordPanel(result: any, command?: Command) {
         {
           type: 1,
           components: [
-            button("판매 현황", "nav:stats", 1),
+            button("＋ 새 라이선스", "modal:create", 3),
+            button("고객 찾기", "modal:search", 1),
+            button("판매 현황", "nav:stats", 2),
+            button("서비스 상태", "nav:system:status", 2),
+          ],
+        },
+        {
+          type: 1,
+          components: [
+            button("7일 내 만료", "nav:exp:7:1", 2),
+            button("미사용 키", "nav:list:UNUSED:1", 2),
             button("사용 중", "nav:list:ACTIVE:1", 2),
-            button("미사용", "nav:list:UNUSED:1", 2),
-            button("7일 만료", "nav:exp:7:1", 2),
           ],
         },
       ],
@@ -388,6 +390,7 @@ export function renderDiscordPanel(result: any, command?: Command) {
           components: [
             button("새로고침", "nav:system:status", 1),
             button("운영 도움말", "nav:system:help", 2),
+            button("판매자 홈", "nav:home", 2),
           ],
         },
       ],
@@ -424,8 +427,10 @@ export function renderDiscordPanel(result: any, command?: Command) {
         {
           type: 1,
           components: [
+            button("다시 발급", "modal:create", 3),
             button("판매 현황", "nav:stats", 1),
-            button("미사용 키 보기", "nav:list:UNUSED:1", 2),
+            button("미사용 키", "nav:list:UNUSED:1", 2),
+            button("판매자 홈", "nav:home", 2),
           ],
         },
       ],
@@ -474,6 +479,13 @@ export function renderDiscordPanel(result: any, command?: Command) {
         ...(detailButtons.length
           ? [{ type: 1, components: detailButtons }]
           : []),
+        {
+          type: 1,
+          components: [
+            button("고객 찾기", "modal:search", 1),
+            button("판매자 홈", "nav:home", 2),
+          ],
+        },
       ],
     );
   }
@@ -527,8 +539,11 @@ export function renderDiscordPanel(result: any, command?: Command) {
         {
           type: 1,
           components: [
+            button("기간 연장", `modal:extend:${result.license_id}`, 3),
+            button("고객 메모", `modal:customer:${result.license_id}`, 1),
             button("변경 이력", `nav:hist:${result.license_id}:1`, 2),
-            button("새로고침", `nav:info:${result.license_id}`, 1),
+            button("새로고침", `nav:info:${result.license_id}`, 2),
+            button("판매자 홈", "nav:home", 2),
           ],
         },
       ],
@@ -580,10 +595,11 @@ export function renderDiscordPanel(result: any, command?: Command) {
         {
           type: 1,
           components: [
-            button("↻ 새로고침", "nav:stats", 1),
+            button("＋ 새 라이선스", "modal:create", 3),
+            button("고객 찾기", "modal:search", 1),
+            button("↻ 새로고침", "nav:stats", 2),
             button("7일 만료", "nav:exp:7:1", 2),
-            button("미사용", "nav:list:UNUSED:1", 2),
-            button("사용 중", "nav:list:ACTIVE:1", 2),
+            button("판매자 홈", "nav:home", 2),
           ],
         },
       ],
@@ -693,6 +709,8 @@ function navCommand(custom: string): Command | null {
     };
   if (custom === "nav:stats")
     return { group: "license", action: "stats", params: {} };
+  if (custom === "nav:home")
+    return { group: "license", action: "help", params: {} };
   if (custom === "nav:license:help")
     return { group: "license", action: "help", params: {} };
   if (custom === "nav:system:status")
@@ -710,18 +728,30 @@ function navCommand(custom: string): Command | null {
 }
 
 function errorPanel(state: string) {
-  return response("", [
-    {
-      title: "❌ 처리하지 못했습니다",
-      description: friendlyError(state),
-      color: COLORS.red,
-      fields: [
-        { name: "다음 행동", value: recoveryHint(state), inline: false },
-      ],
-      footer: footer(`오류 코드 · ${state}`),
-      timestamp: stamp(),
-    },
-  ]);
+  return response(
+    "",
+    [
+      {
+        title: "❌ 처리하지 못했습니다",
+        description: friendlyError(state),
+        color: COLORS.red,
+        fields: [
+          { name: "다음 행동", value: recoveryHint(state), inline: false },
+        ],
+        footer: footer(`오류 코드 · ${state}`),
+        timestamp: stamp(),
+      },
+    ],
+    [
+      {
+        type: 1,
+        components: [
+          button("고객 찾기", "modal:search", 1),
+          button("판매자 홈", "nav:home", 2),
+        ],
+      },
+    ],
+  );
 }
 
 export async function executeDiscordV2(
@@ -732,7 +762,9 @@ export async function executeDiscordV2(
   authorize(env, actor);
   let command: Command;
 
-  if (interaction.type === 3) {
+  if (interaction.type === 5) {
+    command = commandFromSellerModal(interaction) as Command;
+  } else if (interaction.type === 3) {
     const custom = String(interaction.data?.custom_id ?? "");
     const confirmation = custom.match(/^(confirm|cancel):(CFM-[a-f0-9-]{36})$/);
     if (confirmation) {
@@ -876,9 +908,16 @@ export async function discord(
     !/^[0-9]{5,25}$/.test(interaction.id) ||
     typeof interaction.token !== "string" ||
     !/^[A-Za-z0-9._-]{20,512}$/.test(interaction.token) ||
-    ![2, 3].includes(interaction.type)
+    ![2, 3, 5].includes(interaction.type)
   )
     return json({ state: "INVALID" }, 400);
+
+  if (interaction.type === 3) {
+    const sellerModal = sellerModalFor(
+      String(interaction.data?.custom_id ?? ""),
+    );
+    if (sellerModal) return json(sellerModal);
+  }
 
   ctx.waitUntil(
     (async () => {

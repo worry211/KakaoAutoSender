@@ -99,7 +99,8 @@ function modalValues(interaction: any) {
   const values: Record<string, string> = {};
   for (const row of interaction?.data?.components ?? []) {
     for (const component of row?.components ?? []) {
-      if (component?.type !== 4 || typeof component.custom_id !== "string") continue;
+      if (component?.type !== 4 || typeof component.custom_id !== "string")
+        continue;
       if (component.custom_id in values) throw new ApiError("INVALID_COMMAND");
       values[component.custom_id] = String(component.value ?? "").trim();
     }
