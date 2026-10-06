@@ -19,12 +19,13 @@ internal sealed record LicenseSnapshot(
     string DownloadUrl)
 {
     public static LicenseSnapshot Initial { get; } = new(
-        false, "CHECKING", "라이선스 확인 중", "", null, 60, 600, 27, "");
+        false, "CHECKING", "라이선스 확인 중", "", null, 60, 600, 151, "");
 }
 
 internal sealed class LicenseClient : IDisposable
 {
-    public const int AppVersion = 27;
+    public const int AppVersion = 151;
+    private const string ClientPlatform = "windows";
     private const string ApiOrigin = "https://kakaomacro-license.ei3921163.workers.dev";
     private readonly InstallIdentity _identity;
     private readonly HttpClient _http;
@@ -73,7 +74,7 @@ internal sealed class LicenseClient : IDisposable
         await _requestGate.WaitAsync(cancellationToken);
         try
         {
-            var body = new ActivationBody(key, _identity.PublicKeyBase64, AppVersion);
+            var body = new ActivationBody(key, _identity.PublicKeyBase64, AppVersion, ClientPlatform);
             try
             {
                 var first = await SendAsync("/api/v1/activate", body, "", cancellationToken);
@@ -150,7 +151,7 @@ internal sealed class LicenseClient : IDisposable
             {
                 response = await SendAsync(
                     "/api/v1/heartbeat",
-                    new VersionBody(AppVersion),
+                    new VersionBody(AppVersion, ClientPlatform),
                     _accessToken,
                     cancellationToken);
                 if (response.State == "ACCESS_EXPIRED")
@@ -163,7 +164,7 @@ internal sealed class LicenseClient : IDisposable
                         {
                             response = await SendAsync(
                                 "/api/v1/session/refresh",
-                                new VersionBody(AppVersion),
+                                new VersionBody(AppVersion, ClientPlatform),
                                 _refreshToken,
                                 cancellationToken);
                         }
@@ -205,7 +206,7 @@ internal sealed class LicenseClient : IDisposable
     private async Task<ApiResponse> RecoverCoreAsync(CancellationToken cancellationToken) =>
         await SendAsync(
             "/api/v1/session/recover",
-            new RecoverBody(_identity.PublicKeyBase64, AppVersion),
+            new RecoverBody(_identity.PublicKeyBase64, AppVersion, ClientPlatform),
             "",
             cancellationToken);
 
@@ -351,14 +352,17 @@ internal sealed class LicenseClient : IDisposable
     private sealed record ActivationBody(
         [property: JsonPropertyName("key")] string Key,
         [property: JsonPropertyName("public_key")] string PublicKey,
-        [property: JsonPropertyName("app_version")] int AppVersion);
+        [property: JsonPropertyName("app_version")] int AppVersion,
+        [property: JsonPropertyName("client_platform")] string ClientPlatform);
 
     private sealed record RecoverBody(
         [property: JsonPropertyName("public_key")] string PublicKey,
-        [property: JsonPropertyName("app_version")] int AppVersion);
+        [property: JsonPropertyName("app_version")] int AppVersion,
+        [property: JsonPropertyName("client_platform")] string ClientPlatform);
 
     private sealed record VersionBody(
-        [property: JsonPropertyName("app_version")] int AppVersion);
+        [property: JsonPropertyName("app_version")] int AppVersion,
+        [property: JsonPropertyName("client_platform")] string ClientPlatform);
 
     private sealed class ApiResponse
     {
