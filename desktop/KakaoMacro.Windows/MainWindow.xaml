@@ -218,17 +218,17 @@
                                                 <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
                                                 <StackPanel>
                                                     <CheckBox x:Name="ApplyMessageCheck" Content="메시지" FontWeight="SemiBold"/>
-                                                    <TextBox x:Name="BulkMessageEditor" Height="118" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" Margin="0,7,0,0"/>
+                                                    <TextBox x:Name="BulkMessageEditor" IsEnabled="{Binding IsChecked, ElementName=ApplyMessageCheck}" Height="118" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" Margin="0,7,0,0"/>
                                                 </StackPanel>
                                                 <StackPanel Grid.Column="2">
                                                     <CheckBox x:Name="ApplyScheduleCheck" Content="전송 일정" FontWeight="SemiBold"/>
-                                                    <ComboBox x:Name="BulkScheduleModeBox" SelectedIndex="0" Margin="0,7,0,0">
+                                                    <ComboBox x:Name="BulkScheduleModeBox" IsEnabled="{Binding IsChecked, ElementName=ApplyScheduleCheck}" SelectedIndex="0" Margin="0,7,0,0">
                                                         <ComboBoxItem Content="간격 반복"/><ComboBoxItem Content="매일 지정 시각"/>
                                                     </ComboBox>
                                                     <Grid Margin="0,7,0,0">
                                                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="8"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                                                        <TextBox x:Name="BulkIntervalBox" Text="60" ToolTip="간격 반복일 때 분 단위"/>
-                                                        <TextBox x:Name="BulkTimesBox" Grid.Column="2" Text="09:00" ToolTip="지정 시각일 때 예: 09:00, 13:30"/>
+                                                        <TextBox x:Name="BulkIntervalBox" IsEnabled="{Binding IsChecked, ElementName=ApplyScheduleCheck}" Text="60" ToolTip="간격 반복일 때 분 단위"/>
+                                                        <TextBox x:Name="BulkTimesBox" Grid.Column="2" IsEnabled="{Binding IsChecked, ElementName=ApplyScheduleCheck}" Text="09:00" ToolTip="지정 시각일 때 예: 09:00, 13:30"/>
                                                     </Grid>
                                                     <WrapPanel Margin="0,6,0,0">
                                                         <Button Style="{StaticResource CompactButton}" Content="1분" Tag="1" Click="BulkIntervalPreset_Click" Margin="0,0,5,0"/>
@@ -245,12 +245,12 @@
                                                 <StackPanel>
                                                     <CheckBox x:Name="ApplyDailyLimitCheck" Content="하루 최대 전송" FontWeight="SemiBold"/>
                                                     <TextBlock Text="0 = 제한 없음" Foreground="{StaticResource Muted}" FontSize="9" Margin="0,4,0,6"/>
-                                                    <TextBox x:Name="BulkDailyLimitBox" Text="8"/>
+                                                    <TextBox x:Name="BulkDailyLimitBox" IsEnabled="{Binding IsChecked, ElementName=ApplyDailyLimitCheck}" Text="8"/>
                                                 </StackPanel>
                                                 <StackPanel Grid.Column="2">
                                                     <CheckBox x:Name="ApplyEnabledCheck" Content="사용 여부" FontWeight="SemiBold"/>
                                                     <TextBlock Text="선택된 방의 자동전송 사용 상태를 함께 변경합니다." Foreground="{StaticResource Muted}" FontSize="9" Margin="0,4,0,10"/>
-                                                    <CheckBox x:Name="BulkEnabledCheck" Content="자동전송 사용" IsChecked="True"/>
+                                                    <CheckBox x:Name="BulkEnabledCheck" IsEnabled="{Binding IsChecked, ElementName=ApplyEnabledCheck}" Content="자동전송 사용" IsChecked="True"/>
                                                 </StackPanel>
                                             </Grid>
                                         </StackPanel>
