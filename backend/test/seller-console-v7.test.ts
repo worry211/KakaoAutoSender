@@ -19,12 +19,16 @@ const buttonLabels = (message: any) =>
 describe("seller console v7 commercial UX", () => {
   it("shows seller-friendly labels while preserving stable command values", () => {
     const create = subcommand("license", "create");
-    const duration = create.options.find((option: any) => option.name === "duration");
+    const duration = create.options.find(
+      (option: any) => option.name === "duration",
+    );
     expect(duration.choices).toContainEqual({ name: "30일", value: "30d" });
     expect(duration.choices).toContainEqual({ name: "영구", value: "permanent" });
 
     const list = subcommand("license", "list");
-    const status = list.options.find((option: any) => option.name === "status");
+    const status = list.options.find(
+      (option: any) => option.name === "status",
+    );
     expect(status.choices).toContainEqual({ name: "사용 중", value: "ACTIVE" });
     expect(status.choices).toContainEqual({ name: "일시 정지", value: "SUSPENDED" });
     expect(subcommand("license", "help").description).toContain("버튼형");
@@ -40,7 +44,8 @@ describe("seller console v7 commercial UX", () => {
     expect(labels).toContain("오늘 처리할 일");
     expect(labels).toContain("판매 현황");
     expect(labels).toContain("서비스 상태");
-    for (const row of message.components) expect(row.components.length).toBeLessThanOrEqual(5);
+    for (const row of message.components)
+      expect(row.components.length).toBeLessThanOrEqual(5);
   });
 
   it("exposes the complete system operations surface without slash-command memorization", () => {
@@ -68,7 +73,8 @@ describe("seller console v7 commercial UX", () => {
         "판매자 홈",
       ]),
     );
-    for (const row of message.components) expect(row.components.length).toBeLessThanOrEqual(5);
+    for (const row of message.components)
+      expect(row.components.length).toBeLessThanOrEqual(5);
   });
 
   it("keeps dangerous system changes behind native forms and validated commands", () => {
@@ -109,7 +115,11 @@ describe("seller console v7 commercial UX", () => {
             { components: [{ type: 4, custom_id: "version", value: "34" }] },
             {
               components: [
-                { type: 4, custom_id: "url", value: "http://example.com/app.apk" },
+                {
+                  type: 4,
+                  custom_id: "url",
+                  value: "http://example.com/app.apk",
+                },
               ],
             },
             { components: [{ type: 4, custom_id: "notes", value: "" }] },
