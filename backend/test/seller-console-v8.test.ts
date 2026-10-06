@@ -47,7 +47,12 @@ describe("seller console v8 mobile operations UX", () => {
 
     const support = labels(message.components[0]);
     expect(support).toEqual(
-      expect.arrayContaining(["기간 연장", "고객 메모", "기기 초기화", "새로고침"]),
+      expect.arrayContaining([
+        "기간 연장",
+        "고객 메모",
+        "기기 초기화",
+        "새로고침",
+      ]),
     );
     expect(support).not.toContain("라이선스 취소");
 
@@ -102,11 +107,13 @@ describe("seller console v8 mobile operations UX", () => {
       release_notes: "판매 기준선",
       message: "",
     });
-    const windowsPolicy = message.embeds[0].fields.find(
-      (field: any) => String(field.name).includes("Windows 정책"),
+    const windowsPolicy = message.embeds[0].fields.find((field: any) =>
+      String(field.name).includes("Windows 정책"),
     );
     expect(windowsPolicy).toBeTruthy();
-    expect(windowsPolicy.value).toContain("Android versionCode 기준과 **분리됨**");
+    expect(windowsPolicy.value).toContain(
+      "Android versionCode 기준과 **분리됨**",
+    );
     expect(windowsPolicy.value).toContain("PC 라이선스");
   });
 
