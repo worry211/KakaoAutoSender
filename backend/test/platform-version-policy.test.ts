@@ -17,11 +17,13 @@ async function installation() {
     true,
     ["sign", "verify"],
   )) as CryptoKeyPair;
+  const spki = (await crypto.subtle.exportKey(
+    "spki",
+    pair.publicKey,
+  )) as ArrayBuffer;
   return {
     pair,
-    publicKey: b64(
-      new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey)),
-    ),
+    publicKey: b64(new Uint8Array(spki)),
   };
 }
 
