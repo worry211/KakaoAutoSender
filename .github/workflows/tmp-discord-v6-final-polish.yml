@@ -28,18 +28,13 @@ jobs:
         working-directory: backend
         run: npm ci
       - name: Secret scan
-        working-directory: backend
-        run: |
-          if grep -RInE '(DISCORD_BOT_TOKEN|SESSION_PEPPER|LICENSE_PEPPER|PRIVATE KEY|BEGIN PRIVATE)' src test scripts --exclude='*.test.ts'; then
-            echo 'Potential secret-like material found' >&2
-            exit 1
-          fi
+        run: node scripts/secret-scan.mjs
       - name: Typecheck
         working-directory: backend
         run: npm run typecheck
       - name: Formatting gate
         working-directory: backend
-        run: npx prettier --check src test scripts
+        run: npm run lint
       - name: Full backend tests
         working-directory: backend
         run: npm test
