@@ -103,6 +103,43 @@ const footer = (text: string) => ({
 });
 const stamp = () => new Date().toISOString();
 
+const recoveryHint = (state: string) => {
+  const hints: Record<string, string> = {
+    NOT_FOUND: "`/license search`로 고객 메모나 LIC ID 일부를 검색해 보세요.",
+    ILLEGAL_STATE:
+      "`/license info`로 현재 상태를 먼저 확인한 뒤 가능한 작업을 선택하세요.",
+    INVALID_COMMAND:
+      "`/license help` 또는 `/system help`에서 입력 형식을 확인하세요.",
+    INVALID_DURATION:
+      "7d / 30d / 90d / 180d / 365d / permanent 중 하나를 사용하세요.",
+    CONFLICT:
+      "`새로고침` 또는 `/license info`로 최신 상태를 확인한 뒤 다시 시도하세요.",
+    CONFIRMATION_EXPIRED:
+      "원래 명령을 다시 실행하면 새 2분 확인창이 생성됩니다.",
+    RATE_LIMITED: "잠시 기다린 뒤 같은 작업을 다시 시도하세요.",
+    INVALID_POLICY:
+      "`/system status`로 현재 정책을 확인한 뒤 안전 범위 안에서 다시 설정하세요.",
+  };
+  return (
+    hints[state] ?? "같은 오류가 반복되면 운영 로그와 대상 LIC ID를 확인하세요."
+  );
+};
+
+const confirmationImpact = (group: string, action: string) => {
+  if (group === "system" && action === "kill-switch")
+    return "전체 고객의 자동전송이 즉시 영향을 받습니다.";
+  if (group === "system" && action === "min-version")
+    return "기준보다 낮은 앱 버전은 업데이트 전까지 사용이 차단될 수 있습니다.";
+  if (group === "system" && action === "maintenance")
+    return "점검이 끝날 때까지 고객 자동전송이 제한될 수 있습니다.";
+  if (action === "delete")
+    return "해당 라이선스는 삭제 상태가 되어 사용이 차단됩니다.";
+  if (action === "revoke") return "해당 라이선스의 사용 권한을 취소합니다.";
+  if (action === "reset-device")
+    return "기존 기기 세션을 끊고 새 기기 등록을 준비합니다.";
+  return "대상 상태가 즉시 변경됩니다.";
+};
+
 const button = (
   label: string,
   custom_id: string,
@@ -179,7 +216,7 @@ function listEmbed(result: any, command?: Command) {
     });
   return {
     title,
-    description: `${filter}\n페이지 **${Number(result.page) || 1}**${result.has_more ? " · 다음 페이지 있음" : ""}`,
+    description: `${filter}\n이번 페이지 **${licenses.length}개** · 페이지 **${Number(result.page) || 1}**${result.has_more ? " · 다음 페이지 있음" : ""}`,
     color: COLORS.blue,
     fields,
     footer: footer(
@@ -193,156 +230,206 @@ function listEmbed(result: any, command?: Command) {
 
 export function renderDiscordPanel(result: any, command?: Command) {
   if (result?.kind === "license_help")
-    return response("", [
-      {
-        title: "🔑 라이선스 관리",
-        description: "판매·고객지원에 필요한 명령어를 역할별로 정리했습니다.",
-        color: COLORS.brand,
-        fields: [
-          {
-            name: "🛒 발급 / 현황",
-            value: "`/license create` 새 키 발급\n`/license stats` 전체 현황",
-            inline: true,
-          },
-          {
-            name: "🔎 조회 / 지원",
-            value:
-              "`/license info` 상세\n`/license search` 검색\n`/license list` 목록\n`/license expiring` 만료 예정\n`/license history` 변경 이력\n`/license customer-memo` 고객/주문 메모",
-            inline: true,
-          },
-          {
-            name: "🛠️ 상태 / 기간",
-            value:
-              "`/license extend` 연장\n`/license suspend` 정지\n`/license resume` 해제",
-            inline: true,
-          },
-          {
-            name: "📱 기기 / 키",
-            value:
-              "`/license reset-device` 기기 변경\n`/license replace-unused-key` 미사용 키 교체",
-            inline: true,
-          },
-          {
-            name: "⛔ 영구 조치",
-            value: "`/license revoke` 취소\n`/license delete` 삭제/차단",
-            inline: true,
-          },
-          {
-            name: "🔐 운영 원칙",
-            value:
-              "KM 키 원문은 발급/교체 순간에만 표시됩니다. 고객 기록에는 **LIC ID**를 사용하세요.",
-            inline: false,
-          },
-        ],
-        footer: footer("판매자 전용"),
-        timestamp: stamp(),
-      },
-    ]);
+    return response(
+      "",
+      [
+        {
+          title: "🔑 라이선스 관리",
+          description: "판매·고객지원에 필요한 명령어를 역할별로 정리했습니다.",
+          color: COLORS.brand,
+          fields: [
+            {
+              name: "🛒 발급 / 현황",
+              value: "`/license create` 새 키 발급\n`/license stats` 전체 현황",
+              inline: true,
+            },
+            {
+              name: "🔎 조회 / 지원",
+              value:
+                "`/license info` 상세\n`/license search` 검색\n`/license list` 목록\n`/license expiring` 만료 예정\n`/license history` 변경 이력\n`/license customer-memo` 고객/주문 메모",
+              inline: true,
+            },
+            {
+              name: "🛠️ 상태 / 기간",
+              value:
+                "`/license extend` 연장\n`/license suspend` 정지\n`/license resume` 해제",
+              inline: true,
+            },
+            {
+              name: "📱 기기 / 키",
+              value:
+                "`/license reset-device` 기기 변경\n`/license replace-unused-key` 미사용 키 교체",
+              inline: true,
+            },
+            {
+              name: "⛔ 영구 조치",
+              value: "`/license revoke` 취소\n`/license delete` 삭제/차단",
+              inline: true,
+            },
+            {
+              name: "🔐 운영 원칙",
+              value:
+                "KM 키 원문은 발급/교체 순간에만 표시됩니다. 고객 기록에는 **LIC ID**를 사용하세요.",
+              inline: false,
+            },
+          ],
+          footer: footer("판매자 전용 · 키 원문은 발급/교체 순간에만 표시"),
+          timestamp: stamp(),
+        },
+      ],
+      [
+        {
+          type: 1,
+          components: [
+            button("판매 현황", "nav:stats", 1),
+            button("사용 중", "nav:list:ACTIVE:1", 2),
+            button("미사용", "nav:list:UNUSED:1", 2),
+            button("7일 만료", "nav:exp:7:1", 2),
+          ],
+        },
+      ],
+    );
 
   if (result?.kind === "system_help")
-    return response("", [
-      {
-        title: "⚙️ 서비스 운영 관리",
-        description: "전체 고객에게 영향을 줄 수 있는 운영 명령어입니다.",
-        color: COLORS.blue,
-        fields: [
-          {
-            name: "📊 상태",
-            value: "`/system status` 운영 현황",
-            inline: true,
-          },
-          {
-            name: "🧰 제어",
-            value:
-              "`/system maintenance` 점검 모드\n`/system kill-switch` 긴급 중단",
-            inline: true,
-          },
-          {
-            name: "📦 버전",
-            value:
-              "`/system min-version` 최소 버전\n`/system latest-version` 최신 버전",
-            inline: true,
-          },
-          {
-            name: "🌐 정책",
-            value: "`/system policy` 서버 확인 / 오프라인 유예",
-            inline: true,
-          },
-        ],
-        footer: footer("위험 작업은 최종 확인 필요"),
-        timestamp: stamp(),
-      },
-    ]);
+    return response(
+      "",
+      [
+        {
+          title: "⚙️ 서비스 운영 관리",
+          description: "전체 고객에게 영향을 줄 수 있는 운영 명령어입니다.",
+          color: COLORS.blue,
+          fields: [
+            {
+              name: "📊 상태",
+              value: "`/system status` 운영 현황",
+              inline: true,
+            },
+            {
+              name: "🧰 제어",
+              value:
+                "`/system maintenance` 점검 모드\n`/system kill-switch` 긴급 중단",
+              inline: true,
+            },
+            {
+              name: "📦 버전",
+              value:
+                "`/system min-version` 최소 버전\n`/system latest-version` 최신 버전",
+              inline: true,
+            },
+            {
+              name: "🌐 정책",
+              value: "`/system policy` 서버 확인 / 오프라인 유예",
+              inline: true,
+            },
+          ],
+          footer: footer("전체 고객 영향 작업은 최종 확인 필요"),
+          timestamp: stamp(),
+        },
+      ],
+      [{ type: 1, components: [button("운영 현황", "nav:system:status", 1)] }],
+    );
 
   if (result?.kind === "system_status")
-    return response("", [
-      {
-        title: "⚙️ 서비스 운영 현황",
-        description:
-          result.kill_switch || result.maintenance
-            ? "⚠️ 현재 일부 또는 전체 자동전송이 제한된 상태입니다."
-            : "✅ 서비스가 정상 운영 중입니다.",
-        color: result.kill_switch
-          ? COLORS.red
-          : result.maintenance
-            ? COLORS.yellow
-            : COLORS.green,
-        fields: [
-          {
-            name: "🛡️ 안전 상태",
-            value: `긴급 중단 **${result.kill_switch ? "켜짐 🔴" : "꺼짐 🟢"}**\n점검 모드 **${result.maintenance ? "켜짐 🟠" : "꺼짐 🟢"}**`,
-            inline: true,
-          },
-          {
-            name: "📦 앱 버전",
-            value: `최소 **${result.min_version}**\n최신 **${result.latest_version}**`,
-            inline: true,
-          },
-          {
-            name: "🌐 라이선스 정책",
-            value: `확인 주기 **${result.heartbeat_seconds}초**\n오프라인 유예 **${result.grace_seconds}초**`,
-            inline: true,
-          },
-          {
-            name: "⬇️ 업데이트 주소",
-            value: result.download_url || "—",
-            inline: false,
-          },
-          {
-            name: "📝 릴리즈 노트",
-            value: oneLine(result.release_notes, 500),
-            inline: false,
-          },
-          {
-            name: "📢 고객 안내",
-            value: oneLine(result.message, 500),
-            inline: false,
-          },
-        ],
-        footer: footer("실시간 운영 설정"),
-        timestamp: stamp(),
-      },
-    ]);
+    return response(
+      "",
+      [
+        {
+          title: "⚙️ 서비스 운영 현황",
+          description:
+            result.kill_switch || result.maintenance
+              ? "⚠️ 현재 일부 또는 전체 자동전송이 제한된 상태입니다."
+              : "✅ 서비스가 정상 운영 중입니다.",
+          color: result.kill_switch
+            ? COLORS.red
+            : result.maintenance
+              ? COLORS.yellow
+              : COLORS.green,
+          fields: [
+            {
+              name: "🛡️ 안전 상태",
+              value: `긴급 중단 **${result.kill_switch ? "켜짐 🔴" : "꺼짐 🟢"}**\n점검 모드 **${result.maintenance ? "켜짐 🟠" : "꺼짐 🟢"}**`,
+              inline: true,
+            },
+            {
+              name: "📦 앱 버전",
+              value: `최소 **${result.min_version}**\n최신 **${result.latest_version}**`,
+              inline: true,
+            },
+            {
+              name: "🌐 라이선스 정책",
+              value: `확인 주기 **${result.heartbeat_seconds}초**\n오프라인 유예 **${result.grace_seconds}초**`,
+              inline: true,
+            },
+            {
+              name: "⬇️ 업데이트 주소",
+              value:
+                result.download_url ||
+                "⚠️ 미설정 · 판매 배포 전 최신 다운로드 주소를 등록하세요.",
+              inline: false,
+            },
+            {
+              name: "📝 릴리즈 노트",
+              value: oneLine(result.release_notes, 500),
+              inline: false,
+            },
+            {
+              name: "📢 고객 안내",
+              value: oneLine(result.message, 500),
+              inline: false,
+            },
+          ],
+          footer: footer("실시간 운영 설정 · 위험 변경은 확인창으로 보호"),
+          timestamp: stamp(),
+        },
+      ],
+      [
+        {
+          type: 1,
+          components: [
+            button("새로고침", "nav:system:status", 1),
+            button("운영 도움말", "nav:system:help", 2),
+          ],
+        },
+      ],
+    );
 
   if (Array.isArray(result)) {
     const fields = result.map((license: Row, index: number) => ({
-      name: `🔑 ${index + 1}. ${license.license_id}`,
+      name: `#${index + 1} · ${licenseTerm(license)}`,
       value: [
-        `**기간**  ${licenseTerm(license)}`,
-        `**KM 키**  \`${license.key}\``,
+        "**구매자에게 전달할 KM 키**",
+        `\`${license.key}\``,
+        `**관리 ID**  ${license.license_id}`,
+        `**고객 메모**  ${oneLine(license.customer_memo, 100)}`,
       ].join("\n"),
       inline: false,
     }));
-    return response("", [
-      {
-        title: "✅ 라이선스 발급 완료",
-        description: `총 **${result.length}개**를 발급했습니다. 구매자에게는 KM 키만 전달하세요.`,
-        color: COLORS.green,
-        fields,
-        footer: footer("KM 키는 지금 한 번만 표시됨"),
-        timestamp: stamp(),
-      },
-    ]);
+    return response(
+      "",
+      [
+        {
+          title: "✅ 판매용 라이선스 발급 완료",
+          description: [
+            `총 **${result.length}개**를 발급했습니다.`,
+            "구매자에게는 **KM 키만 전달**하고 판매 기록에는 LIC ID를 남겨두세요.",
+            "키 원문은 이 응답을 닫기 전에 필요한 곳에 안전하게 전달하세요.",
+          ].join("\n"),
+          color: COLORS.green,
+          fields,
+          footer: footer("민감 정보 · KM 키는 지금 한 번만 표시"),
+          timestamp: stamp(),
+        },
+      ],
+      [
+        {
+          type: 1,
+          components: [
+            button("판매 현황", "nav:stats", 1),
+            button("미사용 키 보기", "nav:list:UNUSED:1", 2),
+          ],
+        },
+      ],
+    );
   }
 
   if (result?.kind === "history") {
@@ -454,7 +541,14 @@ export function renderDiscordPanel(result: any, command?: Command) {
       [
         {
           title: "📊 라이선스 현황",
-          description: `전체 **${Number(result.total) || 0}개**`,
+          description: [
+            `전체 **${Number(result.total) || 0}개**`,
+            Number(result.expiring_7d) ||
+            Number(result.unused_30d) ||
+            Number(result.inactive_7d)
+              ? "⚠️ 확인이 필요한 항목이 있습니다. 아래 버튼에서 바로 확인하세요."
+              : "✅ 현재 즉시 확인이 필요한 운영 항목이 없습니다.",
+          ].join("\n"),
           color: COLORS.blue,
           fields: [
             {
@@ -486,6 +580,7 @@ export function renderDiscordPanel(result: any, command?: Command) {
         {
           type: 1,
           components: [
+            button("↻ 새로고침", "nav:stats", 1),
             button("7일 만료", "nav:exp:7:1", 2),
             button("미사용", "nav:list:UNUSED:1", 2),
             button("사용 중", "nav:list:ACTIVE:1", 2),
@@ -596,6 +691,14 @@ function navCommand(custom: string): Command | null {
       action: "info",
       params: { "key-or-id": m[1] },
     };
+  if (custom === "nav:stats")
+    return { group: "license", action: "stats", params: {} };
+  if (custom === "nav:license:help")
+    return { group: "license", action: "help", params: {} };
+  if (custom === "nav:system:status")
+    return { group: "system", action: "status", params: {} };
+  if (custom === "nav:system:help")
+    return { group: "system", action: "help", params: {} };
   m = custom.match(/^nav:hist:(LIC-[a-f0-9-]{36}):([1-9]\d{0,5})$/i);
   if (m)
     return {
@@ -612,6 +715,9 @@ function errorPanel(state: string) {
       title: "❌ 처리하지 못했습니다",
       description: friendlyError(state),
       color: COLORS.red,
+      fields: [
+        { name: "다음 행동", value: recoveryHint(state), inline: false },
+      ],
       footer: footer(`오류 코드 · ${state}`),
       timestamp: stamp(),
     },
@@ -704,6 +810,11 @@ export async function executeDiscordV2(
                 inline: false,
               },
               { name: "대상", value: `**${target}**`, inline: false },
+              {
+                name: "영향",
+                value: confirmationImpact(command.group, command.action),
+                inline: false,
+              },
               {
                 name: "사유",
                 value: oneLine(command.params.reason, 300),
