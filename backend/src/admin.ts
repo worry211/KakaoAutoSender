@@ -187,6 +187,96 @@ export async function admin(
     await env.DB.batch(statements);
     return out;
   }
+  if (action === "attention") {
+    const expiringUntil = t + 7 * 86400;
+    const unusedBefore = t - 30 * 86400;
+    const inactiveBefore = t - 7 * 86400;
+    const summary = await env.DB.prepare(
+      `SELECT
+   count(*) FILTER (WHERE
+     (status IN ('ACTIVE','SUSPENDED') AND expires_at>? AND expires_at<=?) OR
+     (status='UNUSED' AND created_at<=?) OR
+     (status='ACTIVE' AND (expires_at IS NULL OR expires_at>?) AND (last_seen_at IS NULL OR last_seen_at<?)) OR
+     status='SUSPENDED'
+   ) AS total_attention,
+   coalesce(sum(status IN ('ACTIVE','SUSPENDED') AND expires_at>? AND expires_at<=?),0) AS expiring_7d,
+   coalesce(sum(status='UNUSED' AND created_at<=?),0) AS unused_30d,
+   coalesce(sum(status='ACTIVE' AND (expires_at IS NULL OR expires_at>?) AND (last_seen_at IS NULL OR last_seen_at<?)),0) AS inactive_7d,
+   coalesce(sum(status='SUSPENDED'),0) AS suspended
+   FROM licenses`,
+    )
+      .bind(
+        t,
+        expiringUntil,
+        unusedBefore,
+        t,
+        inactiveBefore,
+        t,
+        expiringUntil,
+        unusedBefore,
+        t,
+        inactiveBefore,
+      )
+      .first<Row>();
+
+    const rows = await env.DB.prepare(
+      `SELECT *,
+        CASE
+          WHEN status IN ('ACTIVE','SUSPENDED') AND expires_at>? AND expires_at<=? THEN 'EXPIRING'
+          WHEN status='UNUSED' AND created_at<=? THEN 'UNUSED_OLD'
+          WHEN status='ACTIVE' AND (expires_at IS NULL OR expires_at>?) AND (last_seen_at IS NULL OR last_seen_at<?) THEN 'INACTIVE'
+          WHEN status='SUSPENDED' THEN 'SUSPENDED'
+          ELSE NULL
+        END AS attention_kind
+       FROM licenses
+       WHERE
+         (status IN ('ACTIVE','SUSPENDED') AND expires_at>? AND expires_at<=?) OR
+         (status='UNUSED' AND created_at<=?) OR
+         (status='ACTIVE' AND (expires_at IS NULL OR expires_at>?) AND (last_seen_at IS NULL OR last_seen_at<?)) OR
+         status='SUSPENDED'
+       ORDER BY
+         CASE
+           WHEN status IN ('ACTIVE','SUSPENDED') AND expires_at>? AND expires_at<=? THEN 1
+           WHEN status='UNUSED' AND created_at<=? THEN 2
+           WHEN status='ACTIVE' AND (expires_at IS NULL OR expires_at>?) AND (last_seen_at IS NULL OR last_seen_at<?) THEN 3
+           ELSE 4
+         END,
+         coalesce(expires_at, 9223372036854775807) ASC,
+         created_at ASC
+       LIMIT 10`,
+    )
+      .bind(
+        t,
+        expiringUntil,
+        unusedBefore,
+        t,
+        inactiveBefore,
+        t,
+        expiringUntil,
+        unusedBefore,
+        t,
+        inactiveBefore,
+        t,
+        expiringUntil,
+        unusedBefore,
+        t,
+        inactiveBefore,
+      )
+      .all<Row>();
+
+    return {
+      kind: "attention",
+      total_attention: Number(summary?.total_attention ?? 0),
+      expiring_7d: Number(summary?.expiring_7d ?? 0),
+      unused_30d: Number(summary?.unused_30d ?? 0),
+      inactive_7d: Number(summary?.inactive_7d ?? 0),
+      suspended: Number(summary?.suspended ?? 0),
+      licenses: rows.results.map((row) => ({
+        ...support(row),
+        attention_kind: row.attention_kind,
+      })),
+    };
+  }
   if (action === "stats") {
     // Seller-facing "today" follows Korea Standard Time rather than UTC.
     const sellerDayStart = t - ((t + 9 * 3600) % 86400);
