@@ -5,6 +5,7 @@ on:
     branches: [feat/discord-seller-console-v8]
     paths:
       - 'scripts/patch_discord_seller_v8.mjs'
+      - 'scripts/patch_discord_seller_v8_compat.mjs'
       - '.github/workflows/discord-v8-editor.yml'
 
 permissions:
@@ -23,7 +24,9 @@ jobs:
         with:
           node-version: '24'
       - name: Apply seller console v8 UX patch
-        run: node scripts/patch_discord_seller_v8.mjs
+        run: |
+          node scripts/patch_discord_seller_v8.mjs
+          node scripts/patch_discord_seller_v8_compat.mjs
       - name: Format and verify backend
         working-directory: backend
         run: |
