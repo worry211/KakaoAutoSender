@@ -24,20 +24,26 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
       - name: Apply seller console v3 patch
         run: node scripts/patch-discord-seller-v3.mjs
+      - name: Format touched seller-console files
+        working-directory: backend
+        run: npx prettier --write src/discordV2.ts src/discordOperatorUx.ts test/discord-v3-quality.test.ts
       - name: Verify backend commercial gate
         working-directory: backend
-        run: npm ci && npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
+        run: npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
       - name: Confirm intended product diff
         run: |
           git diff --check
-          git diff -- backend/src/discordV2.ts
+          git diff -- backend/src/discordV2.ts backend/src/discordOperatorUx.ts backend/test/discord-v3-quality.test.ts
       - name: Commit verified product source
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add backend/src/discordV2.ts
+          git add backend/src/discordV2.ts backend/src/discordOperatorUx.ts backend/test/discord-v3-quality.test.ts
           git commit -m 'feat(discord): guide seller next actions and handoff' || exit 0
           git push origin HEAD:feat/discord-seller-console-v3-quality
