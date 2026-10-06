@@ -74,7 +74,8 @@ describe("Discord seller console v2", () => {
     const labels = message.components[0].components.map(
       (item: any) => item.label,
     );
-    expect(labels).toContain("＋ 새 라이선스");
+    expect(labels).toContain("＋ 30일 발급");
+    expect(labels).toContain("＋ 영구 발급");
     expect(labels).toContain("고객 찾기");
     expect(labels).toContain("판매 현황");
     expect(
@@ -97,11 +98,11 @@ describe("Discord seller console v2", () => {
     expect(message.embeds[0].fields[0].value).toContain(
       "구매자에게 전달할 KM 키",
     );
-    expect(message.embeds[0].fields[0].value).toContain("주문 #42");
+    expect(message.embeds[0].fields[0].name).toContain("주문 #42");
     const createLabels = message.components[0].components.map(
       (item: any) => item.label,
     );
-    expect(createLabels).toContain("다시 발급");
+    expect(createLabels).toContain("＋ 30일 재발급");
     expect(createLabels).toContain("판매 현황");
   });
 
