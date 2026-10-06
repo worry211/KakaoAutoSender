@@ -21,6 +21,9 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: backend/package-lock.json
+      - name: Refresh lockfile
+        working-directory: backend
+        run: npm install --package-lock-only --ignore-scripts
       - name: Install backend dependencies
         working-directory: backend
         run: npm ci
@@ -34,14 +37,14 @@ jobs:
           npm run lint
           npm test
           npm audit --audit-level=moderate
-      - name: Commit formatting if needed
+      - name: Commit verified normalization
         run: |
-          if git diff --quiet -- backend/src/index.ts backend/src/license.ts; then
-            echo "No formatting changes needed"
+          if git diff --quiet -- backend/package-lock.json backend/src/index.ts backend/src/license.ts; then
+            echo "No generated changes needed"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/src/index.ts backend/src/license.ts
-          git commit -m "style: format platform version policy"
+          git add backend/package-lock.json backend/src/index.ts backend/src/license.ts
+          git commit -m "chore: normalize platform policy and security lockfile"
           git push origin HEAD:feat/platform-version-policy-v1
