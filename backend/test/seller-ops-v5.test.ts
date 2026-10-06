@@ -21,7 +21,9 @@ const base = {
 };
 
 const labels = (message: any) =>
-  message.components.flatMap((row: any) => row.components).map((b: any) => b.label);
+  message.components
+    .flatMap((row: any) => row.components)
+    .map((b: any) => b.label);
 
 describe("Discord seller console v5 state-aware operations", () => {
   it("shows only relevant operations for an active license", () => {
@@ -68,9 +70,7 @@ describe("Discord seller console v5 state-aware operations", () => {
         custom_id: `form:suspend:${id}`,
         components: [
           {
-            components: [
-              { type: 4, custom_id: "reason", value: "고객 요청" },
-            ],
+            components: [{ type: 4, custom_id: "reason", value: "고객 요청" }],
           },
         ],
       },
@@ -88,14 +88,14 @@ describe("Discord seller console v5 state-aware operations", () => {
         custom_id: `form:reset:${id}`,
         components: [
           {
-            components: [
-              { type: 4, custom_id: "reason", value: "PC 교체" },
-            ],
+            components: [{ type: 4, custom_id: "reason", value: "PC 교체" }],
           },
         ],
       },
     });
     expect(command.action).toBe("reset-device");
-    expect(needsConfirmation(command.group, command.action, command.params)).toBe(true);
+    expect(
+      needsConfirmation(command.group, command.action, command.params),
+    ).toBe(true);
   });
 });

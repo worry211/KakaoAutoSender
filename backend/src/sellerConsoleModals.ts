@@ -92,6 +92,61 @@ export function sellerModalFor(customId: string) {
       }),
     ]);
 
+  match = customId.match(/^modal:admin:(LIC-[a-f0-9-]{36})$/i);
+  if (match)
+    return modal(`form:admin:${match[1]}`, "관리 메모 수정", [
+      textInput("memo", "판매자 관리 메모", {
+        required: false,
+        placeholder: "예: 환불 문의 확인 중 · 재발급 보류",
+        maxLength: 500,
+        paragraph: true,
+      }),
+    ]);
+
+  match = customId.match(/^modal:suspend:(LIC-[a-f0-9-]{36})$/i);
+  if (match)
+    return modal(`form:suspend:${match[1]}`, "라이선스 일시 정지", [
+      textInput("reason", "정지 사유", {
+        placeholder: "예: 결제 확인 필요 · 고객 요청",
+        minLength: 2,
+        maxLength: 500,
+        paragraph: true,
+      }),
+    ]);
+
+  match = customId.match(/^modal:reset:(LIC-[a-f0-9-]{36})$/i);
+  if (match)
+    return modal(`form:reset:${match[1]}`, "기기 초기화 요청", [
+      textInput("reason", "기기 초기화 사유", {
+        placeholder: "예: 고객 PC 교체",
+        minLength: 2,
+        maxLength: 500,
+        paragraph: true,
+      }),
+    ]);
+
+  match = customId.match(/^modal:revoke:(LIC-[a-f0-9-]{36})$/i);
+  if (match)
+    return modal(`form:revoke:${match[1]}`, "라이선스 취소 요청", [
+      textInput("reason", "취소 사유", {
+        placeholder: "예: 환불 완료 · 부정 사용 확인",
+        minLength: 2,
+        maxLength: 500,
+        paragraph: true,
+      }),
+    ]);
+
+  match = customId.match(/^modal:delete:(LIC-[a-f0-9-]{36})$/i);
+  if (match)
+    return modal(`form:delete:${match[1]}`, "라이선스 삭제 / 차단 요청", [
+      textInput("reason", "삭제 / 차단 사유", {
+        placeholder: "삭제 후 사용이 차단됩니다.",
+        minLength: 2,
+        maxLength: 500,
+        paragraph: true,
+      }),
+    ]);
+
   return null;
 }
 
@@ -160,6 +215,41 @@ export function commandFromSellerModal(interaction: any): SellerConsoleCommand {
         memo: String(values.memo ?? "").slice(0, 500),
       },
     };
+
+  match = customId.match(/^form:admin:(LIC-[a-f0-9-]{36})$/i);
+  if (match && LICENSE_ID.test(match[1]))
+    return {
+      group: "license",
+      action: "note",
+      params: {
+        "key-or-id": match[1],
+        memo: String(values.memo ?? "").slice(0, 500),
+      },
+    };
+
+  const reasonCommand = (
+    action: string,
+    pattern: RegExp,
+  ): SellerConsoleCommand | null => {
+    const reasonMatch = customId.match(pattern);
+    if (!reasonMatch || !LICENSE_ID.test(reasonMatch[1])) return null;
+    const reason = String(values.reason ?? "")
+      .trim()
+      .slice(0, 500);
+    if (reason.length < 2) throw new ApiError("INVALID_COMMAND");
+    return {
+      group: "license",
+      action,
+      params: { "key-or-id": reasonMatch[1], reason },
+    };
+  };
+
+  const actionCommand =
+    reasonCommand("suspend", /^form:suspend:(LIC-[a-f0-9-]{36})$/i) ??
+    reasonCommand("reset-device", /^form:reset:(LIC-[a-f0-9-]{36})$/i) ??
+    reasonCommand("revoke", /^form:revoke:(LIC-[a-f0-9-]{36})$/i) ??
+    reasonCommand("delete", /^form:delete:(LIC-[a-f0-9-]{36})$/i);
+  if (actionCommand) return actionCommand;
 
   throw new ApiError("INVALID_COMMAND");
 }

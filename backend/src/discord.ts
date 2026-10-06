@@ -37,7 +37,9 @@ export const needsConfirmation = (
   params: Row = {},
 ) =>
   group === "license"
-    ? ["revoke", "delete", "reset-device"].includes(action)
+    ? ["revoke", "delete", "reset-device", "replace-unused-key"].includes(
+        action,
+      )
     : action === "kill-switch" ||
       action === "min-version" ||
       (action === "maintenance" && params.enabled === true);
