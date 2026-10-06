@@ -23,14 +23,18 @@ describe("seller console v7 commercial UX", () => {
       (option: any) => option.name === "duration",
     );
     expect(duration.choices).toContainEqual({ name: "30일", value: "30d" });
-    expect(duration.choices).toContainEqual({ name: "영구", value: "permanent" });
+    expect(duration.choices).toContainEqual({
+      name: "영구",
+      value: "permanent",
+    });
 
     const list = subcommand("license", "list");
-    const status = list.options.find(
-      (option: any) => option.name === "status",
-    );
+    const status = list.options.find((option: any) => option.name === "status");
     expect(status.choices).toContainEqual({ name: "사용 중", value: "ACTIVE" });
-    expect(status.choices).toContainEqual({ name: "일시 정지", value: "SUSPENDED" });
+    expect(status.choices).toContainEqual({
+      name: "일시 정지",
+      value: "SUSPENDED",
+    });
     expect(subcommand("license", "help").description).toContain("버튼형");
     expect(subcommand("system", "help").description).toContain("버튼형");
   });
