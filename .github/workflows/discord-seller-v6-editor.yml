@@ -1,0 +1,40 @@
+name: Discord seller v6 one-shot editor
+
+on:
+  push:
+    branches: [feat/discord-seller-console-v6-commercial-ux]
+    paths:
+      - 'scripts/apply-discord-seller-v6.mjs'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/discord-seller-console-v6-commercial-ux
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Apply seller console v6 UX patch
+        run: node scripts/apply-discord-seller-v6.mjs
+      - name: Verify backend commercial gate
+        working-directory: backend
+        run: npm ci && npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
+      - name: Remove one-shot editor files
+        run: git rm scripts/apply-discord-seller-v6.mjs .github/workflows/discord-seller-v6-editor.yml
+      - name: Commit verified product changes only
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/discordV2.ts backend/src/sellerConsoleModals.ts backend/test/seller-ux-v6.test.ts
+          git commit -m "feat(discord): polish seller console commercial UX"
+          git push origin HEAD:feat/discord-seller-console-v6-commercial-ux
