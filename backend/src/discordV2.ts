@@ -186,15 +186,15 @@ const recoveryHint = (state: string) => {
     ILLEGAL_STATE:
       "상세 화면을 **새로고침**한 뒤 현재 상태에 표시되는 작업만 선택하세요.",
     INVALID_COMMAND:
-      "`/license help` 또는 `/system help`에서 입력 형식을 확인하세요.",
+      "판매자 홈이나 운영 현황으로 돌아가 같은 작업 버튼에서 입력값을 다시 확인하세요.",
     INVALID_DURATION:
       "7d / 30d / 90d / 180d / 365d / permanent 중 하나를 사용하세요.",
     CONFLICT: "**새로고침**으로 최신 상태를 불러온 뒤 다시 시도하세요.",
     CONFIRMATION_EXPIRED:
-      "원래 명령을 다시 실행하면 새 2분 확인창이 생성됩니다.",
+      "같은 작업 버튼을 다시 누르면 새 2분 확인창이 생성됩니다.",
     RATE_LIMITED: "잠시 기다린 뒤 같은 작업을 다시 시도하세요.",
     INVALID_POLICY:
-      "`/system status`로 현재 정책을 확인한 뒤 안전 범위 안에서 다시 설정하세요.",
+      "운영 현황에서 현재 정책을 확인한 뒤 안전 범위 안에서 다시 설정하세요.",
   };
   return (
     hints[state] ?? "같은 오류가 반복되면 운영 로그와 대상 LIC ID를 확인하세요."
@@ -206,6 +206,8 @@ const confirmationImpact = (group: string, action: string) => {
     return "전체 고객의 자동전송이 즉시 영향을 받습니다.";
   if (group === "system" && action === "min-version")
     return "기준보다 낮은 앱 버전은 업데이트 전까지 사용이 차단될 수 있습니다.";
+  if (group === "system" && action === "policy")
+    return "전체 고객의 서버 확인 주기와 오프라인 유예가 즉시 변경됩니다.";
   if (group === "system" && action === "maintenance")
     return "점검이 끝날 때까지 고객 자동전송이 제한될 수 있습니다.";
   if (action === "delete")
@@ -440,37 +442,47 @@ export function renderDiscordPanel(result: any, command?: Command) {
       [
         {
           title: "⚙️ 서비스 운영 관리",
-          description: "전체 고객에게 영향을 줄 수 있는 운영 명령어입니다.",
+          description:
+            "운영 현황에서 현재 상태를 확인하고 **버튼으로 바로 변경**합니다. 명령어를 외울 필요가 없습니다.",
           color: COLORS.blue,
           fields: [
             {
-              name: "📊 상태",
-              value: "`/system status` 운영 현황",
-              inline: true,
-            },
-            {
-              name: "🧰 제어",
+              name: "🛡️ 안전 제어",
               value:
-                "`/system maintenance` 점검 모드\n`/system kill-switch` 긴급 중단",
+                "**운영 현황**에서 점검 모드와 긴급 중단을 현재 상태에 맞게 켜거나 해제합니다.",
               inline: true,
             },
             {
-              name: "📦 버전",
+              name: "📦 Android 배포",
               value:
-                "`/system min-version` 최소 버전\n`/system latest-version` 최신 버전",
+                "최소·최신 versionCode와 고객 다운로드 주소를 운영 현황의 버튼에서 관리합니다.",
               inline: true,
             },
             {
-              name: "🌐 정책",
-              value: "`/system policy` 서버 확인 / 오프라인 유예",
+              name: "🌐 라이선스 정책",
+              value: "서버 확인 주기와 오프라인 유예를 버튼에서 변경합니다.",
               inline: true,
+            },
+            {
+              name: "🔐 변경 보호",
+              value:
+                "점검 시작·긴급 중단·최소 버전·서버 정책 변경은 **최종 확인창**을 거쳐 실수를 막습니다.",
+              inline: false,
             },
           ],
-          footer: footer("전체 고객 영향 작업은 최종 확인 필요"),
+          footer: footer("버튼 우선 · 전역 영향 작업은 최종 확인"),
           timestamp: stamp(),
         },
       ],
-      [{ type: 1, components: [button("운영 현황", "nav:system:status", 1)] }],
+      [
+        {
+          type: 1,
+          components: [
+            button("운영 현황 열기", "nav:system:status", 1),
+            button("판매자 홈", "nav:home", 2),
+          ],
+        },
+      ],
     );
 
   if (result?.kind === "system_status")

@@ -42,6 +42,7 @@ export const needsConfirmation = (
       )
     : action === "kill-switch" ||
       action === "min-version" ||
+      action === "policy" ||
       (action === "maintenance" && params.enabled === true);
 
 const response = (content: string, components: any[] = []) => ({
@@ -102,25 +103,25 @@ export function friendlyError(state: string) {
       "라이선스를 찾지 못했습니다. LIC ID 또는 KM 키를 다시 확인하세요.",
     FORBIDDEN: "판매자 권한이 없습니다.",
     INVALID_COMMAND:
-      "명령어 입력값이 올바르지 않습니다. /license help 또는 /system help를 확인하세요.",
+      "입력값이 올바르지 않습니다. 판매자 홈 또는 운영 현황에서 같은 작업을 다시 열어 확인하세요.",
     INVALID_DURATION: "지원하지 않는 기간입니다.",
     INVALID_QUANTITY: "발급 수량은 1~10개만 가능합니다.",
     INVALID_PAGE: "페이지 번호가 올바르지 않습니다.",
     INVALID_STATUS: "지원하지 않는 라이선스 상태입니다.",
     INVALID_VERSION: "versionCode 값이 올바르지 않습니다.",
     MIN_VERSION_ABOVE_LATEST:
-      "최소 지원 버전이 최신 버전보다 높습니다. /system latest-version을 먼저 올리세요.",
+      "최소 지원 버전이 최신 버전보다 높습니다. 운영 현황에서 최신 버전을 먼저 올리세요.",
     LATEST_VERSION_BELOW_MIN:
       "최신 버전은 현재 최소 지원 버전보다 낮게 설정할 수 없습니다.",
     INVALID_URL: "다운로드 주소는 유효한 HTTPS URL이어야 합니다.",
     INVALID_POLICY:
       "확인 주기는 30~300초, 오프라인 유예는 0~600초로 설정하세요.",
     ILLEGAL_STATE:
-      "현재 라이선스 상태에서는 이 작업을 실행할 수 없습니다. /license info로 먼저 상태를 확인하세요.",
+      "현재 라이선스 상태에서는 이 작업을 실행할 수 없습니다. 고객 상세 화면을 새로고침해 가능한 작업을 확인하세요.",
     CONFLICT:
       "동시에 다른 변경이 적용되었습니다. 상태를 다시 확인한 뒤 재시도하세요.",
     CONFIRMATION_EXPIRED:
-      "확인 요청이 만료되었거나 이미 처리되었습니다. 명령어를 다시 실행하세요.",
+      "확인 요청이 만료되었거나 이미 처리되었습니다. 같은 작업 버튼을 다시 눌러 새 확인창을 여세요.",
     RATE_LIMITED: "요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
     INVALID_CONFIRMATION: "유효하지 않은 확인 요청입니다.",
   };
@@ -446,7 +447,7 @@ export async function discord(
         data = response(
           e instanceof ApiError
             ? "❌ " + friendlyError(e.state)
-            : "❌ 처리하지 못했습니다. 잠시 후 다시 시도하고 /license info로 상태를 확인하세요.",
+            : "❌ 처리하지 못했습니다. 잠시 후 다시 시도하고 판매자 홈에서 고객 상태를 다시 확인하세요.",
         );
       }
       // Neither response content nor interaction token is persisted or logged.
