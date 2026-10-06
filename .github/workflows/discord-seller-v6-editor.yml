@@ -5,6 +5,7 @@ on:
     branches: [feat/discord-seller-console-v6-commercial-ux]
     paths:
       - 'scripts/apply-discord-seller-v6.mjs'
+      - 'scripts/fix-discord-v6-script.mjs'
 
 permissions:
   contents: write
@@ -23,13 +24,15 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: backend/package-lock.json
-      - name: Apply seller console v6 UX patch
-        run: node scripts/apply-discord-seller-v6.mjs
+      - name: Repair and apply seller console v6 UX patch
+        run: |
+          node scripts/fix-discord-v6-script.mjs
+          node scripts/apply-discord-seller-v6.mjs
       - name: Verify backend commercial gate
         working-directory: backend
         run: npm ci && npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
       - name: Remove one-shot editor files
-        run: git rm scripts/apply-discord-seller-v6.mjs .github/workflows/discord-seller-v6-editor.yml
+        run: git rm scripts/apply-discord-seller-v6.mjs scripts/fix-discord-v6-script.mjs .github/workflows/discord-seller-v6-editor.yml
       - name: Commit verified product changes only
         shell: bash
         run: |
