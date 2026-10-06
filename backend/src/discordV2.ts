@@ -530,9 +530,43 @@ export function renderDiscordPanel(result: any, command?: Command) {
         {
           type: 1,
           components: [
-            button("새로고침", "nav:system:status", 1),
-            button("운영 도움말", "nav:system:help", 2),
+            button("↻ 새로고침", "nav:system:status", 1),
+            button(
+              result.maintenance ? "점검 해제" : "점검 모드 켜기",
+              result.maintenance
+                ? "act:system:maintenance:off"
+                : "modal:system:maintenance:on",
+              result.maintenance ? 3 : 2,
+            ),
+            button(
+              result.kill_switch ? "긴급 중단 해제" : "긴급 중단",
+              result.kill_switch
+                ? "act:system:kill-switch:off"
+                : "modal:system:kill-switch:on",
+              result.kill_switch ? 3 : 4,
+            ),
             button("판매자 홈", "nav:home", 2),
+          ],
+        },
+        {
+          type: 1,
+          components: [
+            button(
+              "최소 버전",
+              `modal:system:min-version:${Number(result.min_version) || 20}`,
+              2,
+            ),
+            button(
+              "최신 버전",
+              `modal:system:latest-version:${Number(result.latest_version) || 20}`,
+              1,
+            ),
+            button(
+              "서버 정책",
+              `modal:system:policy:${Number(result.heartbeat_seconds) || 60}:${Number(result.grace_seconds) || 0}`,
+              2,
+            ),
+            button("운영 도움말", "nav:system:help", 2),
           ],
         },
       ],
@@ -933,6 +967,18 @@ function navCommand(custom: string): Command | null {
     return { group: "license", action: "help", params: {} };
   if (custom === "nav:license:help")
     return { group: "license", action: "help", params: {} };
+  if (custom === "act:system:maintenance:off")
+    return {
+      group: "system",
+      action: "maintenance",
+      params: { enabled: false, message: "" },
+    };
+  if (custom === "act:system:kill-switch:off")
+    return {
+      group: "system",
+      action: "kill-switch",
+      params: { enabled: false, reason: "판매자 콘솔에서 긴급 중단 해제" },
+    };
   if (custom === "nav:system:status")
     return { group: "system", action: "status", params: {} };
   if (custom === "nav:system:help")

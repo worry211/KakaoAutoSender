@@ -156,6 +156,70 @@ export function sellerModalFor(customId: string) {
       }),
     ]);
 
+  if (customId === "modal:system:maintenance:on")
+    return modal("form:system:maintenance:on", "점검 모드 켜기", [
+      textInput("message", "고객 안내", {
+        placeholder: "예: 서버 점검 중입니다. 잠시 후 다시 시도해 주세요.",
+        minLength: 2,
+        maxLength: 500,
+        paragraph: true,
+      }),
+    ]);
+
+  if (customId === "modal:system:kill-switch:on")
+    return modal("form:system:kill-switch:on", "긴급 중단 켜기", [
+      textInput("reason", "긴급 중단 사유", {
+        placeholder: "예: 오배송 가능성 확인 중",
+        minLength: 2,
+        maxLength: 500,
+        paragraph: true,
+      }),
+    ]);
+
+  match = customId.match(/^modal:system:min-version:(\d{1,8})$/);
+  if (match)
+    return modal("form:system:min-version", "최소 지원 버전 변경", [
+      textInput("version", "최소 versionCode", {
+        value: match[1],
+        placeholder: "예: 34",
+        maxLength: 8,
+      }),
+    ]);
+
+  match = customId.match(/^modal:system:latest-version:(\d{1,8})$/);
+  if (match)
+    return modal("form:system:latest-version", "최신 버전 배포 정보", [
+      textInput("version", "최신 versionCode", {
+        value: match[1],
+        placeholder: "예: 34",
+        maxLength: 8,
+      }),
+      textInput("url", "HTTPS 다운로드 주소", {
+        placeholder: "https://...",
+        minLength: 8,
+        maxLength: 500,
+      }),
+      textInput("notes", "릴리즈 노트", {
+        required: false,
+        placeholder: "예: 안정성 개선 및 UI 업데이트",
+        maxLength: 500,
+        paragraph: true,
+      }),
+    ]);
+
+  match = customId.match(/^modal:system:policy:(\d{1,4}):(\d{1,4})$/);
+  if (match)
+    return modal("form:system:policy", "라이선스 확인 정책", [
+      textInput("heartbeat", "서버 확인 주기 (30~300초)", {
+        value: match[1],
+        maxLength: 3,
+      }),
+      textInput("grace", "오프라인 유예 (0~600초)", {
+        value: match[2],
+        maxLength: 3,
+      }),
+    ]);
+
   return null;
 }
 
@@ -181,6 +245,64 @@ const validDuration = (value: string) => {
 export function commandFromSellerModal(interaction: any): SellerConsoleCommand {
   const customId = String(interaction?.data?.custom_id ?? "");
   const values = modalValues(interaction);
+
+  if (customId === "form:system:maintenance:on") {
+    const message = String(values.message ?? "")
+      .trim()
+      .slice(0, 500);
+    if (message.length < 2) throw new ApiError("INVALID_COMMAND");
+    return {
+      group: "system",
+      action: "maintenance",
+      params: { enabled: true, message },
+    };
+  }
+
+  if (customId === "form:system:kill-switch:on") {
+    const reason = String(values.reason ?? "")
+      .trim()
+      .slice(0, 500);
+    if (reason.length < 2) throw new ApiError("INVALID_COMMAND");
+    return {
+      group: "system",
+      action: "kill-switch",
+      params: { enabled: true, reason },
+    };
+  }
+
+  if (customId === "form:system:min-version") {
+    const version = Number(values.version);
+    if (!Number.isInteger(version) || version < 20 || version > 99999999)
+      throw new ApiError("INVALID_COMMAND");
+    return { group: "system", action: "min-version", params: { version } };
+  }
+
+  if (customId === "form:system:latest-version") {
+    const version = Number(values.version);
+    const url = String(values.url ?? "").trim();
+    const notes = String(values.notes ?? "")
+      .trim()
+      .slice(0, 500);
+    if (!Number.isInteger(version) || version < 20 || version > 99999999)
+      throw new ApiError("INVALID_COMMAND");
+    if (!/^https:\/\/[^\s]+$/i.test(url) || url.length > 500)
+      throw new ApiError("INVALID_COMMAND");
+    return {
+      group: "system",
+      action: "latest-version",
+      params: { version, url, ...(notes ? { notes } : {}) },
+    };
+  }
+
+  if (customId === "form:system:policy") {
+    const heartbeat = Number(values.heartbeat);
+    const grace = Number(values.grace);
+    if (!Number.isInteger(heartbeat) || heartbeat < 30 || heartbeat > 300)
+      throw new ApiError("INVALID_COMMAND");
+    if (!Number.isInteger(grace) || grace < 0 || grace > 600)
+      throw new ApiError("INVALID_COMMAND");
+    return { group: "system", action: "policy", params: { heartbeat, grace } };
+  }
 
   if (customId === "form:create") {
     const quantity = Number(values.quantity || "1");
