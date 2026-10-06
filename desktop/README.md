@@ -21,7 +21,7 @@ Two separate open-chat windows can therefore remain distinct even when their vis
 - same signed license protocol as Android (`KM1`, ECDSA P-256, nonce/timestamp/body+token hashes)
 - activation, same-install recovery, access heartbeat and refresh
 - license lease gate before every scheduled dispatch
-- commercial dark desktop UI with custom dark ComboBox/drop-down styling
+- commercial dark desktop UI with unified rounded fields, tabs, selection states and restrained brand accents
 - multi-room profiles, search, state filters and sorting
 - interval schedules and fixed daily times
 - quick 1 / 5 / 10 / 30 / 60 minute interval presets
@@ -31,8 +31,8 @@ Two separate open-chat windows can therefore remain distinct even when their vis
 - one-level latest bulk-change undo; restored rooms stay stopped until explicitly restarted
 - selected start / stop / enable / disable / validate / delete
 - selected-room one-shot send with large-batch confirmation
-- single-room editor valid auto-save with a fixed bottom save/test action bar
-- `Ctrl+S` explicit save and `Ctrl+Enter` one-shot send
+- single-room editor with debounced automatic persistence; no redundant visible save button
+- `Ctrl+S` remains an optional explicit flush shortcut; `Ctrl+Enter` performs one-shot send
 - system tray show / start / stop / exit
 - configurable X-button behavior: hide to tray or exit
 - every real exit path confirms when automation is still running

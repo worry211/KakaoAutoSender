@@ -85,6 +85,7 @@ public partial class MainWindow : Window
         Closed += (_, _) => Shutdown();
         if (_rooms.Count > 0) RoomList.SelectedIndex = 0;
         AppendLog("Windows 클라이언트 시작 · 자동전송은 명시적 시작 전까지 정지 상태");
+        if (!string.IsNullOrWhiteSpace(_store.LastRecoveryNotice)) AppendLog(_store.LastRecoveryNotice);
         UpdateSelectionUi();
         UpdateDashboard();
     }
@@ -497,7 +498,7 @@ public partial class MainWindow : Window
             _editorDirty = false;
             QueueSaveSettings();
             RefreshRoomUi();
-            EditorSaveStatusText.Text = $"저장됨 · {DateTime.Now:HH:mm:ss}";
+            EditorSaveStatusText.Text = $"자동 저장됨 · {DateTime.Now:HH:mm:ss}";
             AppendLog("선택 방 설정 저장");
         }
     }
@@ -587,7 +588,7 @@ public partial class MainWindow : Window
         _loadingSingleEditor = false;
         _editingRoomId = room.Id;
         _editorDirty = false;
-        EditorSaveStatusText.Text = "변경사항 자동 저장 · Ctrl+S 저장 · Ctrl+Enter 1회 전송";
+        EditorSaveStatusText.Text = "변경사항은 자동 저장됩니다 · Ctrl+Enter 1회 전송";
     }
 
     private void SetSingleEditorEnabled(bool enabled)
