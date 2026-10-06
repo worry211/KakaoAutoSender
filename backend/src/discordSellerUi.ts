@@ -1,10 +1,10 @@
 type CommandLike = { group?: string; action?: string; params?: Record<string, any> };
 
 type DiscordMessage = {
-  content?: string;
-  embeds?: any[];
-  components?: any[];
-  allowed_mentions?: any;
+  content: string;
+  embeds: any[];
+  components: any[];
+  allowed_mentions: any;
 };
 
 const COLORS = {
@@ -79,20 +79,19 @@ const nextAction = (license: any) => {
 };
 
 const hasNavigation = (message: DiscordMessage) =>
-  (message.components ?? []).some((row: any) =>
+  message.components.some((row: any) =>
     (row?.components ?? []).some((item: any) =>
       String(item?.custom_id ?? "").startsWith("nav:home"),
     ),
   );
 
 const addNavigation = (message: DiscordMessage) => {
-  message.components ??= [];
   if (message.components.length >= 5 || hasNavigation(message)) return;
   message.components.push(navRow());
 };
 
 const polishHome = (message: DiscordMessage) => {
-  const embed = message.embeds?.[0];
+  const embed = message.embeds[0];
   if (!embed) return;
   embed.title = "KakaoMacro Seller · 운영 홈";
   embed.description =
@@ -132,7 +131,6 @@ const polishHome = (message: DiscordMessage) => {
   ];
   embed.footer = { text: "KakaoMacro Seller · 판매/지원 운영 콘솔" };
 
-  message.components ??= [];
   const firstRow = message.components[0];
   if (
     firstRow?.components &&
@@ -144,7 +142,7 @@ const polishHome = (message: DiscordMessage) => {
 };
 
 const polishStats = (message: DiscordMessage, result: any) => {
-  const embed = message.embeds?.[0];
+  const embed = message.embeds[0];
   if (!embed) return;
   const total = safeNumber(result?.total);
   const active = safeNumber(result?.active);
@@ -175,7 +173,7 @@ const polishStats = (message: DiscordMessage, result: any) => {
 };
 
 const polishList = (message: DiscordMessage, result: any, command?: CommandLike) => {
-  const embed = message.embeds?.[0];
+  const embed = message.embeds[0];
   const licenses = Array.isArray(result?.licenses) ? result.licenses : [];
   if (!embed) return;
 
@@ -204,7 +202,7 @@ const polishList = (message: DiscordMessage, result: any, command?: CommandLike)
 };
 
 const polishDetail = (message: DiscordMessage, result: any) => {
-  const embed = message.embeds?.[0];
+  const embed = message.embeds[0];
   if (!embed) return;
   embed.title = `${stateLabel(result?.state)} · ${shortLicenseId(result?.license_id)}`;
   embed.description = `관리 ID  \`${result?.license_id ?? "—"}\``;
@@ -216,7 +214,7 @@ const polishDetail = (message: DiscordMessage, result: any) => {
 };
 
 const polishIssued = (message: DiscordMessage, result: any[]) => {
-  const embed = message.embeds?.[0];
+  const embed = message.embeds[0];
   if (!embed) return;
   embed.title = "판매 전달 패키지 준비 완료";
   embed.description = [
@@ -228,7 +226,7 @@ const polishIssued = (message: DiscordMessage, result: any[]) => {
 };
 
 const polishSystem = (message: DiscordMessage, result: any) => {
-  const embed = message.embeds?.[0];
+  const embed = message.embeds[0];
   if (!embed) return;
   const blocked = Boolean(result?.kill_switch);
   const maintenance = Boolean(result?.maintenance);
@@ -243,7 +241,7 @@ const polishSystem = (message: DiscordMessage, result: any) => {
 };
 
 const polishHistory = (message: DiscordMessage, result: any) => {
-  const embed = message.embeds?.[0];
+  const embed = message.embeds[0];
   if (!embed) return;
   embed.title = `변경 이력 · ${shortLicenseId(result?.license_id)}`;
   embed.description = `관리 ID  \`${result?.license_id ?? "—"}\`\n페이지 **${result?.page ?? 1}**${result?.has_more ? " · 다음 페이지 있음" : ""}`;
@@ -259,9 +257,7 @@ export function polishSellerPanel(
   message: DiscordMessage,
   result: any,
   command?: CommandLike,
-) {
-  if (!message || typeof message !== "object") return message;
-
+): DiscordMessage {
   if (result?.kind === "license_help") polishHome(message);
   else if (result?.kind === "system_status") polishSystem(message, result);
   else if (Array.isArray(result)) polishIssued(message, result);
