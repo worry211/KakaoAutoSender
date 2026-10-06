@@ -1,0 +1,43 @@
+name: Discord seller console v3 editor
+
+on:
+  push:
+    branches: [feat/discord-seller-console-v3-quality]
+    paths:
+      - 'scripts/patch-discord-seller-v3.mjs'
+      - '.github/workflows/discord-v3-editor.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/discord-seller-console-v3-quality
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Apply seller console v3 patch
+        run: node scripts/patch-discord-seller-v3.mjs
+      - name: Verify backend commercial gate
+        working-directory: backend
+        run: npm ci && npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
+      - name: Confirm intended product diff
+        run: |
+          git diff --check
+          git diff -- backend/src/discordV2.ts
+      - name: Commit verified product source
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/src/discordV2.ts
+          git commit -m 'feat(discord): guide seller next actions and handoff' || exit 0
+          git push origin HEAD:feat/discord-seller-console-v3-quality
