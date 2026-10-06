@@ -1,5 +1,6 @@
 name: Discord seller console v3 editor
 
+# Verification retry after aligning the customer-handoff regression expectation.
 on:
   push:
     branches:
