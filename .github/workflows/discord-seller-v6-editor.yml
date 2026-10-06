@@ -28,9 +28,15 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Apply v6 seller console patch
         run: python scripts/patch_discord_seller_v6.py
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Format patched seller console
+        working-directory: backend
+        run: npx prettier --write src/discordV2.ts src/sellerConsoleModals.ts test/seller-ops-v6.test.ts
       - name: Verify backend
         working-directory: backend
-        run: npm ci && npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
+        run: npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
       - name: Commit verified product changes
         run: |
           git config user.name "github-actions[bot]"
