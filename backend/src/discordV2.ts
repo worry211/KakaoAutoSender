@@ -211,6 +211,51 @@ const button = (
   disabled = false,
 ) => ({ type: 2, style, label, custom_id, disabled });
 
+const detailActionRows = (license: any) => {
+  const licenseId = String(license?.license_id ?? "");
+  const state = String(license?.state ?? "");
+  const primary: any[] = [];
+  if (["ACTIVE", "UNUSED", "EXPIRED"].includes(state))
+    primary.push(button("기간 연장", `modal:extend:${licenseId}`, 3));
+  primary.push(
+    button("고객 메모", `modal:customer:${licenseId}`, 1),
+    button("관리 메모", `modal:admin:${licenseId}`, 2),
+    button("변경 이력", `nav:hist:${licenseId}:1`, 2),
+    button("새로고침", `nav:info:${licenseId}`, 2),
+  );
+
+  const operations: any[] = [];
+  if (state === "ACTIVE") {
+    operations.push(
+      button("일시 정지", `modal:suspend:${licenseId}`, 2),
+      button("기기 초기화", `modal:reset:${licenseId}`, 1),
+      button("라이선스 취소", `modal:revoke:${licenseId}`, 4),
+    );
+  } else if (state === "SUSPENDED") {
+    operations.push(
+      button("정지 해제", `act:resume:${licenseId}`, 3),
+      button("라이선스 취소", `modal:revoke:${licenseId}`, 4),
+    );
+  } else if (state === "UNUSED") {
+    operations.push(
+      button("미사용 키 교체", `act:replace:${licenseId}`, 1),
+      button("라이선스 취소", `modal:revoke:${licenseId}`, 4),
+    );
+  } else if (state === "EXPIRED") {
+    operations.push(button("라이선스 취소", `modal:revoke:${licenseId}`, 4));
+  } else if (state === "REVOKED") {
+    operations.push(button("삭제 / 차단", `modal:delete:${licenseId}`, 4));
+  }
+  operations.push(button("판매자 홈", "nav:home", 2));
+
+  return [
+    ...(primary.length ? [{ type: 1, components: primary.slice(0, 5) }] : []),
+    ...(operations.length
+      ? [{ type: 1, components: operations.slice(0, 5) }]
+      : []),
+  ];
+};
+
 function pager(command: Command | undefined, result: any) {
   if (!command) return [];
   const page = Number(result?.page ?? command.params.page ?? 1);
@@ -672,18 +717,7 @@ export function renderDiscordPanel(result: any, command?: Command) {
           timestamp: stamp(),
         },
       ],
-      [
-        {
-          type: 1,
-          components: [
-            button("기간 연장", `modal:extend:${result.license_id}`, 3),
-            button("고객 메모", `modal:customer:${result.license_id}`, 1),
-            button("변경 이력", `nav:hist:${result.license_id}:1`, 2),
-            button("새로고침", `nav:info:${result.license_id}`, 2),
-            button("판매자 홈", "nav:home", 2),
-          ],
-        },
-      ],
+      detailActionRows(result),
     );
   }
 
@@ -844,6 +878,20 @@ function navCommand(custom: string): Command | null {
       action: "info",
       params: { "key-or-id": m[1] },
     };
+  m = custom.match(/^act:resume:(LIC-[a-f0-9-]{36})$/i);
+  if (m)
+    return {
+      group: "license",
+      action: "resume",
+      params: { "key-or-id": m[1] },
+    };
+  m = custom.match(/^act:replace:(LIC-[a-f0-9-]{36})$/i);
+  if (m)
+    return {
+      group: "license",
+      action: "replace-unused-key",
+      params: { "key-or-id": m[1] },
+    };
   if (custom === "nav:stats")
     return { group: "license", action: "stats", params: {} };
   if (custom === "nav:attention")
@@ -900,6 +948,7 @@ export async function executeDiscordV2(
 ) {
   authorize(env, actor);
   let command: Command;
+  let confirmed = false;
 
   if (interaction.type === 5) {
     command = commandFromSellerModal(interaction) as Command;
@@ -924,6 +973,7 @@ export async function executeDiscordV2(
           },
         ]);
       command = JSON.parse(record.payload);
+      confirmed = true;
     } else {
       const nav = navCommand(custom);
       if (!nav) throw new ApiError("INVALID_CONFIRMATION");
@@ -935,94 +985,97 @@ export async function executeDiscordV2(
     } catch {
       throw new ApiError("INVALID_COMMAND");
     }
+  }
 
-    if (needsConfirmation(command.group, command.action, command.params)) {
-      if (command.group === "license") {
-        const info = await admin(
-          env,
-          actor,
-          "license",
-          "info",
-          command.params,
-          interaction.id,
-        );
-        command.params["key-or-id"] = info.license_id;
-        command.params.__confirm_state = info.state;
-        command.params.__confirm_customer = String(info.customer_memo ?? "");
-      }
-      const confirmation = id("CFM-");
-      await env.DB.prepare(
-        "INSERT INTO confirmations(id,admin_id,payload,expires_at) VALUES(?,?,?,?)",
-      )
-        .bind(confirmation, actor, JSON.stringify(command), now() + 120)
-        .run();
-      const target = command.params["key-or-id"] ?? "전체 설치";
-      const mode =
-        command.params.enabled === true
-          ? "켜기"
-          : command.params.enabled === false
-            ? "끄기"
-            : "실행";
-      return response(
-        "",
-        [
-          {
-            title: "⚠️ 최종 확인 필요",
-            description:
-              "영향이 큰 작업입니다. 대상과 사유를 확인한 뒤 실행하세요.",
-            color: COLORS.yellow,
-            fields: [
-              {
-                name: "작업",
-                value: `**${actionLabel(
-                  command.group === "system"
-                    ? command.action.toUpperCase().replaceAll("-", "_") +
-                        "_CHANGE"
-                    : command.action.toUpperCase().replaceAll("-", "_"),
-                )} · ${mode}**`,
-                inline: false,
-              },
-              { name: "대상", value: `**${target}**`, inline: false },
-              ...(command.group === "license"
-                ? [
-                    {
-                      name: "현재 상태",
-                      value: stateMeta(command.params.__confirm_state).label,
-                      inline: true,
-                    },
-                    {
-                      name: "고객 확인",
-                      value: oneLine(command.params.__confirm_customer, 180),
-                      inline: true,
-                    },
-                  ]
-                : []),
-              {
-                name: "영향",
-                value: confirmationImpact(command.group, command.action),
-                inline: false,
-              },
-              {
-                name: "사유",
-                value: oneLine(command.params.reason, 300),
-                inline: false,
-              },
-            ],
-            footer: footer("2분 후 확인 요청 만료"),
-            timestamp: stamp(),
-          },
-        ],
-        [
-          {
-            type: 1,
-            components: [
-              button("확인하고 실행", "confirm:" + confirmation, 4),
-              button("취소", "cancel:" + confirmation, 2),
-            ],
-          },
-        ],
+  if (
+    !confirmed &&
+    needsConfirmation(command.group, command.action, command.params)
+  ) {
+    if (command.group === "license") {
+      const info = await admin(
+        env,
+        actor,
+        "license",
+        "info",
+        command.params,
+        interaction.id,
       );
+      command.params["key-or-id"] = info.license_id;
+      command.params.__confirm_state = info.state;
+      command.params.__confirm_customer = String(info.customer_memo ?? "");
     }
+    const confirmation = id("CFM-");
+    await env.DB.prepare(
+      "INSERT INTO confirmations(id,admin_id,payload,expires_at) VALUES(?,?,?,?)",
+    )
+      .bind(confirmation, actor, JSON.stringify(command), now() + 120)
+      .run();
+    const target = command.params["key-or-id"] ?? "전체 설치";
+    const mode =
+      command.params.enabled === true
+        ? "켜기"
+        : command.params.enabled === false
+          ? "끄기"
+          : "실행";
+    return response(
+      "",
+      [
+        {
+          title: "⚠️ 최종 확인 필요",
+          description:
+            "영향이 큰 작업입니다. 대상과 사유를 확인한 뒤 실행하세요.",
+          color: COLORS.yellow,
+          fields: [
+            {
+              name: "작업",
+              value: `**${actionLabel(
+                command.group === "system"
+                  ? command.action.toUpperCase().replaceAll("-", "_") +
+                      "_CHANGE"
+                  : command.action.toUpperCase().replaceAll("-", "_"),
+              )} · ${mode}**`,
+              inline: false,
+            },
+            { name: "대상", value: `**${target}**`, inline: false },
+            ...(command.group === "license"
+              ? [
+                  {
+                    name: "현재 상태",
+                    value: stateMeta(command.params.__confirm_state).label,
+                    inline: true,
+                  },
+                  {
+                    name: "고객 확인",
+                    value: oneLine(command.params.__confirm_customer, 180),
+                    inline: true,
+                  },
+                ]
+              : []),
+            {
+              name: "영향",
+              value: confirmationImpact(command.group, command.action),
+              inline: false,
+            },
+            {
+              name: "사유",
+              value: oneLine(command.params.reason, 300),
+              inline: false,
+            },
+          ],
+          footer: footer("2분 후 확인 요청 만료"),
+          timestamp: stamp(),
+        },
+      ],
+      [
+        {
+          type: 1,
+          components: [
+            button("확인하고 실행", "confirm:" + confirmation, 4),
+            button("취소", "cancel:" + confirmation, 2),
+          ],
+        },
+      ],
+    );
   }
 
   let result = await admin(
