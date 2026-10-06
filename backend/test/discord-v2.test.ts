@@ -164,9 +164,9 @@ describe("Discord seller console v3 interaction UX", () => {
       customer_memo: "테스트 고객",
       admin_memo: "",
     });
-    const labels = message.components[0].components.map(
-      (item: any) => item.label,
-    );
+    const labels = message.components
+      .flatMap((row: any) => row.components)
+      .map((item: any) => item.label);
     expect(labels).toContain("기간 연장");
     expect(labels).toContain("고객 메모");
     expect(labels).toContain("판매자 홈");
