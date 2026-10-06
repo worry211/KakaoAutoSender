@@ -16,6 +16,8 @@ import {
   auditStatement,
 } from "./core";
 
+type ClientPlatform = "android" | "windows";
+
 async function credentials(env: Env) {
   const access = random(),
     refresh = random();
@@ -35,10 +37,60 @@ function publicCredentials(c: Awaited<ReturnType<typeof credentials>>) {
     access_expires_at: c.access_expires_at,
   };
 }
-function stateFor(l: Row | null, c: Row, version: number) {
+
+function validateClientBody(
+  body: Row,
+  required: Record<string, "string" | "number">,
+): ClientPlatform {
+  const rawPlatform = body?.client_platform;
+  if (
+    rawPlatform !== undefined &&
+    rawPlatform !== "android" &&
+    rawPlatform !== "windows"
+  )
+    throw new ApiError("INVALID");
+  const { client_platform: _ignored, ...legacyBody } = body ?? {};
+  schema(legacyBody, required);
+  // Backwards compatibility: every pre-platform client was Android. Existing
+  // Android sale builds therefore remain valid without an app update.
+  return rawPlatform === "windows" ? "windows" : "android";
+}
+
+function clientMetadata(
+  c: Row,
+  l: Row | null,
+  state: string,
+  platform: ClientPlatform,
+  version: number,
+) {
+  const base = metadata(c, l, state);
+  if (platform === "android") return { ...base, client_platform: "android" };
+
+  // Windows uses the same license/session authority but intentionally does not
+  // inherit Android versionCode gates. Until a dedicated Windows update policy
+  // is introduced, the currently running Windows build is authoritative for
+  // its own update metadata. Maintenance/kill-switch and license state remain
+  // shared and server authoritative.
+  return {
+    ...base,
+    min_version: 1,
+    latest_version: version,
+    download_url: "",
+    release_notes: "",
+    client_platform: "windows",
+  };
+}
+
+function stateFor(
+  l: Row | null,
+  c: Row,
+  version: number,
+  platform: ClientPlatform,
+) {
   const state = effective(l);
   if (state !== "ACTIVE") return state;
-  if (version < c.min_version) return "UPDATE_REQUIRED";
+  if (platform === "android" && version < c.min_version)
+    return "UPDATE_REQUIRED";
   return c.kill_switch || c.maintenance ? "MAINTENANCE" : "ACTIVE";
 }
 export async function activate(
@@ -48,11 +100,16 @@ export async function activate(
   env: Env,
   requestId: string,
 ) {
-  schema(b, { key: "string", public_key: "string", app_version: "number" });
+  const platform = validateClientBody(b, {
+    key: "string",
+    public_key: "string",
+    app_version: "number",
+  });
   const c = await config(env);
-  if (b.app_version < c.min_version)
-    return metadata(c, null, "UPDATE_REQUIRED");
-  if (c.maintenance || c.kill_switch) return metadata(c, null, "MAINTENANCE");
+  if (platform === "android" && b.app_version < c.min_version)
+    return clientMetadata(c, null, "UPDATE_REQUIRED", platform, b.app_version);
+  if (c.maintenance || c.kill_switch)
+    return clientMetadata(c, null, "MAINTENANCE", platform, b.app_version);
   await proof(req, raw, b.public_key, "", env);
   const keyHash = await hash(env.LICENSE_KEY_PEPPER, normalize(b.key));
   const fingerprint = await sha(b.public_key),
@@ -104,7 +161,13 @@ export async function activate(
     .bind(requestId)
     .first<Row>();
   return {
-    ...metadata(c, l, stateFor(l, c, b.app_version)),
+    ...clientMetadata(
+      c,
+      l,
+      stateFor(l, c, b.app_version, platform),
+      platform,
+      b.app_version,
+    ),
     ...publicCredentials(creds),
   };
 }
@@ -128,7 +191,6 @@ export async function authenticate(
   if (s.revoked || s.generation !== s.license_generation || !s.public_key)
     throw new ApiError("DEVICE_MISMATCH", 401);
   await proof(req, raw, s.public_key, token, env);
-  // Return explicit invalid license reason even when an access token has just expired.
   if (effective(s) !== "ACTIVE") return { s, expired: false };
   return {
     s,
@@ -143,11 +205,12 @@ export async function entitlement(
   requestId: string,
   refresh = false,
 ) {
-  schema(b, { app_version: "number" });
+  const platform = validateClientBody(b, { app_version: "number" });
   const { s, expired } = await authenticate(req, raw, b, env, refresh),
     c = await config(env);
-  const state = stateFor(s, c, b.app_version);
-  if (state !== "ACTIVE") return metadata(c, s, state);
+  const state = stateFor(s, c, b.app_version, platform);
+  if (state !== "ACTIVE")
+    return clientMetadata(c, s, state, platform, b.app_version);
   if (expired) throw new ApiError(refresh ? "INVALID" : "ACCESS_EXPIRED", 401);
   if (!refresh) {
     await env.DB.prepare(
@@ -155,7 +218,7 @@ export async function entitlement(
     )
       .bind(now(), s.license_id)
       .run();
-    return metadata(c, s, "ACTIVE");
+    return clientMetadata(c, s, "ACTIVE", platform, b.app_version);
   }
   const creds = await credentials(env);
   const result = await env.DB.prepare(
@@ -177,10 +240,13 @@ export async function entitlement(
     )
     .run();
   if (result.meta.changes !== 1) throw new ApiError("INVALID", 401);
-  return { ...metadata(c, s, "ACTIVE"), ...publicCredentials(creds) };
+  return {
+    ...clientMetadata(c, s, "ACTIVE", platform, b.app_version),
+    ...publicCredentials(creds),
+  };
 }
 export async function deactivate(req: Request, raw: string, b: Row, env: Env) {
-  schema(b, { app_version: "number" });
+  validateClientBody(b, { app_version: "number" });
   const { s } = await authenticate(req, raw, b, env);
   await env.DB.prepare("UPDATE sessions SET revoked=1 WHERE session_id=?")
     .bind(s.session_id)
@@ -188,8 +254,6 @@ export async function deactivate(req: Request, raw: string, b: Row, env: Env) {
   return { state: "INVALID", server_time: now() };
 }
 
-// Recover a lost activation/rotation response using the SAME non-exportable key.
-// No consumed redeem code is accepted; a new installation cannot use this endpoint.
 export async function recover(
   req: Request,
   raw: string,
@@ -197,7 +261,10 @@ export async function recover(
   env: Env,
   requestId: string,
 ) {
-  schema(b, { public_key: "string", app_version: "number" });
+  const platform = validateClientBody(b, {
+    public_key: "string",
+    app_version: "number",
+  });
   await proof(req, raw, b.public_key, "", env);
   const l = await env.DB.prepare(
     "SELECT * FROM licenses WHERE fingerprint=? AND public_key=? ORDER BY created_at DESC LIMIT 1",
@@ -205,8 +272,9 @@ export async function recover(
     .bind(await sha(b.public_key), b.public_key)
     .first<Row>();
   const c = await config(env),
-    state = stateFor(l, c, b.app_version);
-  if (state !== "ACTIVE") return metadata(c, l, state);
+    state = stateFor(l, c, b.app_version, platform);
+  if (state !== "ACTIVE")
+    return clientMetadata(c, l, state, platform, b.app_version);
   const creds = await credentials(env),
     t = now();
   const rs = await env.DB.batch([
@@ -231,5 +299,8 @@ export async function recover(
     ),
   ]);
   if (rs[0].meta.changes !== 1) throw new ApiError("INVALID", 401);
-  return { ...metadata(c, l, "ACTIVE"), ...publicCredentials(creds) };
+  return {
+    ...clientMetadata(c, l, "ACTIVE", platform, b.app_version),
+    ...publicCredentials(creds),
+  };
 }

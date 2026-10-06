@@ -30,6 +30,26 @@ async function boundedBody(req: Request) {
     bytes,
   );
 }
+
+function parseEntitlementQuery(url: URL) {
+  const entries = [...url.searchParams];
+  if (entries.length < 1 || entries.length > 2) throw new ApiError("INVALID");
+  const seen = new Set<string>();
+  for (const [key] of entries) {
+    if (!["app_version", "client_platform"].includes(key) || seen.has(key))
+      throw new ApiError("INVALID");
+    seen.add(key);
+  }
+  if (!seen.has("app_version")) throw new ApiError("INVALID");
+  const platform = url.searchParams.get("client_platform");
+  if (platform !== null && platform !== "android" && platform !== "windows")
+    throw new ApiError("INVALID");
+  return {
+    app_version: Number(url.searchParams.get("app_version")),
+    ...(platform ? { client_platform: platform } : {}),
+  };
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext) {
     const request = id("REQ-"),
@@ -80,22 +100,14 @@ export default {
       )
         throw new ApiError("INVALID_CONTENT_TYPE", 415);
       const raw = await boundedBody(req);
-      if (req.method === "GET") {
-        const params = [...new URL(req.url).searchParams];
-        if (params.length !== 1 || params[0][0] !== "app_version")
-          throw new ApiError("INVALID");
-      }
       let b: any;
       try {
         b =
           req.method === "GET"
-            ? {
-                app_version: Number(
-                  new URL(req.url).searchParams.get("app_version"),
-                ),
-              }
+            ? parseEntitlementQuery(new URL(req.url))
             : JSON.parse(raw);
-      } catch {
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
         throw new ApiError("INVALID");
       }
       let value: any;
@@ -124,7 +136,6 @@ export default {
         request,
       );
     } finally {
-      // Fixed endpoint allowlist prevents attacker-controlled paths from entering logs.
       console.log(
         JSON.stringify({
           request_id: request,
