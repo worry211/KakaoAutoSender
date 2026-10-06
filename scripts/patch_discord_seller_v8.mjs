@@ -14,8 +14,7 @@ replaceRegex(
   const licenseId = String(license?.license_id ?? "");
   const state = String(license?.state ?? "");
 
-  // Row 1 is intentionally customer-support first. Keep the most common,
-  // reversible actions together so mobile operators do not hunt through rows.
+  // Customer-support actions stay in the first row for mobile speed.
   const support: any[] = [];
   if (["ACTIVE", "UNUSED", "EXPIRED"].includes(state))
     support.push(button("기간 연장", \`modal:extend:\${licenseId}\`, 3));
@@ -28,14 +27,14 @@ replaceRegex(
     support.push(button("미사용 키 교체", \`act:replace:\${licenseId}\`, 1));
   support.push(button("새로고침", \`nav:info:\${licenseId}\`, 2));
 
-  // Row 2 is seller-only context and navigation.
+  // Seller-only context is visually separated from customer-support work.
   const adminRow = [
     button("관리 메모", \`modal:admin:\${licenseId}\`, 2),
     button("변경 이력", \`nav:hist:\${licenseId}:1\`, 2),
     button("판매자 홈", "nav:home", 2),
   ];
 
-  // Row 3 is deliberately separated because every action here changes access.
+  // Access-changing actions get their own final row.
   const danger: any[] = [];
   if (state === "ACTIVE") {
     danger.push(
@@ -66,7 +65,7 @@ replaceRegex(
       "",
       [
         {
-          title: "🧭 KakaoMacro 판매자 홈",
+          title: "🧭 KakaoMacro 판매자 콘솔 · 홈",
           description: [
             "판매와 고객지원을 **버튼 중심으로 처리하는 운영 홈**입니다.",
             "새 판매는 왼쪽부터, 기존 고객 문제는 **고객 찾기**에서 시작하세요.",
@@ -109,7 +108,7 @@ replaceRegex(
             button("기타 기간 발급", "modal:create", 2),
             button("7일 내 만료", "nav:exp:7:1", 2),
             button("미사용 키", "nav:list:UNUSED:1", 2),
-            button("운영 대시보드", "nav:stats", 2),
+            button("판매 현황", "nav:stats", 2),
             button("서비스 상태", "nav:system:status", 2),
           ],
         },
@@ -145,35 +144,25 @@ source = source.replace(policyNeedle, policyReplacement);
 replaceRegex(
   /  if \(Array\.isArray\(result\)\) \{[\s\S]*?\n  if \(result\?\.kind === "history"\)/,
   `  if (Array.isArray(result)) {
-    const fields = result.flatMap((license: Row, index: number) => [
-      {
-        name: \`#\${index + 1} · 구매자에게 전달\`,
-        value: [
-          \`**고객 / 주문**  \${customerLabel(license)}\`,
-          \`**사용 기간**  \${licenseTerm(license)}\`,
-          "**KM 키**",
-          \`\\\`\${license.key}\\\`\`,
-        ].join("\\n"),
-        inline: false,
-      },
-      {
-        name: \`#\${index + 1} · 판매자 기록용\`,
-        value: [
-          "구매자에게 보낼 필요 없는 내부 관리 ID입니다.",
-          \`**LIC ID**  \${license.license_id}\`,
-        ].join("\\n"),
-        inline: false,
-      },
-    ]);
+    const fields = result.map((license: Row, index: number) => ({
+      name: \`#\${index + 1} · \${customerLabel(license)} · 구매자 전달\`,
+      value: [
+        \`**사용 기간**  \${licenseTerm(license)}\`,
+        "**구매자에게 전달할 KM 키**",
+        \`\\\`\${license.key}\\\`\`,
+        "**판매자 기록용 LIC ID · 구매자 전달 불필요**",
+        \`\${license.license_id}\`,
+      ].join("\\n"),
+      inline: false,
+    }));
     return response(
       "",
       [
         {
-          title: "✅ 라이선스 발급 완료",
+          title: "✅ 판매용 라이선스 발급 완료",
           description: [
             \`총 **\${result.length}개**를 발급했습니다.\`,
-            "구매자에게는 **‘구매자에게 전달’ 영역의 KM 키만** 보내세요.",
-            "LIC ID는 고객지원과 주문 추적을 위한 **판매자 내부 기록**입니다.",
+            "구매자에게는 **KM 키만 전달**하고 LIC ID는 고객지원용 판매 기록으로 보관하세요.",
             "KM 키 원문은 이 응답을 닫기 전에 필요한 곳에 안전하게 전달하세요.",
           ].join("\\n"),
           color: COLORS.green,
@@ -186,9 +175,9 @@ replaceRegex(
         {
           type: 1,
           components: [
-            button("＋ 30일 추가 발급", "modal:create:30d", 3),
+            button("＋ 30일 재발급", "modal:create:30d", 3),
             button("고객 찾기", "modal:search", 1),
-            button("운영 대시보드", "nav:stats", 2),
+            button("판매 현황", "nav:stats", 2),
             button("판매자 홈", "nav:home", 2),
           ],
         },
@@ -200,8 +189,10 @@ replaceRegex(
   'license issue handoff',
 );
 
-source = source.replace('title: "📊 라이선스 현황",', 'title: "📊 판매 · 고객 운영 대시보드",');
-source = source.replaceAll('button("판매 현황", "nav:stats", 2)', 'button("운영 대시보드", "nav:stats", 2)');
+source = source.replace(
+  'title: "📊 라이선스 현황",',
+  'title: "📊 라이선스 현황 · 운영 대시보드",',
+);
 
 fs.writeFileSync(path, source);
 console.log('seller console v8 patch applied');
