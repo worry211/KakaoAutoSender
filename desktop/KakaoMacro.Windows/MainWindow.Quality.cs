@@ -6,7 +6,7 @@ namespace KakaoMacro.Windows;
 
 public partial class MainWindow
 {
-    private TabControl? _qualityWorkspaceTabs;
+    private System.Windows.Controls.TabControl? _qualityWorkspaceTabs;
     private bool _qualitySelectionHooked;
 
     protected override void OnContentRendered(EventArgs e)
@@ -14,7 +14,7 @@ public partial class MainWindow
         base.OnContentRendered(e);
         if (_qualitySelectionHooked) return;
 
-        _qualityWorkspaceTabs = FindVisualChild<TabControl>(this);
+        _qualityWorkspaceTabs = FindVisualChild<System.Windows.Controls.TabControl>(this);
         RoomList.SelectionChanged += QualityRoomSelectionChanged;
         _qualitySelectionHooked = true;
         RouteSelectionToWorkspace();
