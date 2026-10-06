@@ -57,10 +57,19 @@ internal sealed class SettingsStore
             if (backupExisted) PreserveCorruptCopy(BackupPath, "settings-backup");
             if (primaryExisted || backupExisted)
             {
-                LastRecoveryNotice = "설정 파일을 복구하지 못했습니다. 손상본은 설정 폴더에 보존했습니다.";
+                LastRecoveryNotice = "설정 파일과 마지막 정상 백업을 모두 복구하지 못했습니다. 손상본은 설정 폴더에 보존했습니다.";
                 WriteRecoveryLog(LastRecoveryNotice);
+
+                // Never silently start with an empty room list when persisted seller
+                // configuration exists but every recovery copy is unreadable. Doing so
+                // could allow a later save to overwrite evidence of the original setup.
+                throw new InvalidDataException(
+                    LastRecoveryNotice + Environment.NewLine +
+                    "설정 폴더: " + _directory + Environment.NewLine +
+                    "복구 전에는 새 설정을 저장하지 않습니다.");
             }
 
+            // A genuinely fresh installation has no primary and no backup.
             return new AppSettings();
         }
     }
