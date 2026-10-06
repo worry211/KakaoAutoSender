@@ -28,9 +28,15 @@ jobs:
         run: |
           node scripts/fix-discord-v6-script.mjs
           node scripts/apply-discord-seller-v6.mjs
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Format generated product sources
+        working-directory: backend
+        run: npx prettier --write src/discordV2.ts test/seller-ux-v6.test.ts
       - name: Verify backend commercial gate
         working-directory: backend
-        run: npm ci && npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
+        run: npm run typecheck && npm run lint && npm test && npm audit --audit-level=moderate
       - name: Remove one-shot editor files
         run: git rm scripts/apply-discord-seller-v6.mjs scripts/fix-discord-v6-script.mjs .github/workflows/discord-seller-v6-editor.yml
       - name: Commit verified product changes only
