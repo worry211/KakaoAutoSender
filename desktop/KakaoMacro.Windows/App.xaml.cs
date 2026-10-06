@@ -20,6 +20,19 @@ public partial class App : System.Windows.Application
             MainWindow = window;
             window.Show();
         }
+        catch (InvalidDataException ex)
+        {
+            var path = CrashReporter.Write("settings-recovery", ex);
+            MessageBox.Show(
+                "저장된 방 설정을 안전하게 복구하지 못해 프로그램 시작을 중단했습니다.\n\n" +
+                ex.Message +
+                "\n\n오류 기록: " + (string.IsNullOrWhiteSpace(path) ? "기록 실패" : path) +
+                "\n\n손상된 설정을 덮어쓰지 않도록 새 설정 저장은 수행하지 않았습니다.",
+                "KakaoMacro PC 설정 복구 필요",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            Shutdown(2);
+        }
         catch (Exception ex)
         {
             var path = CrashReporter.Write("startup", ex);
