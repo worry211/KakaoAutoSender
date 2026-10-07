@@ -42,34 +42,41 @@ const modal = (customId: string, title: string, components: unknown[]) => ({
   data: { custom_id: customId, title, components },
 });
 
+const issueFields = () => [
+  textInput("quantity", "수량", {
+    placeholder: "1~10",
+    value: "1",
+    maxLength: 2,
+  }),
+  textInput("memo", "고객 / 주문 메모", {
+    required: false,
+    placeholder: "예: 디스코드 닉네임 · 주문번호",
+    maxLength: 500,
+  }),
+];
+
 export function sellerModalFor(customId: string) {
-  const createPreset = customId.match(/^modal:create(?::(30d|permanent))?$/);
-  if (createPreset) {
-    const preset = createPreset[1] ?? "30d";
-    const title =
-      preset === "permanent"
-        ? "영구 라이선스 발급"
-        : customId === "modal:create:30d"
-          ? "30일 라이선스 발급"
-          : "새 라이선스 발급";
-    return modal("form:create", title, [
+  // High-frequency presets should feel like presets: do not ask the seller to
+  // confirm the duration a second time on mobile.
+  if (customId === "modal:create:30d")
+    return modal("form:create:30d", "30일 라이선스 발급", issueFields());
+
+  if (customId === "modal:create:permanent")
+    return modal(
+      "form:create:permanent",
+      "영구 라이선스 발급",
+      issueFields(),
+    );
+
+  if (customId === "modal:create")
+    return modal("form:create", "새 라이선스 발급", [
       textInput("duration", "사용 기간", {
         placeholder: "7d / 30d / 90d / 180d / 365d / permanent",
-        value: preset,
+        value: "30d",
         maxLength: 9,
       }),
-      textInput("quantity", "수량", {
-        placeholder: "1~10",
-        value: "1",
-        maxLength: 2,
-      }),
-      textInput("memo", "고객 / 주문 메모", {
-        required: false,
-        placeholder: "예: 디스코드 닉네임 · 주문번호",
-        maxLength: 500,
-      }),
+      ...issueFields(),
     ]);
-  }
 
   if (customId === "modal:search")
     return modal("form:search", "고객 · 라이선스 찾기", [
@@ -242,6 +249,24 @@ const validDuration = (value: string) => {
   return normalized;
 };
 
+const issueCommand = (
+  duration: string,
+  values: Record<string, string>,
+): SellerConsoleCommand => {
+  const quantity = Number(values.quantity || "1");
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10)
+    throw new ApiError("INVALID_QUANTITY");
+  return {
+    group: "license",
+    action: "create",
+    params: {
+      duration: validDuration(duration),
+      quantity,
+      ...(values.memo ? { memo: values.memo.slice(0, 500) } : {}),
+    },
+  };
+};
+
 export function commandFromSellerModal(interaction: any): SellerConsoleCommand {
   const customId = String(interaction?.data?.custom_id ?? "");
   const values = modalValues(interaction);
@@ -304,20 +329,11 @@ export function commandFromSellerModal(interaction: any): SellerConsoleCommand {
     return { group: "system", action: "policy", params: { heartbeat, grace } };
   }
 
-  if (customId === "form:create") {
-    const quantity = Number(values.quantity || "1");
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10)
-      throw new ApiError("INVALID_QUANTITY");
-    return {
-      group: "license",
-      action: "create",
-      params: {
-        duration: validDuration(values.duration ?? ""),
-        quantity,
-        ...(values.memo ? { memo: values.memo.slice(0, 500) } : {}),
-      },
-    };
-  }
+  if (customId === "form:create:30d") return issueCommand("30d", values);
+  if (customId === "form:create:permanent")
+    return issueCommand("permanent", values);
+  if (customId === "form:create")
+    return issueCommand(values.duration ?? "", values);
 
   if (customId === "form:search") {
     const query = String(values.query ?? "").trim();
