@@ -32,6 +32,7 @@ public static class LifecyclePolicy
 
     public static void Apply(RoomState room, KakaoPcAutomation.Result result, DateTimeOffset now)
     {
+        if (result.Cancelled) return;
         if (result.BackgroundDeferred)
         {
             room.BackgroundDeferred = true; room.Stage = "다른 작업 중 · 점검 대기";

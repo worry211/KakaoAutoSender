@@ -201,11 +201,7 @@ public partial class MainWindow : Window
             return;
         }
         var result = await _coordinator.SafeProbeAsync(room);
-        room.Status = result.Success ? "PROBE_OK" : "PROBE_ERROR";
-        room.LastError = result.Success ? "" : result.Status;
-        room.LastDiagnostic = result.Status;
-        State.LastStatus = room.Title + " · " + result.Status;
-        _coordinator.Save();
+        if (!IsLoaded || result.Cancelled) return;
         RefreshUi();
     }
 
@@ -219,6 +215,7 @@ public partial class MainWindow : Window
             return;
         }
         var result = await _coordinator.LiveCheckAsync(room);
+        if (!IsLoaded || result.Cancelled) return;
         MessageBox.Show(this, result.Status, result.Success ? "점검 완료" : "점검 실패",
             MessageBoxButton.OK, result.Success ? MessageBoxImage.Information : MessageBoxImage.Warning);
         RefreshUi();

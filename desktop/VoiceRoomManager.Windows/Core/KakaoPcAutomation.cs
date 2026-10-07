@@ -29,7 +29,8 @@ public sealed class KakaoPcAutomation
         bool InterventionRequired = false,
         bool VerifiedEnded = false,
         bool NeedsRecheck = false,
-        bool BackgroundDeferred = false);
+        bool BackgroundDeferred = false,
+        bool Cancelled = false);
 
     public Result EnsureKakaoRunning()
     {

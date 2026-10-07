@@ -5,6 +5,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
 {
     private readonly StateStore _store;
     private readonly KakaoPcAutomation _kakao;
+    private readonly IRoomWorkflowDriver _workflowDriver;
     private readonly SemaphoreSlim _singleFlight = new(1, 1);
     private readonly Timer _timer;
     private readonly DesktopState _state;
@@ -15,9 +16,10 @@ public sealed class VoiceRoomCoordinator : IDisposable
     public event Action? StateChanged;
     public bool IsBusy { get; private set; }
     public DesktopState Snapshot => _state;
-    public VoiceRoomCoordinator(StateStore store, KakaoPcAutomation kakao, bool schedule = true, Func<RoomState, bool>? canRunAutomatically = null)
+    public VoiceRoomCoordinator(StateStore store, KakaoPcAutomation kakao, bool schedule = true, Func<RoomState, bool>? canRunAutomatically = null, IRoomWorkflowDriver? workflowDriver = null)
     {
         _store = store; _kakao = kakao; _state = store.Load();
+        _workflowDriver = workflowDriver ?? new WindowsWorkflowDriver(kakao);
         _canRunAutomatically = canRunAutomatically ?? (room => BackgroundActivityPolicy.CanRun(room));
         LifecyclePolicy.Recover(_state, DateTimeOffset.UtcNow);
 
@@ -27,7 +29,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
     public void Save() => _store.Save(_state);
     private void Notify() { if (!_disposed) StateChanged?.Invoke(); }
     private void Stage(RoomState room, string stage)
-    { room.Stage = stage; OperationLog.Write(room, stage); Save(); Notify(); }
+    { if (_disposed || _run.IsCancellationRequested) throw new OperationCanceledException(); room.Stage = stage; OperationLog.Write(room, stage); Save(); Notify(); }
     public void StartAll()
     {
         if (IsBusy) return;
@@ -76,6 +78,14 @@ public sealed class VoiceRoomCoordinator : IDisposable
         {
             IsBusy = true; Notify();
             var result = await Task.Run(() => Process(room, probe, token));
+            if (token.IsCancellationRequested || _disposed)
+                return new(false, "중단된 점검 결과 폐기 · 기존 중단 상태 유지", Cancelled: true);
+            if (probe)
+            {
+                room.Status = result.Success ? "PROBE_OK" : "PROBE_ERROR";
+                room.LastError = result.Success ? "" : result.Status;
+                _state.LastStatus = room.Title + " · " + result.Status;
+            }
             if (!probe && !token.IsCancellationRequested) LifecyclePolicy.Apply(room, result, DateTimeOffset.UtcNow);
             if (!probe && result.AudioRepaired) _state.AudioRepairs++;
             room.Stage = probe ? "안전 진단 완료" : room.Status == "USER_ACTION_REQUIRED" ? "사용자 조치 필요" : result.Success ? "활성 · 보호 확인" : "재시도 대기";
@@ -171,10 +181,11 @@ public sealed class VoiceRoomCoordinator : IDisposable
     private KakaoPcAutomation.Result Process(RoomState room, bool probe, CancellationToken token, bool background = false)
     {
         var duration = Stopwatch.StartNew();
-        using var op = new AutomationOperation(room, token, stage => Stage(room, stage), background);
+        using var op = new AutomationOperation(room, token, stage => Stage(room, stage), background,
+            checkpoint: () => { if (!_disposed) Save(); });
         try
         {
-            return new RoomWorkflow(new WindowsWorkflowDriver(_kakao)).Execute(room, probe, token,
+            return new RoomWorkflow(_workflowDriver).Execute(room, probe, token,
                 stage => AutomationOperation.Stage(RoomWorkflow.Display(stage)));
         }
         catch (BackgroundWorkDeferredException) { return new(false, "다른 작업 중 · 점검 대기", BackgroundDeferred: true); }
@@ -184,5 +195,5 @@ public sealed class VoiceRoomCoordinator : IDisposable
         finally { room.LastOperationMilliseconds = duration.ElapsedMilliseconds; }
     }
     public void Dispose()
-    { _disposed = true; _run.Cancel(); _timer.Dispose(); PowerPolicy.SetKeepSystemAwake(false); }
+    { if (_disposed) return; _disposed = true; _run.Cancel(); _timer.Dispose(); PowerPolicy.SetKeepSystemAwake(false); }
 }

@@ -4,6 +4,15 @@ using Xunit;
 namespace VoiceRoomManager.Windows.Tests;
 public class SubmissionLifecycleTests
 {
+    [Fact] public void DeliveredSubmissionIsCheckpointedBeforeACancelledProgressCallback()
+    {
+        var room = new RoomState { CreationUncertain = true };
+        DateTimeOffset? persisted = null;
+        using var operation = new AutomationOperation(room, CancellationToken.None,
+            progress: _ => throw new OperationCanceledException(), checkpoint: () => persisted = room.CreationSubmittedAt);
+        Assert.Throws<OperationCanceledException>(() => AutomationOperation.MarkCreationSubmitted());
+        Assert.NotNull(persisted); Assert.Equal(room.CreationSubmittedAt, persisted); Assert.True(room.CreationUncertain);
+    }
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-10-07T10:00:00+09:00");
     [Fact] public void ActiveReadbackAfterTimeoutAndRestartRecoversTheSubmittedLifetime()
     {

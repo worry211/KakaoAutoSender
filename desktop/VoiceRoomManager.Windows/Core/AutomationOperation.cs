@@ -10,6 +10,7 @@ internal sealed class AutomationOperation : IDisposable
     private readonly Stopwatch _elapsed = Stopwatch.StartNew();
     private readonly CancellationToken _token;
     private readonly Action<string>? _progress;
+    private readonly Action? _checkpoint;
     private readonly bool _background;
     private readonly Func<bool>? _mayContinue;
     private readonly HashSet<IntPtr> _foregroundTargets = [];
@@ -20,9 +21,9 @@ internal sealed class AutomationOperation : IDisposable
     private string _proofUrl = "";
     public static AutomationOperation? Current => Slot.Value;
 
-    public AutomationOperation(RoomState room, CancellationToken token, Action<string>? progress = null, bool background = false, Func<bool>? mayContinue = null)
+    public AutomationOperation(RoomState room, CancellationToken token, Action<string>? progress = null, bool background = false, Func<bool>? mayContinue = null, Action? checkpoint = null)
     {
-        Room = room; _token = token; _progress = progress; _background = background; _mayContinue = mayContinue;
+        Room = room; _token = token; _progress = progress; _background = background; _mayContinue = mayContinue; _checkpoint = checkpoint;
         _previous = Slot.Value; Slot.Value = this;
     }
 
@@ -59,6 +60,7 @@ internal sealed class AutomationOperation : IDisposable
     public static void MarkCreationSubmitted()
     {
         Current!.Room.CreationSubmittedAt = DateTimeOffset.UtcNow;
+        Current._checkpoint?.Invoke(); // Preserve delivered-input epoch even if Stop cancelled the progress callback.
         Current._progress?.Invoke("생성 제출 기록 · 활성 확인 재시도");
     }
     public bool Prove(IntPtr host)

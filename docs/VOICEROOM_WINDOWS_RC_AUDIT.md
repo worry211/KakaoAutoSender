@@ -1,3 +1,12 @@
+# Current continuation: Windows RC7 cancellation/startup audit
+
+137 local Windows tests pass. Manual/probe results arriving after Stop/Dispose are marked cancelled and discarded by coordinator and UI. Delivered submit time checkpoints precede cancelled progress callbacks. Startup attempts, loaded window, duplicate instance and startup exceptions are recorded in logs/startup.jsonl. Existing focus-aware wait remains; no background-only backend or unattended focus-stealing mode.
+
+RC6 launch verification resumed successfully on 2026-10-07 at 17:04 KST through the normal File Explorer EXE launch. launch_app's window-opened handler preparation fails; this did not reproduce an EXE/security refusal. Actual outputs RC6 path/version and active/both-muted recovery were observed; duration 2255ms versus previous 31914ms observation, not a controlled benchmark. Legacy unknown start remains unknown. Modified build real 48h regeneration and other-account request gates still need proof.
+
+RC7 final commit CI, package hashes and actual launch/quiet/resume checks belong in PR #12 and output manifest. Preserve Android/backend and existing state. Never fabricate release approval from these tests.
+
+---
 # Current continuation: Windows RC6 expiry recovery — 2026-10-07
 
 Actual target logs: 16:17 KST explicit ended VoiceRoom was closed, then lost chat foreground caused a menu intervention. 16:18–16:20 repeated desktop UIA scans delayed work by roughly 15 seconds each and verification exceeded 90 seconds after submission. User subsequently cleared uncertainty; the active room was rediscovered with unknown start. Do not fabricate a recovered timestamp for this legacy case.
