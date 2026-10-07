@@ -22,10 +22,6 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Restore win-x64
-        run: dotnet restore desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -r win-x64
-      - name: Release build with warnings as errors
-        run: dotnet build desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --no-restore -warnaserror
       - name: Routing, stop and recovery regression tests
         run: dotnet test desktop/KakaoMacro.Windows.Tests -c Release -warnaserror --logger trx
       - uses: actions/upload-artifact@v4
@@ -33,6 +29,10 @@ jobs:
         with:
           name: windows-safety-test-results
           path: desktop/KakaoMacro.Windows.Tests/TestResults/*.trx
+      - name: Restore win-x64
+        run: dotnet restore desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -r win-x64
+      - name: Release build with warnings as errors
+        run: dotnet build desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --no-restore -warnaserror
       - name: Publish self-contained x64
         run: dotnet publish desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o desktop/artifacts/win-x64
       - name: Prepare sale executable
