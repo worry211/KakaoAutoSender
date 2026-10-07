@@ -414,11 +414,12 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task DispatchAsync(RoomProfile room, bool scheduled, CancellationToken cancellationToken)
+    private async Task DispatchAsync(RoomProfile room, bool scheduled, CancellationToken cancellationToken, long? expectedRoomGeneration = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!_license.CanDispatch || (scheduled && !room.Running)) return;
         var stopGeneration = room.StopGeneration;
+        if (expectedRoomGeneration is long expected && expected != stopGeneration) return;
         var dispatchGeneration = _dispatchFence.Generation;
         var binding = room.Binding;
         var message = room.Message;
@@ -533,7 +534,7 @@ public partial class MainWindow : Window
         try
         {
             await _schedulerGate.WaitAsync(linked.Token); acquired = true;
-            await Task.Run(() => DispatchAsync(room, false, linked.Token), linked.Token);
+            await Task.Run(() => DispatchAsync(room, false, linked.Token, roomGeneration), linked.Token);
         }
         catch (OperationCanceledException) { }
         finally
@@ -903,7 +904,7 @@ public partial class MainWindow : Window
             foreach (var room in selected)
             {
                 if (room.StopGeneration != selectedGenerations[room.Id] || !_rooms.Contains(room)) continue;
-                await DispatchAsync(room, false, linked.Token);
+                await DispatchAsync(room, false, linked.Token, selectedGenerations[room.Id]);
                 if (string.Equals(room.LastStatus, "수동 테스트 전송 성공", StringComparison.Ordinal))
                     sent++;
                 if (room != selected[^1])
