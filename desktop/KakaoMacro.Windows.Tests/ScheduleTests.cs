@@ -22,6 +22,7 @@ public class ScheduleTests
     [Fact] public void DailyCountRollsOverBeforeCheckingLimit()
     {
         var room=new RoomProfile{CountDate="2026-10-07",TodayCount=9,DailyLimit=1};
-        Assert.False(ScheduleCalculator.DailyLimitReached(room,DateTimeOffset.Now));Assert.Equal(0,room.TodayCount);
+        var local = new DateTimeOffset(new DateTime(2026,10,8,12,0,0), TimeZoneInfo.Local.GetUtcOffset(new DateTime(2026,10,8)));
+        Assert.False(ScheduleCalculator.DailyLimitReached(room,local));Assert.Equal(0,room.TodayCount);
     }
 }

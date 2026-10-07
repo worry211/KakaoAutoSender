@@ -517,8 +517,9 @@ public class KakaoNotificationListener extends NotificationListenerService {
         if (value != null) return new Candidate(value, CONFIDENCE_HIGH, "system conversation shortcut");
 
         value = usableCandidate(sender, preview, ranking.longLabel);
-    if (value != null)
-      return new Candidate(value, CONFIDENCE_HIGH, "system conversation shortcut long label");
+        if (value != null) {
+            return new Candidate(value, CONFIDENCE_HIGH, "system conversation shortcut long label");
+        }
 
         value = usableCandidate(sender, preview, subText);
         if (value != null) return new Candidate(value, CONFIDENCE_MEDIUM, "subText");
