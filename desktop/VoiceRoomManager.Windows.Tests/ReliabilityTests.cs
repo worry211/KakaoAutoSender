@@ -64,10 +64,11 @@ public class ReliabilityTests
         var converted=new FormatConvertedBitmap(scaled,PixelFormats.Bgra32,null,0);
         var w=converted.PixelWidth;var h=converted.PixelHeight;var pixels=new byte[w*h*4];converted.CopyPixels(pixels,w*4,0);
         uint Pixel(int x,int y){var i=(y*w+x)*4;return (uint)(pixels[i+2]<<16|pixels[i+1]<<8|pixels[i]);}
-        var hit=yellow?CtaDetector.Yellow(w,h,Pixel):CtaDetector.BlueOutline(w,h,Pixel);
+        var hit=yellow?CtaDetector.Yellow(w,h,Pixel):CtaDetector.OpenChatOutline(w,h,Pixel);
         Assert.NotNull(hit);
         Assert.InRange(hit.Value.X,yellow?140*scale:730*scale,yellow?200*scale:850*scale);
     }
     [Fact] public void BlankOrGenericYellowCannotBeClicked()
-    { Assert.Null(CtaDetector.BlueOutline(800,600,(_,_)=>0xFFFFFF));Assert.Null(CtaDetector.Yellow(800,600,(_,_)=>0xFEE500)); }
+    { Assert.Null(CtaDetector.OpenChatOutline(800,600,(_,_)=>0xFFFFFF));Assert.Null(CtaDetector.Yellow(800,600,(_,_)=>0xFEE500)); }
 }
+

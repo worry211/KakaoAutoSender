@@ -7,7 +7,7 @@ namespace VoiceRoomManager.Windows.Core;
 /// <summary>
 /// Visual fallback for the public open.kakao.com landing page when Chromium accessibility is
 /// disabled or exposes no actionable nodes. It only clicks a large white rounded-outline CTA
-/// surrounded by Kakao OpenChat blue inside a browser window whose title identifies OpenChat.
+/// surrounded by the observed Kakao OpenChat blue/green theme, with exact URL evidence.
 /// No generic coordinates or generic browser buttons are used.
 /// </summary>
 internal static class BrowserOpenChatVisualBridge
@@ -79,9 +79,9 @@ internal static class BrowserOpenChatVisualBridge
         var bytes = LocalTextSurface.Capture(new(r.Left,r.Top,r.Right,r.Bottom));
         if (bytes is null) return null;
         var frame = new PixelFrame(bytes);
-        var hit = CtaDetector.BlueOutline(frame.Width,frame.Height,frame.Pixel);
+        var hit = CtaDetector.OpenChatOutline(frame.Width,frame.Height,frame.Pixel);
         if (hit is null) return null;
-        diagnostic = "흰 외곽선 · 파란 배경 · 단일 CTA";
+        diagnostic = "흰 외곽선 · OpenChat 배경 · 단일 CTA";
         return (r.Left+hit.Value.X,r.Top+hit.Value.Y,hit.Value.Width,hit.Value.Height);
     }
 
@@ -120,3 +120,4 @@ internal static class BrowserOpenChatVisualBridge
         return sb.ToString();
     }
 }
+

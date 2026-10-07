@@ -28,6 +28,8 @@ internal static class OpenChatLinkLauncher
     };
 
     private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+    [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out NativeRect rect);
 
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
@@ -65,6 +67,7 @@ internal static class OpenChatLinkLauncher
         {
             Activate(existingLanding[0].Hwnd);
             var resume = KakaoOpenChatEntry.TryEnter(room);
+            OperationLog.Write(room, "OPENCHAT_ENTRY", "success=" + resume.Success + " · " + resume.Diagnostic);
             return new(true, resume.Success, resume.Diagnostic, resume.InterventionRequired);
         }
         try
@@ -87,6 +90,7 @@ internal static class OpenChatLinkLauncher
         }
 
         var entry = KakaoOpenChatEntry.TryEnter(room);
+        OperationLog.Write(room, "OPENCHAT_ENTRY", "success=" + entry.Success + " · " + entry.Diagnostic);
         return new(true, entry.Success, entry.Diagnostic, entry.InterventionRequired);
     }
 
@@ -96,7 +100,33 @@ internal static class OpenChatLinkLauncher
         var action = FindUniqueBrowserAction(confirm ? KakaoOpenNames : JoinNames, true, out diagnostic);
         if (action is null) return false;
         Activate(action.Hwnd);
-        return Invoke(action.Element);
+        AutomationOperation.Pause(100);
+        try
+        {
+            // Chromium InvokePattern may return successfully without a trusted user
+            // gesture for external-app navigation. Deliver a real, scoped click;
+            // the entry state machine must still prove the resulting Kakao screen.
+            var current = action.Element.Current;
+            if (!current.IsEnabled || current.IsOffscreen || current.Name.Trim() != action.Name
+                || !BrowserUrlEvidence.Matches(action.Hwnd, AutomationOperation.Current!.Room.OpenChatUrl)
+                || !GetWindowRect(action.Hwnd, out var rect)) return false;
+            var point = ActionPoint(current.BoundingRectangle, new(rect.Left, rect.Top, rect.Right, rect.Bottom));
+            var delivered = point is { } p && NativeInput.Click(action.Hwnd, p.X, p.Y);
+            diagnostic += " nativeClick=" + delivered + " transition=pending";
+            OperationLog.Write(AutomationOperation.Current!.Room, "BROWSER_ACTION", $"name={action.Name} · " + diagnostic);
+            return delivered;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return false; }
+    }
+
+    internal static (int X, int Y)? ActionPoint(System.Windows.Rect button, KakaoSurfaceLocator.Bounds window)
+    {
+        if (button.IsEmpty || !double.IsFinite(button.Left) || !double.IsFinite(button.Top)
+            || !double.IsFinite(button.Width) || !double.IsFinite(button.Height)
+            || button.Width is < 20 or > 1000 || button.Height is < 15 or > 180
+            || button.Left < window.Left || button.Top < window.Top || button.Right > window.Right || button.Bottom > window.Bottom) return null;
+        return ((int)Math.Round(button.Left + button.Width / 2), (int)Math.Round(button.Top + button.Height / 2));
     }
 
     private static BrowserButton? FindUniqueBrowserAction(
@@ -155,30 +185,9 @@ internal static class OpenChatLinkLauncher
         try
         {
             if (!element.Current.IsEnabled || element.Current.IsOffscreen) return false;
-            return element.TryGetCurrentPattern(InvokePattern.Pattern, out _)
-                || element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out _);
+            return !element.Current.BoundingRectangle.IsEmpty;
         }
         catch { return false; }
-    }
-
-    private static bool Invoke(AutomationElement element)
-    {
-        AutomationOperation.Check();
-        try
-        {
-            if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
-            {
-                ((InvokePattern)invoke).Invoke();
-                return true;
-            }
-            if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selection))
-            {
-                ((SelectionItemPattern)selection).Select();
-                return true;
-            }
-        }
-        catch { }
-        return false;
     }
 
     private static bool WaitForExactChat(string title, TimeSpan timeout, out IntPtr hwnd)

@@ -1,4 +1,9 @@
-# Current continuation: Windows RC8 footer reliability
+# Current continuation: Windows RC9 browser entry reliability
+
+RC8 actual closed-chat StartAll failed to see preview at 18:14:34; automatic retry recovered exact chat/active/both-muted at 18:19:29. RC9 sends a native click to the fresh unique exact-name browser action, verifying official URL, rectangle containment, foreground and point ownership. The old Invoke/Selection-only browser executor is removed. Delivered input remains pending until real Kakao room proof. Browser action and entry traces are logged. The observed green landing theme is recognized with the existing strict single-outline geometry; solid backgrounds and unsupported colors are rejected. 152 local tests cover geometry, theme variants and existing workflow barriers. Final RC9 CI/target proof/hashes belong in PR #12 and manifest. Android/backend unchanged; elapsed 48h, other-account requests, account multi-room limits and physical monitor/lock/login gates remain.
+
+---
+# Previous continuation: Windows RC8 footer reliability
 
 Final RC8 target run: normal launch 18:07:22 / ready 18:07:23 / existing active+both muted 18:07:27. Controlled one-participant termination then unattended retry recovered a transient menu miss: default menu, submit 18:08:42, active+both-muted 18:08:45, 5020ms. Durable new epoch 18:08:42.5814718 KST, no manual creation/audio action. CI for code 687b5e4: VoiceRoom Windows #101, Windows client #165, APK/backend #648 all success. Real elapsed 48h remains pending.
 

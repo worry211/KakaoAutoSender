@@ -32,10 +32,16 @@ public static class CtaDetector
         return new(rows.Min(r => r.Left), rows[0].Y, w, h);
     }
 
-    public static CtaBounds? BlueOutline(int width, int height, Func<int, int, uint> pixel)
+    public static CtaBounds? OpenChatOutline(int width, int height, Func<int, int, uint> pixel)
     {
         static bool White(uint c) => ((c >> 16) & 255) >= 238 && ((c >> 8) & 255) >= 238 && (c & 255) >= 238;
-        static bool Blue(uint c) { var r = (c >> 16) & 255; var g = (c >> 8) & 255; var b = c & 255; return r is >= 25 and <= 95 && g is >= 110 and <= 185 && b is >= 165 and <= 235 && b > g && g > r + 35; }
+        static int Theme(uint c)
+        {
+            var r = (c >> 16) & 255; var g = (c >> 8) & 255; var b = c & 255;
+            if (r is >= 25 and <= 95 && g is >= 110 and <= 185 && b is >= 165 and <= 235 && b > g && g > r + 35) return 1;
+            if (r is >= 20 and <= 95 && g is >= 130 and <= 210 && b is >= 65 and <= 180 && g > r + 45 && g > b + 15) return 2;
+            return 0;
+        }
         var rows = new List<(int Y, int Left, int Right)>();
         for (var y = 10; y < height * .85; y += 2)
         {
@@ -46,7 +52,7 @@ public static class CtaDetector
                 if (start >= 0 && x - start >= width * .12)
                 {
                     var center = (start + x) / 2;
-                    if (y > 8 && y + 8 < height && Blue(pixel(center,y-8)) && Blue(pixel(center,y+8)))
+                    if (y > 8 && y + 8 < height && Theme(pixel(center,y-8)) is var theme && theme != 0 && Theme(pixel(center,y+8)) == theme)
                         rows.Add((y,start,x));
                 }
                 start = -1;
@@ -64,3 +70,4 @@ public static class CtaDetector
         return hits.Count==1?hits[0]:null;
     }
 }
+

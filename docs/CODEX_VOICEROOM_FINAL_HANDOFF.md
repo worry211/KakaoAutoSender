@@ -1,4 +1,9 @@
-# Current continuation: Windows RC8 footer reliability
+# Current continuation: Windows RC9 browser entry reliability
+
+Final RC8 chat-close/StartAll target test first failed to find preview after semantic browser invocation at 18:14:34; automatic retry eventually recovered exact chat/active/both-muted at 18:19:29. This is delay/retry evidence, not proof that browser InvokePattern alone caused failure. RC9 uses a native click on the fresh exact-name UIA rectangle only after exact official URL, containment, foreground and point ownership checks. Delivery remains transition-pending; actual Kakao room proof is required. Selection/Invoke-only browser execution was removed. Native browser action and complete entry traces are logged. Observed green OpenChat landing joins the existing blue-theme outline recognizer; geometry/unique-match/exact URL guards remain. Unsupported colors and generic solid backgrounds are rejected. 152 local tests pass before packaging; final RC9 CI/binary/actual QA belongs in PR #12 and output manifest. Preserve all unresolved real-device gates.
+
+---
+# Previous continuation: Windows RC8 footer reliability
 
 Final RC8 target run: normal launch 18:07:22 / ready 18:07:23 / existing active+both muted 18:07:27. Controlled one-participant termination then unattended retry recovered a transient menu miss: default menu, submit 18:08:42, active+both-muted 18:08:45, 5020ms. Durable new epoch 18:08:42.5814718 KST, no manual creation/audio action. CI for code 687b5e4: VoiceRoom Windows #101, Windows client #165, APK/backend #648 all success. Real elapsed 48h remains pending.
 
