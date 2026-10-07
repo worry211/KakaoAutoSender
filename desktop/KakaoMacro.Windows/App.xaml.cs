@@ -6,8 +6,17 @@ namespace KakaoMacro.Windows;
 
 public partial class App : System.Windows.Application
 {
+    private readonly SingleInstanceGuard _instanceGuard = new();
+
     protected override void OnStartup(StartupEventArgs e)
     {
+        if (!_instanceGuard.TryAcquire())
+        {
+            MessageBox.Show("KakaoMacro PC가 이미 실행 중입니다. 작업 표시줄 또는 트레이에서 기존 창을 열어 주세요.\n\n전송 중복을 막기 위해 두 번째 실행은 시작하지 않습니다.",
+                "KakaoMacro PC 이미 실행 중", MessageBoxButton.OK, MessageBoxImage.Information);
+            Shutdown(0);
+            return;
+        }
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
@@ -46,6 +55,12 @@ public partial class App : System.Windows.Application
                 MessageBoxImage.Error);
             Shutdown(1);
         }
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _instanceGuard.Dispose();
+        base.OnExit(e);
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
