@@ -1,5 +1,7 @@
 # Current continuation: Windows RC8 footer reliability
 
+Final RC8 target run: normal launch 18:07:22 / ready 18:07:23 / existing active+both muted 18:07:27. Controlled one-participant termination then unattended retry recovered a transient menu miss: default menu, submit 18:08:42, active+both-muted 18:08:45, 5020ms. Durable new epoch 18:08:42.5814718 KST, no manual creation/audio action. CI for code 687b5e4: VoiceRoom Windows #101, Windows client #165, APK/backend #648 all success. Real elapsed 48h remains pending.
+
 142 local Windows regression tests pass. Actual RC7 controlled termination on October 7 was followed by unattended default-menu creation at 18:03:50 KST and active/both-muted proof at 18:03:53, 5087ms from due workflow entry. Persisted StartedAt matches the delivered submission epoch; CreationUncertain is false after proof. No manual creation menu or audio click was used. This is controlled termination recovery, not elapsed 48-hour expiry proof.
 
 Target QA also exposed an exit-circle component joined to cursor-overlay illumination: the left four circles remained intact. RC8 recovers only the exit control from its strict glyph in the bounded right-hand layout slot, retaining exact room/PID/participant, four-control geometry, typed audio and repeated readback. Missing exit glyph still fails closed. Positive and missing-glyph overlay fixtures run at 100%, 150%, 200%. Android/backend unchanged. Final RC8 launch/CI/hashes and residual gates are recorded in PR #12 and output manifest.
@@ -581,3 +583,4 @@ Before finishing:
 - If an architectural change is clearly needed, make it.
 - If current assumptions are wrong, correct them rather than preserving them for compatibility.
 - Continue until you have the best production-ready release candidate you can reasonably produce from the repository and available runtime evidence.
+

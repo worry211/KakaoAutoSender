@@ -1,5 +1,7 @@
 # Current continuation: Windows RC8 footer reliability
 
+Final RC8 target run: normal launch 18:07:22 / ready 18:07:23 / existing active+both muted 18:07:27. Controlled one-participant termination then unattended retry recovered a transient menu miss: default menu, submit 18:08:42, active+both-muted 18:08:45, 5020ms. Durable new epoch 18:08:42.5814718 KST, no manual creation/audio action. CI for code 687b5e4: VoiceRoom Windows #101, Windows client #165, APK/backend #648 all success. Real elapsed 48h remains pending.
+
 142 local tests pass. On October 7, controlled termination of the one-participant room was followed by the RC7 unattended default-menu workflow: submit 18:03:50 KST, active/mic-muted/speaker-muted repeated proof 18:03:53, 5087ms operation. The durable epoch matches submission; no manual creation menu or audio click. This proves controlled recovery, not real elapsed 48-hour expiration.
 
 Exit-circle recognition occasionally failed when cursor-overlay illumination connected its background to adjacent pixels while four left circles remained intact. RC8 recovers only the actual exit glyph within the strict right-hand layout slot; it still requires exact title/PID, positive participants, left-control geometry and typed audio readback. Overlay and missing-exit-glyph regression cases cover 100%, 150%, 200%. A missing audio control is never inferred. Final RC8 binary QA/CI/hash evidence is in PR #12 and output manifest. Other-account requests, account multi-room limits, physical monitor OFF/lock/login restart and elapsed 48h remain unverified.
@@ -140,3 +142,4 @@ Windows 실제 Kakao 보이스룸 생성/PIP 및 icon-only audio/요청 UI, 모�
 90초 제한은 adapter 호출 사이에서 검사하는 cooperative 제한이다. native UIA provider가 한 호출에서 멈추는 경우 강제 중단은 보장하지 않는다. 자동화를 worker process로 격리하는 개선 여지가 남는다. 이 RC를 판매 승인 완료로 포장하지 않는다. unsigned EXE이며 코드서명/installer/licensing를 Windows에 새로 만들지 않았다.
 
 [한 번의 종합 smoke + 장시간 체크](VOICEROOM_WINDOWS_RC_CHECKLIST.md)를 사용한다. CI는 real Kakao 계정에 접속하지 않는다.
+
