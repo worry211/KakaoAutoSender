@@ -55,12 +55,10 @@ public class SaleReadinessTest {
   public void activationKeyHelperCompactsWhitespaceButRejectsBadAlphabet() {
     assertEquals(
         "KM-2345-6789-ABCD-EFGH-JKMN-PQRS",
-        LicenseActivity.normalizeActivationKeyInput(
-            " km-2345-6789-ABCD- EFGH-JKMN-PQRS \n"));
+        LicenseActivity.normalizeActivationKeyInput(" km-2345-6789-ABCD- EFGH-JKMN-PQRS \n"));
     assertFalse(
         LicenseActivity.isActivationKeyFormat(
-            LicenseActivity.normalizeActivationKeyInput(
-                "KM-2345-6789-ABCD-EFGH-JKMN-PQRO")));
+            LicenseActivity.normalizeActivationKeyInput("KM-2345-6789-ABCD-EFGH-JKMN-PQRO")));
   }
 
   @Test
@@ -70,15 +68,16 @@ public class SaleReadinessTest {
     assertEquals(
         "image/jpeg", RoomEditorActivity.resolveConcreteImageMime("IMAGE/JPEG", "anything.bin"));
     assertNull(RoomEditorActivity.resolveConcreteImageMime("image/*", "photo.unknownext"));
-    assertNull(RoomEditorActivity.resolveConcreteImageMime("application/octet-stream", "photo.unknownext"));
+    assertNull(
+        RoomEditorActivity.resolveConcreteImageMime(
+            "application/octet-stream", "photo.unknownext"));
   }
 
   @Test
   public void textSendFailsClosedWhenOnlyDataRemoteInputExists() throws Exception {
     installTarget(false, true);
     assertFalse(
-        KakaoMessageSender.send(
-            context, "room-a", "hello", new RoomMediaStore.Media("", "", "")));
+        KakaoMessageSender.send(context, "room-a", "hello", new RoomMediaStore.Media("", "", "")));
     assertTrue(KakaoMessageSender.lastError().contains("텍스트"));
   }
 
@@ -86,8 +85,7 @@ public class SaleReadinessTest {
   public void textSendWorksOnlyThroughFreeFormRemoteInput() throws Exception {
     installTarget(true, true);
     assertTrue(
-        KakaoMessageSender.send(
-            context, "room-a", "hello", new RoomMediaStore.Media("", "", "")));
+        KakaoMessageSender.send(context, "room-a", "hello", new RoomMediaStore.Media("", "", "")));
     assertEquals("", KakaoMessageSender.lastError());
   }
 
@@ -106,8 +104,7 @@ public class SaleReadinessTest {
 
   @SuppressWarnings("unchecked")
   private void installTarget(boolean freeForm, boolean imageData) throws Exception {
-    java.lang.reflect.Field field =
-        KakaoNotificationListener.class.getDeclaredField("sessions");
+    java.lang.reflect.Field field = KakaoNotificationListener.class.getDeclaredField("sessions");
     field.setAccessible(true);
     Map<String, KakaoNotificationListener.ReplyTarget> sessions =
         (Map<String, KakaoNotificationListener.ReplyTarget>) field.get(null);
@@ -133,5 +130,10 @@ public class SaleReadinessTest {
             "test",
             new ArrayList<>(),
             true));
+    java.lang.reflect.Field recent =
+        KakaoNotificationListener.class.getDeclaredField("recentTargets");
+    recent.setAccessible(true);
+    ((Map<String, KakaoNotificationListener.ReplyTarget>) recent.get(null))
+        .put("sale-test", sessions.get("room-a"));
   }
 }

@@ -17,7 +17,7 @@ export function enforceDiscordScope(raw: string, env: Env) {
   // Discord endpoint verification PING is signature-checked by discord() after this scope check.
   if (interaction.type === 1) return interaction;
 
-  if (![2, 3].includes(interaction.type)) throw new ApiError("INVALID", 400);
+  if (![2, 3, 5].includes(interaction.type)) throw new ApiError("INVALID", 400);
   if (interaction.guild_id !== ADMIN_GUILD_ID)
     throw new ApiError("FORBIDDEN", 403);
 

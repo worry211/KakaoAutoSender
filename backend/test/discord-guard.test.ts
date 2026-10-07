@@ -24,6 +24,23 @@ describe("Discord admin scope guard", () => {
     const i = enforceDiscordScope(command(), env);
     expect(i.guild_id).toBe(ADMIN_GUILD_ID);
   });
+  it("accepts authorized modal submissions under the same guild/actor scope", () => {
+    expect(enforceDiscordScope(command({ type: 5 }), env).type).toBe(5);
+  });
+  it("rejects a modal submitted by another actor or in another guild", () => {
+    expect(() =>
+      enforceDiscordScope(
+        command({ type: 5, guild_id: "1550000000000000000" }),
+        env,
+      ),
+    ).toThrowError(/FORBIDDEN/);
+    expect(() =>
+      enforceDiscordScope(
+        command({ type: 5, member: { user: { id: "1419993816999657514" } } }),
+        env,
+      ),
+    ).toThrowError(/FORBIDDEN/);
+  });
 
   it("rejects commands from another guild", () => {
     expect(() =>

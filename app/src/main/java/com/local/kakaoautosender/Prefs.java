@@ -2,7 +2,6 @@ package com.local.kakaoautosender;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDate;
@@ -75,7 +74,8 @@ final class Prefs {
 
     static ArrayList<String> recentLabels(Context c) {
         ensureLabelSchema(c);
-        ArrayList<String> list = new ArrayList<>(p(c).getStringSet(KEY_RECENT_LABELS, Collections.emptySet()));
+    ArrayList<String> list =
+        new ArrayList<>(p(c).getStringSet(KEY_RECENT_LABELS, Collections.emptySet()));
         Collections.sort(list, String.CASE_INSENSITIVE_ORDER);
         return list;
     }
@@ -257,14 +257,27 @@ final class Prefs {
 
     static void appendLog(Context c, String line) {
         if (line == null || line.trim().isEmpty()) return;
-        String safe = line.replace('\n', ' ').replace('\r', ' ').trim();
-        String old = p(c).getString(KEY_EVENT_LOG, "");
+    // Status remains local UI state. Support history stores only fixed event
+    // categories, never arbitrary room names, message previews or media paths.
+    String safe =
+        line.contains("차단")
+            ? "안전 차단 발생"
+            : line.contains("실패") || line.contains("오류")
+                ? "작업 실패 · 현재 상태 확인 필요"
+                : line.contains("중지")
+                    ? "자동전송 중지"
+                    : line.contains("전송")
+                        ? "전송 상태 변경"
+                        : line.contains("연결") ? "방 연결 상태 변경" : "설정 또는 서비스 상태 변경";
+    boolean safeSchema = p(c).getBoolean("event_log_private_v1", false);
+    String old = safeSchema ? p(c).getString(KEY_EVENT_LOG, "") : "";
         String next = System.currentTimeMillis() + "|" + safe + "\n" + old;
         if (next.length() > MAX_LOG_CHARS) next = next.substring(0, MAX_LOG_CHARS);
-        p(c).edit().putString(KEY_EVENT_LOG, next).apply();
+    p(c).edit().putBoolean("event_log_private_v1", true).putString(KEY_EVENT_LOG, next).apply();
     }
 
     static String recentLog(Context c, int maxLines) {
+    if (!p(c).getBoolean("event_log_private_v1", false)) return "기록 없음";
         String raw = p(c).getString(KEY_EVENT_LOG, "");
         if (raw == null || raw.isEmpty()) return "기록 없음";
         String[] lines = raw.split("\\n");

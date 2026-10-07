@@ -9,11 +9,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>KakaoMacro.Windows</AssemblyName>
     <RootNamespace>KakaoMacro.Windows</RootNamespace>
-    <Version>1.6.2</Version>
-    <AssemblyVersion>1.6.2.0</AssemblyVersion>
-    <FileVersion>1.6.2.0</FileVersion>
-    <InformationalVersion>1.6.2</InformationalVersion>
+    <Version>1.6.3</Version>
+    <AssemblyVersion>1.6.3.0</AssemblyVersion>
+    <FileVersion>1.6.3.0</FileVersion>
+    <InformationalVersion>1.6.3</InformationalVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x64</Platforms>
   </PropertyGroup>
+  <ItemGroup><InternalsVisibleTo Include="KakaoMacro.Windows.Tests" /></ItemGroup>
 </Project>

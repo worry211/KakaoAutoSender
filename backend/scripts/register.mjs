@@ -42,9 +42,7 @@ async function put(path, body) {
   });
   const raw = await response.text();
   if (!response.ok)
-    throw new Error(
-      `Discord registration failed: HTTP ${response.status} ${raw}`,
-    );
+    throw new Error(`Discord registration failed: HTTP ${response.status}`);
   try {
     return JSON.parse(raw);
   } catch {

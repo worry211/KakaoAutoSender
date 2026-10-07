@@ -6,7 +6,9 @@ namespace KakaoMacro.Windows.Services;
 internal sealed class SettingsStore
 {
     private readonly object _gate = new();
-    private readonly string _directory = Path.Combine(
+    private readonly string _directory;
+    private bool _recoveryBlocked;
+    internal SettingsStore(string? directory = null) => _directory = directory ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "KakaoMacro",
         "Windows");
@@ -57,6 +59,7 @@ internal sealed class SettingsStore
             if (backupExisted) PreserveCorruptCopy(BackupPath, "settings-backup");
             if (primaryExisted || backupExisted)
             {
+                _recoveryBlocked = true;
                 LastRecoveryNotice = "설정 파일과 마지막 정상 백업을 모두 복구하지 못했습니다. 손상본은 설정 폴더에 보존했습니다.";
                 WriteRecoveryLog(LastRecoveryNotice);
 
@@ -80,6 +83,7 @@ internal sealed class SettingsStore
         var serialized = JsonSerializer.Serialize(value, JsonOptions);
         lock (_gate)
         {
+            if (_recoveryBlocked) throw new InvalidDataException("손상된 설정 복구 전에는 새 설정을 저장하지 않습니다.");
             if (string.Equals(serialized, _lastSerialized, StringComparison.Ordinal)) return;
             Directory.CreateDirectory(_directory);
 
@@ -91,7 +95,16 @@ internal sealed class SettingsStore
             WriteAtomic(SettingsPath, serialized);
 
             // The very first save also gets a recovery point immediately.
-            if (!File.Exists(BackupPath)) WriteAtomic(BackupPath, serialized);
+            if (!TryLoadCanonical(BackupPath, out _, out _))
+            {
+                if (File.Exists(BackupPath))
+                {
+                    PreserveCorruptCopy(BackupPath, "settings-backup");
+                    LastRecoveryNotice = "정상 설정을 확인하고 손상된 복구용 백업을 다시 만들었습니다.";
+                    WriteRecoveryLog(LastRecoveryNotice);
+                }
+                WriteAtomic(BackupPath, serialized);
+            }
             _lastSerialized = serialized;
         }
     }
@@ -102,7 +115,16 @@ internal sealed class SettingsStore
     {
         try
         {
-            if (!File.Exists(BackupPath)) WriteAtomic(BackupPath, serialized);
+            if (!TryLoadCanonical(BackupPath, out _, out _))
+            {
+                if (File.Exists(BackupPath))
+                {
+                    PreserveCorruptCopy(BackupPath, "settings-backup");
+                    LastRecoveryNotice = "정상 설정을 확인하고 손상된 복구용 백업을 다시 만들었습니다.";
+                    WriteRecoveryLog(LastRecoveryNotice);
+                }
+                WriteAtomic(BackupPath, serialized);
+            }
         }
         catch
         {
@@ -119,6 +141,9 @@ internal sealed class SettingsStore
             if (!File.Exists(path)) return false;
             var raw = File.ReadAllText(path);
             if (string.IsNullOrWhiteSpace(raw)) return false;
+            using var document = JsonDocument.Parse(raw);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.EnumerateObject().Any(p => p.Name.Equals("Rooms", StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Array)) return false;
             var parsed = JsonSerializer.Deserialize<AppSettings>(raw, JsonOptions);
             if (parsed is null) return false;
             Sanitize(parsed);
@@ -187,6 +212,8 @@ internal sealed class SettingsStore
     {
         value.SchemaVersion = 3;
         value.Rooms ??= new List<RoomProfile>();
+        if (value.Rooms.Any(r => r is null) || value.Rooms.Where(r => r.Id != Guid.Empty).GroupBy(r => r.Id).Any(g => g.Count() > 1))
+            throw new InvalidDataException("중복 또는 손상된 방 설정을 확인해야 합니다.");
         foreach (var room in value.Rooms)
         {
             room.DisplayName = Clean(room.DisplayName, 120, "카톡방");

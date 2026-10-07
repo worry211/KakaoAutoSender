@@ -33,7 +33,7 @@ public partial class MainWindow : Window
     private readonly SemaphoreSlim _schedulerGate = new(1, 1);
     private readonly Queue<string> _logLines = new();
     private readonly TrayService _tray;
-    private CancellationTokenSource _dispatchFence = new();
+    private readonly DispatchFence _dispatchFence = new();
     private CancellationTokenSource? _saveDebounce;
     private CancellationTokenSource? _searchDebounce;
     private CancellationTokenSource? _editorSaveDebounce;
@@ -65,7 +65,16 @@ public partial class MainWindow : Window
 
         _identity = new InstallIdentity();
         _license = new LicenseClient(_identity);
-        _license.Changed += snapshot => Dispatcher.BeginInvoke(() => UpdateLicenseUi(snapshot));
+        _license.Changed += snapshot =>
+        {
+            if (!snapshot.Active) _dispatchFence.Cancel();
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (_isShuttingDown) return;
+                if (!snapshot.Active && _rooms.Any(r => r.Running)) StopRooms(_rooms.ToList(), true, "라이선스 확인 필요 · 전송 중단");
+                UpdateLicenseUi(snapshot);
+            });
+        };
 
         _dispatchFence.Cancel(); // explicit start is required after every app launch.
         _tray = new TrayService();
@@ -162,9 +171,7 @@ public partial class MainWindow : Window
         }
 
         var binding = capture.Binding;
-        var existing = _rooms.FirstOrDefault(r =>
-            r.Binding?.WindowHandle == binding.WindowHandle &&
-            r.Binding.ProcessStartTicksUtc == binding.ProcessStartTicksUtc);
+        var existing = _rooms.FirstOrDefault(r => BindingIdentity.SameWindow(r.Binding, binding));
         if (existing is null)
         {
             existing = new RoomProfile
@@ -241,6 +248,9 @@ public partial class MainWindow : Window
 
     private async Task StartRoomsAsync(IReadOnlyCollection<RoomProfile> targetRooms, string label)
     {
+        var generation = _dispatchFence.Generation;
+        var roomGenerations = targetRooms.ToDictionary(r => r.Id, r => r.StopGeneration);
+        var registeredBindings = _rooms.Select(r => r.Binding).ToArray();
         if (targetRooms.Count == 0) return;
         if (SelectedRooms().Count == 1) SaveEditorToSelected(false);
         await _license.HeartbeatAsync(_shutdown.Token);
@@ -250,13 +260,13 @@ public partial class MainWindow : Window
             return;
         }
 
-        EnsureDispatchFenceOpen();
+        if (!_dispatchFence.TryOpen(generation)) return;
         await _schedulerGate.WaitAsync(_shutdown.Token);
         var started = 0;
         try
         {
             var now = DateTimeOffset.Now;
-            started = await Task.Run(() => PrepareRoomsForStart(targetRooms, now), _shutdown.Token);
+            started = await Task.Run(() => PrepareRoomsForStart(targetRooms, now, generation, roomGenerations, registeredBindings), _shutdown.Token);
         }
         finally
         {
@@ -267,11 +277,13 @@ public partial class MainWindow : Window
         AppendLog($"{label} · 실행 가능한 방 {started}/{targetRooms.Count}개");
     }
 
-    private int PrepareRoomsForStart(IEnumerable<RoomProfile> targetRooms, DateTimeOffset now)
+    private int PrepareRoomsForStart(IEnumerable<RoomProfile> targetRooms, DateTimeOffset now, long generation, IReadOnlyDictionary<Guid,long> roomGenerations, IReadOnlyCollection<KakaoBinding?> registeredBindings)
     {
         var started = 0;
         foreach (var room in targetRooms)
         {
+            if (_dispatchFence.Generation != generation || _dispatchFence.IsCancellationRequested || !_license.CanDispatch) break;
+            if (room.StopGeneration != roomGenerations[room.Id]) continue;
             room.Running = false;
             room.NextAt = null;
             if (!room.Enabled)
@@ -302,25 +314,42 @@ public partial class MainWindow : Window
                 room.LastStatus = "사진 안전 잠금 · PC v1에서 자동전송 차단";
                 continue;
             }
+            if (!ScheduleCalculator.IsValid(room))
+            {
+                room.LastStatus = "예약 시간을 HH:mm 형식으로 확인하세요. 실행을 차단했습니다.";
+                continue;
+            }
+            if (registeredBindings.Count(other => BindingIdentity.SameWindow(other, room.Binding)) > 1)
+            {
+                room.LastStatus = "같은 입력 대상이 중복 등록되어 있습니다. 방 연결을 다시 확인하세요.";
+                continue;
+            }
             ScheduleCalculator.NormalizeDailyCount(room, now);
+            lock (room)
+            {
+            if (_dispatchFence.Generation != generation || _dispatchFence.IsCancellationRequested || !_license.CanDispatch || !room.Enabled || room.StopGeneration != roomGenerations[room.Id]) continue;
             room.Running = true;
             room.NextAt = ScheduleCalculator.DailyLimitReached(room, now)
                 ? ScheduleCalculator.NextAfterDailyLimit(room, now)
                 : ScheduleCalculator.ComputeNext(room, now);
             room.LastStatus = $"실행 중 · 다음 {room.NextAt.Value.LocalDateTime:MM-dd HH:mm:ss}";
             started++;
+            }
         }
         return started;
     }
 
     private void StopRooms(IReadOnlyCollection<RoomProfile> targetRooms, bool global, string label)
     {
-        if (global && !_dispatchFence.IsCancellationRequested) _dispatchFence.Cancel();
+        if (global) _dispatchFence.Cancel();
         foreach (var room in targetRooms)
         {
+            lock(room) {
+            room.StopGeneration++;
             room.Running = false;
             room.NextAt = null;
             room.LastStatus = global ? "전체 중단됨" : "선택 중단됨";
+            }
         }
         QueueSaveSettings();
         RefreshRoomUi();
@@ -334,8 +363,13 @@ public partial class MainWindow : Window
         {
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
-                if (!_license.CanDispatch || _dispatchFence.IsCancellationRequested) continue;
+                if (!_license.CanDispatch || _dispatchFence.IsCancellationRequested)
+                {
+                    _ = Dispatcher.BeginInvoke(() => { if (_rooms.Any(r => r.Running)) StopRooms(_rooms.ToList(), true, "전송 안전 중단"); });
+                    continue;
+                }
                 var now = DateTimeOffset.Now;
+                var session = _dispatchFence.Capture();
                 var due = await Dispatcher.InvokeAsync(() =>
                     _rooms.Where(r => r.Running && r.NextAt is not null && r.NextAt <= now)
                           .OrderBy(r => r.NextAt)
@@ -347,10 +381,10 @@ public partial class MainWindow : Window
                 {
                     foreach (var room in due)
                     {
-                        if (!_license.CanDispatch || _dispatchFence.IsCancellationRequested) break;
+                        if (!_license.CanDispatch || _dispatchFence.Generation != session.Generation || session.Token.IsCancellationRequested) break;
                         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
                             cancellationToken,
-                            _dispatchFence.Token);
+                            session.Token);
                         try
                         {
                             await DispatchAsync(room, true, linked.Token).ConfigureAwait(false);
@@ -360,7 +394,8 @@ public partial class MainWindow : Window
                             room.LastStatus = "전송 중단됨";
                             break;
                         }
-                        await Task.Delay(InterRoomDelay, linked.Token).ConfigureAwait(false);
+                        try { await Task.Delay(InterRoomDelay, linked.Token).ConfigureAwait(false); }
+                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { break; }
                     }
                 }
                 finally
@@ -381,6 +416,17 @@ public partial class MainWindow : Window
 
     private async Task DispatchAsync(RoomProfile room, bool scheduled, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_license.CanDispatch || (scheduled && !room.Running)) return;
+        var stopGeneration = room.StopGeneration;
+        var binding = room.Binding;
+        var message = room.Message;
+        if (await Dispatcher.InvokeAsync(() => _rooms.Count(other => BindingIdentity.SameWindow(other.Binding, binding)) > 1))
+        {
+            room.Running = false; room.NextAt = null;
+            room.LastStatus = "중복된 입력 대상입니다. 전송하지 않고 연결 확인을 기다립니다.";
+            return;
+        }
         var now = DateTimeOffset.Now;
         ScheduleCalculator.NormalizeDailyCount(room, now);
         if (!room.Enabled || room.Binding is null)
@@ -405,7 +451,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        var result = await _binder.SendTextAsync(room.Binding, room.Message, scheduled, cancellationToken).ConfigureAwait(false);
+        var result = await _binder.SendTextAsync(binding, message, scheduled, cancellationToken,
+            () => !_isShuttingDown && _license.CanDispatch && room.Enabled && room.StopGeneration == stopGeneration &&
+                room.BindingValid is not false && string.IsNullOrWhiteSpace(room.PhotoPath) && ReferenceEquals(room.Binding,binding) && room.Message == message && (!scheduled || room.Running)).ConfigureAwait(false);
+        lock(room)
+        {
         if (result.Success)
         {
             room.BindingValid = true;
@@ -414,14 +464,19 @@ public partial class MainWindow : Window
             if (scheduled)
             {
                 room.TodayCount++;
-                room.NextAt = ScheduleCalculator.ComputeNext(room, DateTimeOffset.Now);
-                room.LastStatus = $"전송 성공 · 오늘 {room.TodayCount}회 · 다음 {room.NextAt.Value.LocalDateTime:HH:mm:ss}";
+                if (room.Running && room.StopGeneration == stopGeneration && !cancellationToken.IsCancellationRequested)
+                {
+                    room.NextAt = ScheduleCalculator.ComputeNext(room, DateTimeOffset.Now);
+                    room.LastStatus = $"전송 성공 · 오늘 {room.TodayCount}회 · 다음 {room.NextAt.Value.LocalDateTime:HH:mm:ss}";
+                }
+                else room.NextAt = null;
             }
             else room.LastStatus = "수동 테스트 전송 성공";
             AppendLog($"프로필 {ShortId(room.Id)} 전송 성공");
             return;
         }
 
+        if (room.StopGeneration != stopGeneration || cancellationToken.IsCancellationRequested || (scheduled && !room.Running)) return;
         room.LastStatus = result.Message;
         if (result.Failure == SendFailure.InvalidBinding)
         {
@@ -441,7 +496,7 @@ public partial class MainWindow : Window
         }
 
         room.FailureStreak++;
-        if (result.Failure is SendFailure.InvalidBinding or SendFailure.FocusFailed || room.FailureStreak >= 3)
+        if (result.Failure is SendFailure.InvalidBinding or SendFailure.FocusFailed or SendFailure.SendInputFailed or SendFailure.Stopped || room.FailureStreak >= 3)
         {
             room.Running = false;
             room.NextAt = null;
@@ -452,11 +507,14 @@ public partial class MainWindow : Window
             room.NextAt = DateTimeOffset.Now.AddSeconds(Math.Min(300, 20 * room.FailureStreak));
         }
         AppendLog($"프로필 {ShortId(room.Id)} 전송 실패 · {result.Failure} · 연속 {room.FailureStreak}");
+        }
     }
 
     private async void TestSend_Click(object sender, RoutedEventArgs e)
     {
+        var generation = _dispatchFence.Generation;
         if (!SaveEditorToSelected(true) || SelectedRooms().SingleOrDefault() is not RoomProfile room) return;
+        var roomGeneration = room.StopGeneration;
         await _license.HeartbeatAsync(_shutdown.Token);
         if (!_license.CanDispatch)
         {
@@ -464,14 +522,21 @@ public partial class MainWindow : Window
             return;
         }
         TestSendButton.IsEnabled = false;
-        await _schedulerGate.WaitAsync(_shutdown.Token);
+        if (room.StopGeneration != roomGeneration || !_rooms.Contains(room)) { TestSendButton.IsEnabled = true; return; }
+        if (!_dispatchFence.TryOpen(generation)) { TestSendButton.IsEnabled = true; return; }
+        var session = _dispatchFence.Capture();
+        if (session.Generation != generation) { TestSendButton.IsEnabled = true; return; }
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token, session.Token);
+        var acquired = false;
         try
         {
-            await Task.Run(() => DispatchAsync(room, false, _shutdown.Token), _shutdown.Token);
+            await _schedulerGate.WaitAsync(linked.Token); acquired = true;
+            await Task.Run(() => DispatchAsync(room, false, linked.Token), linked.Token);
         }
+        catch (OperationCanceledException) { }
         finally
         {
-            _schedulerGate.Release();
+            if (acquired) _schedulerGate.Release();
             TestSendButton.IsEnabled = true;
         }
         QueueSaveSettings();
@@ -799,6 +864,7 @@ public partial class MainWindow : Window
 
     private async void SendSelectedNow_Click(object sender, RoutedEventArgs e)
     {
+        var generation = _dispatchFence.Generation;
         var selected = SelectedRooms();
         if (selected.Count == 0)
         {
@@ -815,6 +881,7 @@ public partial class MainWindow : Window
             if (confirm != MessageBoxResult.Yes) return;
         }
         if (selected.Count == 1) SaveEditorToSelected(false);
+        var selectedGenerations = selected.ToDictionary(r => r.Id, r => r.StopGeneration);
         await _license.HeartbeatAsync(_shutdown.Token);
         if (!_license.CanDispatch)
         {
@@ -822,22 +889,29 @@ public partial class MainWindow : Window
             return;
         }
 
-        await _schedulerGate.WaitAsync(_shutdown.Token);
+        if (!_dispatchFence.TryOpen(generation)) return;
+        var session = _dispatchFence.Capture();
+        if (session.Generation != generation) return;
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token, session.Token);
+        var acquired = false;
         var sent = 0;
         try
         {
+            await _schedulerGate.WaitAsync(linked.Token); acquired = true;
             foreach (var room in selected)
             {
-                await DispatchAsync(room, false, _shutdown.Token);
+                if (room.StopGeneration != selectedGenerations[room.Id] || !_rooms.Contains(room)) continue;
+                await DispatchAsync(room, false, linked.Token);
                 if (string.Equals(room.LastStatus, "수동 테스트 전송 성공", StringComparison.Ordinal))
                     sent++;
                 if (room != selected[^1])
-                    await Task.Delay(InterRoomDelay, _shutdown.Token);
+                    await Task.Delay(InterRoomDelay, linked.Token);
             }
         }
+        catch (OperationCanceledException) { }
         finally
         {
-            _schedulerGate.Release();
+            if (acquired) _schedulerGate.Release();
         }
         QueueSaveSettings();
         RefreshRoomUi();
@@ -977,6 +1051,7 @@ public partial class MainWindow : Window
         foreach (var room in selected)
         {
             room.Running = false;
+            room.StopGeneration++;
             _rooms.Remove(room);
         }
         QueueSaveSettings();
@@ -1173,7 +1248,15 @@ public partial class MainWindow : Window
 
     private void UpdateLicenseUi(LicenseSnapshot snapshot)
     {
-        LicenseStatusText.Text = snapshot.Active ? "● 라이선스 정상" : $"● {snapshot.State}";
+        LicenseStatusText.Text = snapshot.Active ? "● 라이선스 정상" : snapshot.State switch
+        {
+            "CHECKING" => "● 라이선스 확인 중",
+            "NETWORK" => "● 인터넷·서버 연결 확인 필요",
+            "EXPIRED" => "● 라이선스 만료",
+            "SUSPENDED" => "● 라이선스 정지",
+            "REVOKED" or "DELETED" => "● 사용할 수 없는 라이선스",
+            _ => "● 라이선스 인증 필요",
+        };
         var expiry = snapshot.ExpiresAt is > 0
             ? DateTimeOffset.FromUnixTimeSeconds(snapshot.ExpiresAt.Value).ToLocalTime().ToString("yyyy-MM-dd HH:mm") + " 만료"
             : snapshot.Active ? "영구 라이선스" : snapshot.Message;
@@ -1305,13 +1388,6 @@ public partial class MainWindow : Window
         LogBox.ScrollToEnd();
     }
 
-    private void EnsureDispatchFenceOpen()
-    {
-        if (!_dispatchFence.IsCancellationRequested) return;
-        _dispatchFence.Dispose();
-        _dispatchFence = new CancellationTokenSource();
-    }
-
     private void Shutdown()
     {
         if (_isShuttingDown) return;
@@ -1330,14 +1406,11 @@ public partial class MainWindow : Window
         _shutdown.Cancel();
         if (_windowHandle != IntPtr.Zero) UnregisterHotKey(_windowHandle, HotkeyId);
         _tray.Dispose();
-        _license.Dispose();
-        _identity.Dispose();
-        _schedulerGate.Dispose();
-        _dispatchFence.Dispose();
+        // In-flight requests and dispatches still own these resources. Cancellation
+        // closes every send gate; process exit releases them after continuations end.
         _saveDebounce?.Dispose();
         _searchDebounce?.Dispose();
         _editorSaveDebounce?.Dispose();
-        _shutdown.Dispose();
     }
 
     private sealed record BulkEditSnapshot(string Message, ScheduleKind ScheduleKind, int IntervalMinutes, string DailyTimes, int DailyLimit, bool Enabled);
