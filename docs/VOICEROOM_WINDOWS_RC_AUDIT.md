@@ -1,6 +1,6 @@
 # Current continuation: Windows RC9 browser entry reliability
 
-Final target RC9 EXE (code cb40c32) normal launch/ready at 18:31:24/18:31:25 KST. Closed-chat browser → preview → exact room → existing active/both-muted at 18:31:46, 18279ms. Controlled termination → automatic default-menu regeneration → active/both-muted at 18:33:38. Complete fresh run: both chat and VoiceRoom closed, StartAll once at 18:36:11 → native browser CTA → verified yellow preview → exact chat → automatic default-menu/form submission → new active/mic-muted/speaker-muted repeated proof at 18:36:30, 19062ms, durable StartedAt 18:36:27.483 UTC+9. No manual creation/entry/audio click during either workflow. These are controlled tests, not elapsed 48h proof. Code CI VoiceRoom Windows #104, Windows client #168, APK/backend #651 success.
+Final target RC9 EXE (code cb40c32) normal launch/ready at 18:31:24/18:31:25 KST. Closed-chat browser → preview → exact room → existing active/both-muted at 18:31:46, 18279ms. Controlled termination → automatic default-menu regeneration → active/both-muted at 18:33:38. Complete fresh run: both chat and VoiceRoom closed, StartAll once at 18:36:11 → native browser CTA → verified yellow preview → exact chat → automatic default-menu/form submission → new active/mic-muted/speaker-muted repeated proof at 18:36:30, 19062ms, durable StartedAt 18:36:27 UTC+9. No manual creation/entry/audio click during either workflow. These are controlled tests, not elapsed 48h proof. Code CI VoiceRoom Windows #104, Windows client #168, APK/backend #651 success.
 
 First RC9 native-delivery run still missed preview within 8 seconds; retry then stalled behind its own landing under the generic foreground gate. Pending entry now recognizes only its exact registered official OpenChat URL as a continuation surface; healthy-room browsing/other tabs/games remain deferred. The read-only handoff budget is 20 seconds within the 90-second operation deadline, not a fixed delay before success. Failed browser-confirmation captions are retained for diagnosis; no arbitrary launch/security button is allowed.
 
@@ -151,6 +151,7 @@ Windows 실제 Kakao 보이스룸 생성/PIP 및 icon-only audio/요청 UI, 모�
 90초 제한은 adapter 호출 사이에서 검사하는 cooperative 제한이다. native UIA provider가 한 호출에서 멈추는 경우 강제 중단은 보장하지 않는다. 자동화를 worker process로 격리하는 개선 여지가 남는다. 이 RC를 판매 승인 완료로 포장하지 않는다. unsigned EXE이며 코드서명/installer/licensing를 Windows에 새로 만들지 않았다.
 
 [한 번의 종합 smoke + 장시간 체크](VOICEROOM_WINDOWS_RC_CHECKLIST.md)를 사용한다. CI는 real Kakao 계정에 접속하지 않는다.
+
 
 
 
