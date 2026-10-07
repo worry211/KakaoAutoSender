@@ -1,6 +1,6 @@
 # Current continuation: Windows RC7 cancellation/startup audit
 
-137 local Windows tests pass. Manual/probe results arriving after Stop/Dispose are marked cancelled and discarded by coordinator and UI. Delivered submit time checkpoints precede cancelled progress callbacks. Startup attempts, loaded window, duplicate instance and startup exceptions are recorded in logs/startup.jsonl. Existing focus-aware wait remains; no background-only backend or unattended focus-stealing mode.
+137 local Windows tests pass. Coordinator logs follow its StateStore directory; test stores do not pollute real operational logs. Manual/probe results arriving after Stop/Dispose are marked cancelled and discarded by coordinator and UI. Delivered submit time checkpoints precede cancelled progress callbacks. Startup attempts, loaded window, duplicate instance and startup exceptions are recorded in logs/startup.jsonl. Existing focus-aware wait remains; no background-only backend or unattended focus-stealing mode.
 
 RC6 launch verification resumed successfully on 2026-10-07 at 17:04 KST through the normal File Explorer EXE launch. launch_app's window-opened handler preparation fails; this did not reproduce an EXE/security refusal. Actual outputs RC6 path/version and active/both-muted recovery were observed; duration 2255ms versus previous 31914ms observation, not a controlled benchmark. Legacy unknown start remains unknown. Modified build real 48h regeneration and other-account request gates still need proof.
 

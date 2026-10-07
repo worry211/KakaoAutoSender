@@ -9,6 +9,7 @@ public sealed class StateStore
     private readonly object _gate = new();
     private readonly string _dir;
     private readonly string _path;
+    internal string LogDirectoryPath => Path.Combine(_dir, "logs");
     private readonly JsonSerializerOptions _json = new() { WriteIndented = true };
 
     public StateStore(string? directory = null)

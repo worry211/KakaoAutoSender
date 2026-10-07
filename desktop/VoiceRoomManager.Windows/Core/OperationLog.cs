@@ -7,14 +7,15 @@ internal static class OperationLog
 {
     private static readonly object Gate = new();
     public static string DirectoryPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VoiceRoomManagerWindows", "logs");
-    public static void Write(RoomState room, string stage, string? diagnostic = null)
+    public static void Write(RoomState room, string stage, string? diagnostic = null, string? directory = null)
     {
         lock (Gate)
         {
             try
             {
-                Directory.CreateDirectory(DirectoryPath);
-                var path = Path.Combine(DirectoryPath, "operations.jsonl");
+                directory ??= DirectoryPath;
+                Directory.CreateDirectory(directory);
+                var path = Path.Combine(directory, "operations.jsonl");
                 if (File.Exists(path) && new FileInfo(path).Length > 2_000_000)
                     File.Move(path, path + ".previous", true);
                 // Room IDs and bounded diagnostics; no automatic screenshots or message bodies.

@@ -22,6 +22,7 @@ public class CoordinatorCancellationTests
             Assert.False(result.Success); Assert.True(result.Cancelled); Assert.Equal("STOPPED", room.Status); Assert.Equal("관리 중단", room.Stage);
             Assert.Null(room.NextCheckAt); Assert.Null(room.LastSuccessAt); Assert.Equal(0, room.Failures);
             Assert.Equal("관리 중단", Assert.Single(store.Load().Rooms).Stage);
+            Assert.Contains(room.Id, File.ReadAllText(Path.Combine(path, "logs", "operations.jsonl")));
         }
         finally { driver.Release.Set(); if (Directory.Exists(path)) Directory.Delete(path, true); }
     }
