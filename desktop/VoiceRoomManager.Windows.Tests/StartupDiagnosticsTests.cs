@@ -19,6 +19,8 @@ public class StartupDiagnosticsTests
             Assert.Equal("startup-failed", record.RootElement.GetProperty("stage").GetString());
             Assert.Equal("System.InvalidOperationException", record.RootElement.GetProperty("errorType").GetString());
             Assert.Equal("fixture error", record.RootElement.GetProperty("detail").GetString());
+            Assert.Contains("rc.7", record.RootElement.GetProperty("version").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(record.RootElement.GetProperty("executable").GetString()));
         }
         finally { Directory.Delete(path, true); }
     }
