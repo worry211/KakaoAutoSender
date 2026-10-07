@@ -1,5 +1,7 @@
 # Current continuation: Windows RC9 browser entry reliability
 
+Final target RC9 EXE (code cb40c32) normal launch/ready at 18:31:24/18:31:25 KST. Closed-chat browser → preview → exact room → existing active/both-muted at 18:31:46, 18279ms. Controlled termination → automatic default-menu regeneration → active/both-muted at 18:33:38. Complete fresh run: both chat and VoiceRoom closed, StartAll once at 18:36:11 → native browser CTA → verified yellow preview → exact chat → automatic default-menu/form submission → new active/mic-muted/speaker-muted repeated proof at 18:36:30, 19062ms, durable StartedAt 18:36:27.483 UTC+9. No manual creation/entry/audio click during either workflow. These are controlled tests, not elapsed 48h proof. Code CI VoiceRoom Windows #104, Windows client #168, APK/backend #651 success.
+
 Additional target evidence: first RC9 native input was delivered but no preview appeared within 8 seconds, and the retry was then blocked because its own exact OpenChat landing counted as other-app foreground. Pending entry now resumes only on the registered exact official URL in a known OpenChat browser; other tabs/URLs/games still defer. Healthy verified-room browser foreground is not an exception. Handoff observation allows up to 20 seconds within the existing 90-second operation limit, without a fixed success delay. Failed confirmation diagnostics now expose launcher captions; arbitrary launch/security buttons are never accepted.
 
 Final RC8 chat-close/StartAll target test first failed to find preview after semantic browser invocation at 18:14:34; automatic retry eventually recovered exact chat/active/both-muted at 18:19:29. This is delay/retry evidence, not proof that browser InvokePattern alone caused failure. RC9 uses a native click on the fresh exact-name UIA rectangle only after exact official URL, containment, foreground and point ownership checks. Delivery remains transition-pending; actual Kakao room proof is required. Selection/Invoke-only browser execution was removed. Native browser action and complete entry traces are logged. Observed green OpenChat landing joins the existing blue-theme outline recognizer; geometry/unique-match/exact URL guards remain. Unsupported colors and generic solid backgrounds are rejected. 154 local tests pass before packaging; final RC9 CI/binary/actual QA belongs in PR #12 and output manifest. Preserve all unresolved real-device gates.
@@ -590,5 +592,6 @@ Before finishing:
 - If an architectural change is clearly needed, make it.
 - If current assumptions are wrong, correct them rather than preserving them for compatibility.
 - Continue until you have the best production-ready release candidate you can reasonably produce from the repository and available runtime evidence.
+
 
 
