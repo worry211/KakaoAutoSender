@@ -3,6 +3,28 @@ import worker from "../src/index";
 import type { Env } from "../src/core";
 
 describe("production deployment provenance", () => {
+  it.each([
+    {},
+    { CF_VERSION_METADATA: {} },
+    {
+      CF_VERSION_METADATA: {
+        tag: "release",
+        timestamp: "2026-10-07T13:00:00Z",
+      },
+    },
+    { CF_VERSION_METADATA: { tag: "a".repeat(40), timestamp: "invalid" } },
+  ])(
+    "cannot claim a verified revision with missing/malformed metadata",
+    async (env) => {
+      const r = await worker.fetch(
+        new Request("https://license.test/api/v1/deployment"),
+        env as unknown as Env,
+        {} as ExecutionContext,
+      );
+      expect(r.status).toBe(503);
+      expect(((await r.json()) as any).state).toBe("UNVERIFIED_DEPLOYMENT");
+    },
+  );
   it("returns the Cloudflare version tag and deployment timestamp", async () => {
     const env = {
       CF_VERSION_METADATA: {

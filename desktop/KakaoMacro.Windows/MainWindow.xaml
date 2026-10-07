@@ -91,6 +91,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <StackPanel>
                                         <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding RoomCode, StringFormat=방 구분 {0}}" FontSize="10" Foreground="{StaticResource Muted}"/>
                                         <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                             <TextBlock Text="{Binding BindingSummary}" FontSize="9" FontWeight="SemiBold">
                                                 <TextBlock.Style>

@@ -33,7 +33,8 @@ public class CommercialGateTest {
     c.getSharedPreferences("entitlement_v2", 0).edit().clear().commit();
     Settings.Global.putInt(c.getContentResolver(), Settings.Global.BOOT_COUNT, 4);
     KakaoNotificationListener.clearRuntimeAndBindings(c);
-    Shadows.shadowOf(c.getContentResolver()).registerInputStream(
+    Shadows.shadowOf(c.getContentResolver())
+        .registerInputStream(
         Uri.parse("content://photo/a"), new ByteArrayInputStream(new byte[] {1, 2, 3}));
     c.getSharedPreferences("entitlement_v2", 0)
         .edit()
@@ -73,6 +74,11 @@ public class CommercialGateTest {
             "test",
             new ArrayList<>(),
             verified));
+    java.lang.reflect.Field recent =
+        KakaoNotificationListener.class.getDeclaredField("recentTargets");
+    recent.setAccessible(true);
+    ((Map<String, KakaoNotificationListener.ReplyTarget>) recent.get(null))
+        .put("t", sessions.get("room-a"));
   }
 
   @Test
@@ -255,6 +261,22 @@ public class CommercialGateTest {
     String d = LicenseManager.diagnostic(c);
     assertFalse(d.contains("private"));
     assertFalse(d.contains("tokens"));
+    Prefs.appendLog(c, "전송 완료 private-room private-message content://private/photo");
+    assertFalse(Prefs.recentLog(c, 10).contains("private"));
+  }
+
+  @Test
+  public void removedPhotoTargetNeverFallsBackToText() throws Exception {
+    target("room-a", true, "image/png");
+    KakaoNotificationListener.invalidateNotification("t", 0);
+    assertFalse(
+        KakaoMessageSender.send(
+            c,
+            "room-a",
+            "text",
+            new RoomMediaStore.Media("content://photo/a", "image/png", "image")));
+    for (Intent i : Shadows.shadowOf(RuntimeEnvironment.getApplication()).getBroadcastIntents())
+      assertFalse("TEST_REPLY".equals(i.getAction()));
   }
 
   private void verifyRedirect(String state) {

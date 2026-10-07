@@ -3,6 +3,7 @@ import { admin, authorize } from "./admin";
 import { parseCommand } from "./commands";
 import { friendlyError, needsConfirmation, verifyDiscord } from "./discord";
 import { commandFromSellerModal, sellerModalFor } from "./sellerConsoleModals";
+import { enforceDiscordScope } from "./discordGuard";
 
 type Command = { group: string; action: string; params: Row };
 
@@ -1212,6 +1213,14 @@ export async function discord(
     interaction = JSON.parse(raw);
   } catch {
     return json({ state: "INVALID" }, 400);
+  }
+  try {
+    enforceDiscordScope(raw, env);
+  } catch (error) {
+    return json(
+      { state: error instanceof ApiError ? error.state : "INVALID" },
+      error instanceof ApiError ? error.status : 400,
+    );
   }
   if (interaction.type === 1) return json({ type: 1 });
   const actor = interaction.member?.user?.id ?? interaction.user?.id ?? "";

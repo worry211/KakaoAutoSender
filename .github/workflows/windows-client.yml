@@ -22,6 +22,13 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Routing, stop and recovery regression tests
+        run: dotnet test desktop/KakaoMacro.Windows.Tests -c Release -warnaserror --logger trx
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-safety-test-results
+          path: desktop/KakaoMacro.Windows.Tests/TestResults/*.trx
       - name: Restore win-x64
         run: dotnet restore desktop/KakaoMacro.Windows/KakaoMacro.Windows.csproj -r win-x64
       - name: Release build with warnings as errors

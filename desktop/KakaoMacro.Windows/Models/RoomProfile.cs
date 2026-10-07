@@ -41,6 +41,12 @@ public sealed class RoomProfile
     public bool Running { get; set; }
 
     [JsonIgnore]
+    public long StopGeneration { get; set; }
+
+    [JsonIgnore]
+    public string RoomCode => Id.ToString("N")[..6].ToUpperInvariant();
+
+    [JsonIgnore]
     public DateTimeOffset? NextAt { get; set; }
 
     [JsonIgnore]

@@ -71,35 +71,18 @@ jobs:
         run: |
           test -n "${CLOUDFLARE_API_TOKEN}" || { echo 'Missing CLOUDFLARE_API_TOKEN production secret.' >&2; exit 1; }
           test -n "${CLOUDFLARE_ACCOUNT_ID}" || { echo 'Missing CLOUDFLARE_ACCOUNT_ID production secret.' >&2; exit 1; }
+      - name: Refuse outdated main revision
+        shell: bash
+        run: test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
       - name: Deploy Worker
         working-directory: backend
         run: npm run deploy -- --tag "${GITHUB_SHA}" --message "GitHub production ${GITHUB_SHA}"
       - name: Smoke public client config and deployment provenance
+        working-directory: backend
+        run: node scripts/verify-production.mjs
+      - name: Verify deployed revision is still main
         shell: bash
-        run: |
-          node <<'NODE'
-          const configUrl = 'https://kakaomacro-license.ei3921163.workers.dev/api/v1/client-config';
-          const configResponse = await fetch(configUrl, { headers: { 'Cache-Control': 'no-cache' } });
-          if (!configResponse.ok) throw new Error(`client-config HTTP ${configResponse.status}`);
-          const config = await configResponse.json();
-          if (config.state !== 'CONFIG') throw new Error(`unexpected client-config state: ${config.state}`);
-          for (const key of ['maintenance', 'kill_switch', 'min_version', 'latest_version']) {
-            if (!(key in config)) throw new Error(`client-config missing ${key}`);
-          }
-
-          const deploymentUrl = 'https://kakaomacro-license.ei3921163.workers.dev/api/v1/deployment';
-          const deploymentResponse = await fetch(deploymentUrl, { headers: { 'Cache-Control': 'no-cache' } });
-          if (!deploymentResponse.ok) throw new Error(`deployment HTTP ${deploymentResponse.status}`);
-          const deployment = await deploymentResponse.json();
-          if (deployment.state !== 'DEPLOYMENT') throw new Error(`unexpected deployment state: ${deployment.state}`);
-          if (deployment.tag !== process.env.GITHUB_SHA) {
-            throw new Error(`live revision mismatch: expected ${process.env.GITHUB_SHA}, got ${deployment.tag || '<empty>'}`);
-          }
-          if (!deployment.deployed_at) throw new Error('deployment metadata missing deployed_at');
-
-          console.log(`Worker smoke PASS · state=${config.state} min=${config.min_version} latest=${config.latest_version}`);
-          console.log(`Production provenance PASS · tag=${deployment.tag} deployed_at=${deployment.deployed_at}`);
-          NODE
+        run: test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
       - name: Check Discord registration credentials
         if: github.event.inputs.action == 'deploy_and_register'
         env:

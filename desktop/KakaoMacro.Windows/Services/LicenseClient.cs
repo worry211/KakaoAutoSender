@@ -19,12 +19,12 @@ internal sealed record LicenseSnapshot(
     string DownloadUrl)
 {
     public static LicenseSnapshot Initial { get; } = new(
-        false, "CHECKING", "라이선스 확인 중", "", null, 60, 600, 151, "");
+        false, "CHECKING", "라이선스 확인 중", "", null, 60, 600, 163, "");
 }
 
 internal sealed class LicenseClient : IDisposable
 {
-    public const int AppVersion = 151;
+    public const int AppVersion = 163;
     private const string ClientPlatform = "windows";
     private const string ApiOrigin = "https://kakaomacro-license.ei3921163.workers.dev";
     private readonly InstallIdentity _identity;
@@ -42,10 +42,10 @@ internal sealed class LicenseClient : IDisposable
     public event Action<LicenseSnapshot>? Changed;
     public LicenseSnapshot Snapshot => _snapshot;
 
-    public LicenseClient(InstallIdentity identity)
+    public LicenseClient(InstallIdentity identity, HttpMessageHandler? handler = null)
     {
         _identity = identity;
-        _http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+        _http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false })
         {
             BaseAddress = new Uri(ApiOrigin),
             Timeout = TimeSpan.FromSeconds(7),
@@ -217,6 +217,9 @@ internal sealed class LicenseClient : IDisposable
         CancellationToken cancellationToken,
         bool retryClock = true)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(7));
+        cancellationToken = deadline.Token;
         var raw = JsonSerializer.Serialize(body);
         var timestamp = EstimatedServerTime().ToString(System.Globalization.CultureInfo.InvariantCulture);
         var nonce = Base64Url(RandomNumberGenerator.GetBytes(24));
@@ -242,8 +245,17 @@ internal sealed class LicenseClient : IDisposable
         if ((int)response.StatusCode >= 500)
             throw new HttpRequestException($"server:{(int)response.StatusCode}");
 
-        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
-        if (bytes.Length is 0 or > 16384) throw new HttpRequestException("body_size");
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[1024];
+        int count;
+        while ((count = await stream.ReadAsync(chunk, cancellationToken)) > 0)
+        {
+            if (buffer.Length + count > 16384) throw new HttpRequestException("body_size");
+            buffer.Write(chunk, 0, count);
+        }
+        var bytes = buffer.ToArray();
+        if (bytes.Length == 0) throw new HttpRequestException("body_size");
         ApiResponse parsed;
         try
         {
@@ -263,6 +275,7 @@ internal sealed class LicenseClient : IDisposable
 
     private LicenseSnapshot Apply(ApiResponse response)
     {
+        if (response.State is "RATE_LIMITED" or "SERVER_ERROR" or "REPLAY" or "INVALID_PROOF") return NetworkFailure();
         if (response.State == "ACTIVE") return Accept(response);
         _accessToken = "";
         if (response.State is "DEVICE_MISMATCH" or "REVOKED" or "DELETED" or "NOT_FOUND")
@@ -272,6 +285,10 @@ internal sealed class LicenseClient : IDisposable
 
     private LicenseSnapshot Accept(ApiResponse response)
     {
+        if (response.ServerTime <= 0 || string.IsNullOrWhiteSpace(response.LicenseId))
+            throw new HttpRequestException("invalid_entitlement_metadata");
+        if (response.ExpiresAt is > 0 && response.ExpiresAt <= response.ServerTime)
+            return SetInactive("EXPIRED", StateMessage("EXPIRED"));
         if (!string.IsNullOrWhiteSpace(response.AccessToken)) _accessToken = response.AccessToken;
         if (!string.IsNullOrWhiteSpace(response.RefreshToken)) _refreshToken = response.RefreshToken;
         _validatedTick = Environment.TickCount64;
@@ -293,6 +310,7 @@ internal sealed class LicenseClient : IDisposable
     private LicenseSnapshot NetworkFailure()
     {
         if (CanDispatch) return _snapshot;
+        if (!_snapshot.Active && _snapshot.State is not ("CHECKING" or "NETWORK")) return _snapshot;
         _snapshot = _snapshot with
         {
             Active = false,

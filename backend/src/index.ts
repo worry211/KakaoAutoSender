@@ -1,7 +1,6 @@
 import { Env, ApiError, now, id, json, rate, config, metadata } from "./core";
 import { activate, entitlement, deactivate, recover } from "./license";
 import { discord } from "./discordV2";
-import { enforceDiscordScope } from "./discordGuard";
 
 async function boundedBody(req: Request) {
   if (Number(req.headers.get("Content-Length") ?? 0) > 16384)
@@ -26,9 +25,13 @@ async function boundedBody(req: Request) {
     bytes.set(c, offset);
     offset += c.length;
   }
-  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
-    bytes,
-  );
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
+      bytes,
+    );
+  } catch {
+    throw new ApiError("INVALID", 400);
+  }
 }
 
 function parseEntitlementQuery(url: URL) {
@@ -52,6 +55,12 @@ function parseEntitlementQuery(url: URL) {
 
 function deploymentMetadata(env: Env) {
   const version = (env as any).CF_VERSION_METADATA;
+  if (
+    !/^[0-9a-f]{40}$/.test(String(version?.tag ?? "")) ||
+    typeof version?.timestamp !== "string" ||
+    !Number.isFinite(Date.parse(version.timestamp))
+  )
+    throw new ApiError("UNVERIFIED_DEPLOYMENT", 503);
   return {
     state: "DEPLOYMENT",
     tag: String(version?.tag ?? ""),
@@ -91,7 +100,6 @@ export default {
         return json(deploymentMetadata(env), 200, request);
       if (path === "/discord/interactions" && req.method === "POST") {
         const raw = await boundedBody(req);
-        enforceDiscordScope(raw, env);
         return await discord(req, raw, env, ctx);
       }
       if (!routes.includes(path)) throw new ApiError("NOT_FOUND", 404);

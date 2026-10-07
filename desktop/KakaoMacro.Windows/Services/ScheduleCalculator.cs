@@ -5,6 +5,13 @@ namespace KakaoMacro.Windows.Services;
 
 internal static class ScheduleCalculator
 {
+    public static bool IsValid(RoomProfile room)
+    {
+        if (room.ScheduleKind == ScheduleKind.Interval) return room.IntervalMinutes is >= 1 and <= 10080;
+        if (room.ScheduleKind != ScheduleKind.FixedTimes) return false;
+        var tokens = (room.DailyTimes ?? "").Split(new[] { ',', ';', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        return tokens.Length > 0 && tokens.All(token => TimeOnly.TryParseExact(token.Trim(), "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out _));
+    }
     public static void NormalizeDailyCount(RoomProfile room, DateTimeOffset now)
     {
         var today = DateOnly.FromDateTime(now.LocalDateTime).ToString("yyyy-MM-dd");
@@ -23,11 +30,11 @@ internal static class ScheduleCalculator
 
     public static DateTimeOffset ComputeNext(RoomProfile room, DateTimeOffset from)
     {
+        if (!IsValid(room)) throw new InvalidDataException("예약 시간을 HH:mm 형식으로 확인하세요.");
         if (room.ScheduleKind == ScheduleKind.Interval)
             return from.AddMinutes(Math.Clamp(room.IntervalMinutes, 1, 10080));
 
         var times = ParseTimes(room.DailyTimes);
-        if (times.Count == 0) times.Add(new TimeOnly(9, 0));
         var local = from.LocalDateTime.AddSeconds(2);
         foreach (var time in times)
         {
@@ -50,7 +57,7 @@ internal static class ScheduleCalculator
     public static string CanonicalTimes(string raw)
     {
         var values = ParseTimes(raw);
-        return values.Count == 0 ? "09:00" : string.Join(", ", values.Select(v => v.ToString("HH:mm")));
+        return !IsValid(new RoomProfile { ScheduleKind = ScheduleKind.FixedTimes, DailyTimes = raw }) ? raw.Trim() : string.Join(", ", values.Select(v => v.ToString("HH:mm")));
     }
 
     private static List<TimeOnly> ParseTimes(string? raw)

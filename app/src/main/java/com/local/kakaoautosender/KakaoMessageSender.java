@@ -6,7 +6,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
-
 import java.io.FileNotFoundException;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -49,7 +48,8 @@ final class KakaoMessageSender {
         Uri uri;
         try {
             uri = Uri.parse(media.uri);
-            if (!"content".equals(uri.getScheme())) throw new IllegalArgumentException("SAF content URI required");
+      if (!"content".equals(uri.getScheme()))
+        throw new IllegalArgumentException("SAF content URI required");
         } catch (Throwable t) {
             lastError = "선택한 사진 주소가 유효하지 않음";
             return false;
@@ -113,10 +113,11 @@ final class KakaoMessageSender {
             data.put(acceptedMime, uri);
             RemoteInput.addDataResultToIntent(dataInput, fillIn, data);
             fillIn.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            context.grantUriPermission(KakaoNotificationListener.KAKAO_PACKAGE, uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
+      context.grantUriPermission(
+          KakaoNotificationListener.KAKAO_PACKAGE, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
             synchronized (DeliveryGate.LOCK) {
-                if (!DeliveryGate.allowed(context)) {
+        if (!DeliveryGate.allowed(context)
+            || !KakaoNotificationListener.isCurrentTarget(requested, target)) {
                     lastError = "전송 중단 · 라이선스 또는 자동전송 상태를 확인하세요.";
                     return false;
                 }
@@ -166,7 +167,8 @@ final class KakaoMessageSender {
             Intent fillIn = new Intent();
             RemoteInput.addResultsToIntent(textInputs, fillIn, results);
             synchronized (DeliveryGate.LOCK) {
-                if (!DeliveryGate.allowed(context)) {
+        if (!DeliveryGate.allowed(context)
+            || !KakaoNotificationListener.isCurrentTarget(requested, target)) {
                     lastError = "전송 중단 · 라이선스 또는 자동전송 상태를 확인하세요.";
                     return false;
                 }

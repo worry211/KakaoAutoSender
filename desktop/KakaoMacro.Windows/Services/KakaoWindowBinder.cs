@@ -1,382 +1,130 @@
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-using System.Text;
 using KakaoMacro.Windows.Models;
-
 namespace KakaoMacro.Windows.Services;
 
-internal enum SendFailure
-{
-    None,
-    BusyUser,
-    InvalidBinding,
-    FocusFailed,
-    SendInputFailed,
-}
-
+internal enum SendFailure { None, BusyUser, InvalidBinding, FocusFailed, SendInputFailed, Stopped }
 internal sealed record BindingCaptureResult(bool Success, string Message, KakaoBinding? Binding);
 internal sealed record SendResult(bool Success, string Message, SendFailure Failure = SendFailure.None);
+internal sealed record WindowObservation(bool TopExists, bool InputExists, bool Visible, int ProcessId,
+    int InputProcessId, long ProcessStartTicksUtc, string ProcessName, string Title, string TopClass,
+    string InputClass, long InputRoot);
+internal readonly record struct KeyStroke(ushort VirtualKey, char Unicode, bool Up);
 
+// Same production Win32 adapter, with injectable observations/input acceptance for safe tests.
+internal interface IKakaoWindowApi
+{
+    BindingCaptureResult Capture();
+    WindowObservation Observe(KakaoBinding binding);
+    long Foreground { get; }
+    long FocusedInput { get; }
+    uint UserIdleMilliseconds { get; }
+    bool Focus(KakaoBinding binding, CancellationToken cancellationToken);
+    bool SendKeys(IReadOnlyList<KeyStroke> keys);
+    void RestoreForeground(long previous, long target);
+}
+internal static class BindingIdentity
+{
+    public static bool SameWindow(KakaoBinding? a, KakaoBinding? b) => a is not null && b is not null &&
+        a.WindowHandle == b.WindowHandle && a.ProcessId == b.ProcessId && a.ProcessStartTicksUtc == b.ProcessStartTicksUtc;
+    public static (bool Valid, string Message) Validate(KakaoBinding? b, WindowObservation o)
+    {
+        if (b is null) return (false, "연결된 카톡방이 없습니다.");
+        if (b.WindowHandle == 0 || b.FocusHandle == 0 || b.FocusHandle == b.WindowHandle || !o.TopExists || !o.InputExists || !o.Visible)
+            return (false, "카카오톡 창 또는 입력칸이 닫혔습니다. 다시 연결해 주세요.");
+        if (o.ProcessId != b.ProcessId || o.InputProcessId != b.ProcessId || o.ProcessStartTicksUtc != b.ProcessStartTicksUtc ||
+            !string.Equals(o.ProcessName, "KakaoTalk", StringComparison.OrdinalIgnoreCase))
+            return (false, "카카오톡이 재시작되었거나 대상이 바뀌었습니다. 다시 연결해 주세요.");
+        if (!string.Equals(o.Title.Trim(), b.WindowTitle.Trim(), StringComparison.Ordinal))
+            return (false, "연결한 방의 창 제목이 바뀌었습니다. 다시 연결해 주세요.");
+        if (string.IsNullOrWhiteSpace(b.TopClass) || string.IsNullOrWhiteSpace(b.FocusClass) || o.TopClass != b.TopClass ||
+            o.InputClass != b.FocusClass || o.InputRoot != b.WindowHandle)
+            return (false, "카카오톡 입력칸 구조가 바뀌었습니다. 다시 연결해 주세요.");
+        return (true, "연결 정상");
+    }
+}
 internal sealed class KakaoWindowBinder
 {
     private readonly SemaphoreSlim _sendGate = new(1, 1);
-
-    public BindingCaptureResult CaptureFocusedRoom()
+    private readonly IKakaoWindowApi _api;
+    internal KakaoWindowBinder(IKakaoWindowApi? api = null) => _api = api ?? new NativeKakaoWindowApi();
+    public BindingCaptureResult CaptureFocusedRoom() => _api.Capture();
+    public (bool Valid, string Message) Validate(KakaoBinding? b)
     {
-        try
-        {
-            var top = GetForegroundWindow();
-            if (top == IntPtr.Zero) return FailCapture("현재 활성 창을 찾지 못했습니다.");
-            var threadId = GetWindowThreadProcessId(top, out var pid);
-            if (threadId == 0 || pid == 0) return FailCapture("활성 창 정보를 읽지 못했습니다.");
-
-            using var process = Process.GetProcessById((int)pid);
-            if (!string.Equals(process.ProcessName, "KakaoTalk", StringComparison.OrdinalIgnoreCase))
-                return FailCapture("카카오톡 PC 채팅창에서 Ctrl+Shift+F8을 눌러 주세요.");
-
-            var title = ReadWindowText(top).Trim();
-            if (string.IsNullOrWhiteSpace(title) || IsMainKakaoWindow(title))
-                return FailCapture("메인 카카오톡 창이 아니라 별도로 열린 채팅방 창에서 연결해 주세요.");
-
-            var info = new GUITHREADINFO { cbSize = Marshal.SizeOf<GUITHREADINFO>() };
-            // KakaoTalk can move the editor onto a different GUI thread when overlays
-            // such as VoiceRoom are active. idThread=0 asks for the actual foreground thread.
-            if (!GetGUIThreadInfo(0, ref info))
-                return FailCapture("카카오톡 입력 포커스를 확인하지 못했습니다.");
-            var focus = info.hwndFocus == IntPtr.Zero ? top : info.hwndFocus;
-            if (GetAncestor(focus, GA_ROOT) != top)
-                return FailCapture("채팅 입력창에 커서를 둔 뒤 다시 연결해 주세요.");
-            var focusThread = GetWindowThreadProcessId(focus, out var focusPid);
-            if (focusThread == 0 || focusPid != pid)
-                return FailCapture("채팅 입력 대상이 이 카카오톡 방에 속하는지 확인하지 못했습니다.");
-
-            var binding = new KakaoBinding
-            {
-                WindowHandle = top.ToInt64(),
-                FocusHandle = focus.ToInt64(),
-                ProcessId = (int)pid,
-                ProcessStartTicksUtc = process.StartTime.ToUniversalTime().Ticks,
-                WindowTitle = title,
-                TopClass = ReadClass(top),
-                FocusClass = ReadClass(focus),
-                PairedAtUtc = DateTimeOffset.UtcNow,
-            };
-            var validation = Validate(binding);
-            return validation.Valid
-                ? new BindingCaptureResult(true, $"'{title}' 연결 완료", binding)
-                : FailCapture(validation.Message);
-        }
-        catch (Exception ex)
-        {
-            return FailCapture($"방 연결 실패: {SafeError(ex)}");
-        }
+        if (b is null) return (false, "연결된 카톡방이 없습니다.");
+        try { return BindingIdentity.Validate(b, _api.Observe(b)); }
+        catch { return (false, "카카오톡 연결을 확인하지 못했습니다. 다시 연결해 주세요."); }
     }
-
-    public (bool Valid, string Message) Validate(KakaoBinding? binding)
+    public async Task<SendResult> SendTextAsync(KakaoBinding? binding, string message, bool scheduled,
+        CancellationToken cancellationToken, Func<bool>? canSend = null, Func<Func<bool>, bool>? acceptInput = null)
     {
-        if (binding is null) return (false, "연결된 카톡방이 없습니다.");
-        var top = new IntPtr(binding.WindowHandle);
-        var focus = new IntPtr(binding.FocusHandle);
-        if (top == IntPtr.Zero || focus == IntPtr.Zero || !IsWindow(top) || !IsWindow(focus))
-            return (false, "카카오톡 창이 닫혔습니다. 다시 연결해 주세요.");
-        if (!IsWindowVisible(top)) return (false, "연결된 카카오톡 창이 현재 유효하지 않습니다.");
-
-        var threadId = GetWindowThreadProcessId(top, out var pid);
-        if (threadId == 0 || pid != binding.ProcessId)
-            return (false, "카카오톡 프로세스가 바뀌었습니다. 다시 연결해 주세요.");
-        var focusThread = GetWindowThreadProcessId(focus, out var focusPid);
-        if (focusThread == 0 || focusPid != binding.ProcessId)
-            return (false, "카카오톡 입력 대상이 바뀌었습니다. 다시 연결해 주세요.");
+        if (string.IsNullOrWhiteSpace(message)) return new(false, "메시지가 비어 있습니다.", SendFailure.SendInputFailed);
+        var initial = Validate(binding); if (!initial.Valid) return new(false, initial.Message, SendFailure.InvalidBinding);
+        await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var previous = 0L;
         try
         {
-            using var process = Process.GetProcessById(binding.ProcessId);
-            if (!string.Equals(process.ProcessName, "KakaoTalk", StringComparison.OrdinalIgnoreCase) ||
-                process.StartTime.ToUniversalTime().Ticks != binding.ProcessStartTicksUtc)
-                return (false, "카카오톡이 재시작되었습니다. 오배송 방지를 위해 다시 연결해 주세요.");
-        }
-        catch
-        {
-            return (false, "카카오톡 프로세스를 확인할 수 없습니다.");
-        }
-
-        var currentTitle = ReadWindowText(top).Trim();
-        if (!string.Equals(NormalizeTitle(currentTitle), NormalizeTitle(binding.WindowTitle), StringComparison.Ordinal))
-            return (false, "연결한 방의 창 제목이 바뀌었습니다. 대상 확인 후 다시 연결해 주세요.");
-        if (!string.Equals(ReadClass(top), binding.TopClass, StringComparison.Ordinal) ||
-            !string.Equals(ReadClass(focus), binding.FocusClass, StringComparison.Ordinal))
-            return (false, "카카오톡 창 구조가 바뀌었습니다. 다시 연결해 주세요.");
-        if (GetAncestor(focus, GA_ROOT) != top)
-            return (false, "저장된 입력 대상이 더 이상 이 채팅방에 속하지 않습니다.");
-        return (true, "연결 정상");
-    }
-
-    public async Task<SendResult> SendTextAsync(
-        KakaoBinding? binding,
-        string message,
-        bool scheduled,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(message))
-            return new SendResult(false, "메시지가 비어 있습니다.", SendFailure.SendInputFailed);
-        var initial = Validate(binding);
-        if (!initial.Valid) return new SendResult(false, initial.Message, SendFailure.InvalidBinding);
-        if (scheduled && MillisecondsSinceLastUserInput() < 2000)
-            return new SendResult(false, "사용자가 PC를 조작 중이라 15초 뒤 다시 시도합니다.", SendFailure.BusyUser);
-
-        await _sendGate.WaitAsync(cancellationToken);
-        try
-        {
-            var checkedAgain = Validate(binding);
-            if (!checkedAgain.Valid)
-                return new SendResult(false, checkedAgain.Message, SendFailure.InvalidBinding);
-
-            var top = new IntPtr(binding!.WindowHandle);
-            var focus = new IntPtr(binding.FocusHandle);
-            var previous = GetForegroundWindow();
-            var targetThread = GetWindowThreadProcessId(top, out var targetPid);
-            var focusThread = GetWindowThreadProcessId(focus, out var focusPid);
-            if (targetThread == 0 || focusThread == 0 ||
-                targetPid != (uint)binding.ProcessId || focusPid != (uint)binding.ProcessId)
-                return new SendResult(false, "카카오톡 입력 스레드가 바뀌었습니다. 방을 다시 연결해 주세요.", SendFailure.InvalidBinding);
-
-            var currentThread = GetCurrentThreadId();
-            var attachedTarget = false;
-            var attachedFocus = false;
-            try
+            cancellationToken.ThrowIfCancellationRequested(); if (canSend?.Invoke() is false) return Stopped();
+            // User activity can change while waiting for a previous serialized send.
+            if (scheduled && _api.UserIdleMilliseconds < 2000) return new(false, "PC를 조작 중입니다. 잠시 후 다시 시도합니다.", SendFailure.BusyUser);
+            var valid = Validate(binding); if (!valid.Valid) return new(false, valid.Message, SendFailure.InvalidBinding);
+            previous = _api.Foreground;
+            if (!_api.Focus(binding!, cancellationToken)) return new(false, "연결한 입력칸을 활성화하지 못했습니다.", SendFailure.FocusFailed);
+            SendResult? Guard()
             {
-                if (currentThread != targetThread)
-                    attachedTarget = AttachThreadInput(currentThread, targetThread, true);
-                if (currentThread != focusThread && focusThread != targetThread)
-                    attachedFocus = AttachThreadInput(currentThread, focusThread, true);
-
-                BringWindowToTop(top);
-                SetForegroundWindow(top);
-                await Task.Delay(110, cancellationToken);
-                SetFocus(focus);
-                await Task.Delay(55, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested(); if (canSend?.Invoke() is false) return Stopped();
+                var current = Validate(binding); if (!current.Valid) return new(false, current.Message, SendFailure.InvalidBinding);
+                if (_api.Foreground != binding!.WindowHandle || _api.FocusedInput != binding.FocusHandle)
+                    return new(false, "다른 창 또는 입력칸으로 이동해 전송을 중단했습니다.", SendFailure.FocusFailed);
+                return null;
             }
-            finally
+            SendResult? Batch(IReadOnlyList<KeyStroke> keys)
             {
-                if (attachedFocus) AttachThreadInput(currentThread, focusThread, false);
-                if (attachedTarget) AttachThreadInput(currentThread, targetThread, false);
+                SendResult? failure = null;
+                var invoked = false;
+                bool Accept()
+                {
+                    invoked = true;
+                    failure = Guard();
+                    return failure is null && _api.SendKeys(keys);
+                }
+                var accepted = acceptInput is null ? Accept() : acceptInput(Accept);
+                if (failure is not null) return failure;
+                if (!invoked) return Stopped();
+                return accepted ? null : new(false, "Windows 입력이 일부만 처리되었습니다. 방을 확인하고 다시 연결하세요.", SendFailure.SendInputFailed);
             }
-
-            if (GetForegroundWindow() != top)
-                return new SendResult(false, "대상 카카오톡 창을 안전하게 활성화하지 못했습니다.", SendFailure.FocusFailed);
-            var focusInfo = new GUITHREADINFO { cbSize = Marshal.SizeOf<GUITHREADINFO>() };
-            if (!GetGUIThreadInfo(focusThread, ref focusInfo) || !FocusMatches(focus, focusInfo.hwndFocus, top))
-                return new SendResult(false, "채팅 입력창 포커스를 복원하지 못했습니다. 입력칸을 다시 연결해 주세요.", SendFailure.FocusFailed);
-
-            if (!SendVirtualChord(VK_CONTROL, VK_A) || !SendVirtualKey(VK_BACK))
-                return new SendResult(false, "카카오톡 입력창 초기화에 실패했습니다.", SendFailure.SendInputFailed);
-            await Task.Delay(25, cancellationToken);
-            if (!SendUnicodeMessage(message) || !SendVirtualKey(VK_RETURN))
-                return new SendResult(false, "Windows 입력 전송에 실패했습니다.", SendFailure.SendInputFailed);
-            await Task.Delay(80, cancellationToken);
-
-            if (previous != IntPtr.Zero && previous != top && IsWindow(previous))
-                SetForegroundWindow(previous);
-            return new SendResult(true, "전송 완료");
+            var clear = Batch(new[] { Key(0x11, false), Key(0x41, false), Key(0x41, true), Key(0x11, true), Key(0x08, false), Key(0x08, true) });
+            if (clear is not null) return clear;
+            await Task.Delay(25, cancellationToken).ConfigureAwait(false);
+            for (var offset = 0; offset < message.Length;)
+            {
+                var length = Math.Min(128, message.Length - offset);
+                if (offset + length < message.Length && char.IsHighSurrogate(message[offset + length - 1])) length--;
+                var result = Batch(MessageKeys(message.Substring(offset, length)));
+                if (result is not null) return result;
+                offset += length;
+            }
+            var submit = Batch(new[] { Key(0x0D, false), Key(0x0D, true) }); if (submit is not null) return submit;
+            // Enter was accepted: a later Stop must not erase the accepted send count.
+            return new(true, "전송 완료");
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            return new SendResult(false, $"전송 실패: {SafeError(ex)}", SendFailure.SendInputFailed);
-        }
+        catch (OperationCanceledException) { throw; }
+        catch { return new(false, "입력 전송을 확인하지 못했습니다. 방을 다시 연결하세요.", SendFailure.SendInputFailed); }
         finally
         {
-            _sendGate.Release();
+            try { if (binding is not null && previous != 0 && !cancellationToken.IsCancellationRequested) _api.RestoreForeground(previous, binding.WindowHandle); }
+            catch { /* Restoring the previous window must not strand the dispatch gate. */ }
+            finally { _sendGate.Release(); }
         }
     }
-
-    private static bool IsMainKakaoWindow(string title)
+    private static SendResult Stopped() => new(false, "전송이 중지되었거나 라이선스 확인이 필요합니다.", SendFailure.Stopped);
+    private static KeyStroke Key(ushort key, bool up) => new(key, '\0', up);
+    internal static List<KeyStroke> MessageKeys(string message)
     {
-        var n = NormalizeTitle(title);
-        return n is "카카오톡" or "KAKAOTALK";
-    }
-
-    private static string NormalizeTitle(string value)
-    {
-        var normalized = (value ?? "").Normalize(NormalizationForm.FormKC);
-        return string.Join(" ", normalized.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
-            .Trim()
-            .ToUpperInvariant();
-    }
-
-    private static string ReadWindowText(IntPtr hwnd)
-    {
-        var length = Math.Clamp(GetWindowTextLength(hwnd), 0, 512);
-        var sb = new StringBuilder(length + 2);
-        GetWindowText(hwnd, sb, sb.Capacity);
-        return sb.ToString();
-    }
-
-    private static string ReadClass(IntPtr hwnd)
-    {
-        var sb = new StringBuilder(256);
-        return GetClassName(hwnd, sb, sb.Capacity) > 0 ? sb.ToString() : "";
-    }
-
-    private static bool FocusMatches(IntPtr expected, IntPtr actual, IntPtr top)
-    {
-        if (actual == expected) return true;
-        if (actual == IntPtr.Zero || GetAncestor(actual, GA_ROOT) != top) return false;
-        // Some KakaoTalk builds focus a nested editor child while VoiceRoom is mounted.
-        // Accept only the already-paired editor subtree; never an arbitrary child in the room.
-        return IsChild(expected, actual) || IsChild(actual, expected);
-    }
-
-    private static uint MillisecondsSinceLastUserInput()
-    {
-        var info = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
-        if (!GetLastInputInfo(ref info)) return uint.MaxValue;
-        return unchecked((uint)Environment.TickCount - info.dwTime);
-    }
-
-    private static bool SendVirtualChord(ushort modifier, ushort key)
-    {
-        var items = new List<INPUT>
+        var keys = new List<KeyStroke>(); foreach (var c in message)
         {
-            Key(modifier, false), Key(key, false), Key(key, true), Key(modifier, true),
-        };
-        return SendBatch(items);
-    }
-
-    private static bool SendVirtualKey(ushort key) => SendBatch(new List<INPUT> { Key(key, false), Key(key, true) });
-
-    private static bool SendUnicodeMessage(string message)
-    {
-        var items = new List<INPUT>(Math.Min(8192, message.Length * 2 + 8));
-        foreach (var ch in message)
-        {
-            if (ch == '\r') continue;
-            if (ch == '\n')
-            {
-                items.Add(Key(VK_SHIFT, false));
-                items.Add(Key(VK_RETURN, false));
-                items.Add(Key(VK_RETURN, true));
-                items.Add(Key(VK_SHIFT, true));
-                continue;
-            }
-            items.Add(Unicode(ch, false));
-            items.Add(Unicode(ch, true));
+            if (c == '\r') continue;
+            if (c == '\n') { keys.Add(Key(0x10, false)); keys.Add(Key(0x0D, false)); keys.Add(Key(0x0D, true)); keys.Add(Key(0x10, true)); }
+            else { keys.Add(new(0, c, false)); keys.Add(new(0, c, true)); }
         }
-        return SendBatch(items);
+        return keys;
     }
-
-    private static bool SendBatch(List<INPUT> items)
-    {
-        const int chunkSize = 512;
-        for (var offset = 0; offset < items.Count; offset += chunkSize)
-        {
-            var chunk = items.Skip(offset).Take(Math.Min(chunkSize, items.Count - offset)).ToArray();
-            if (SendInput((uint)chunk.Length, chunk, Marshal.SizeOf<INPUT>()) != chunk.Length) return false;
-        }
-        return true;
-    }
-
-    private static INPUT Key(ushort key, bool up) => new()
-    {
-        type = INPUT_KEYBOARD,
-        U = new InputUnion
-        {
-            ki = new KEYBDINPUT { wVk = key, dwFlags = up ? KEYEVENTF_KEYUP : 0 },
-        },
-    };
-
-    private static INPUT Unicode(char value, bool up) => new()
-    {
-        type = INPUT_KEYBOARD,
-        U = new InputUnion
-        {
-            ki = new KEYBDINPUT
-            {
-                wScan = value,
-                dwFlags = KEYEVENTF_UNICODE | (up ? KEYEVENTF_KEYUP : 0),
-            },
-        },
-    };
-
-    private static BindingCaptureResult FailCapture(string message) => new(false, message, null);
-    private static string SafeError(Exception ex) => string.IsNullOrWhiteSpace(ex.Message)
-        ? ex.GetType().Name
-        : ex.Message.Replace('\r', ' ').Replace('\n', ' ').Trim()[..Math.Min(120, ex.Message.Replace('\r', ' ').Replace('\n', ' ').Trim().Length)];
-
-    private const uint GA_ROOT = 2;
-    private const uint INPUT_KEYBOARD = 1;
-    private const uint KEYEVENTF_KEYUP = 0x0002;
-    private const uint KEYEVENTF_UNICODE = 0x0004;
-    private const ushort VK_BACK = 0x08;
-    private const ushort VK_RETURN = 0x0D;
-    private const ushort VK_SHIFT = 0x10;
-    private const ushort VK_CONTROL = 0x11;
-    private const ushort VK_A = 0x41;
-
-    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hWnd);
-    [DllImport("user32.dll")] private static extern IntPtr SetFocus(IntPtr hWnd);
-    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
-    [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
-    [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
-    [DllImport("user32.dll")] private static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
-    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr hWnd);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
-    [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO info);
-    [DllImport("user32.dll")] private static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
-    [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint inputCount, INPUT[] inputs, int size);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct GUITHREADINFO
-    {
-        public int cbSize;
-        public uint flags;
-        public IntPtr hwndActive;
-        public IntPtr hwndFocus;
-        public IntPtr hwndCapture;
-        public IntPtr hwndMenuOwner;
-        public IntPtr hwndMoveSize;
-        public IntPtr hwndCaret;
-        public RECT rcCaret;
-    }
-
-    [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
-    [StructLayout(LayoutKind.Sequential)] private struct LASTINPUTINFO { public uint cbSize, dwTime; }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct INPUT { public uint type; public InputUnion U; }
-
-    [StructLayout(LayoutKind.Explicit)]
-    private struct InputUnion
-    {
-        [FieldOffset(0)] public MOUSEINPUT mi;
-        [FieldOffset(0)] public KEYBDINPUT ki;
-        [FieldOffset(0)] public HARDWAREINPUT hi;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MOUSEINPUT
-    {
-        public int dx, dy;
-        public uint mouseData, dwFlags, time;
-        public UIntPtr dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct KEYBDINPUT
-    {
-        public ushort wVk, wScan;
-        public uint dwFlags, time;
-        public UIntPtr dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct HARDWAREINPUT { public uint uMsg; public ushort wParamL, wParamH; }
 }
