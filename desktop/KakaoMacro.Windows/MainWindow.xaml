@@ -21,7 +21,7 @@
                         <TextBlock Text="PC" Foreground="{StaticResource Brand}" FontSize="9" FontWeight="Bold"/>
                     </Border>
                     <Border Background="{StaticResource AccentSoft}" CornerRadius="7" Padding="7,2" Margin="6,0,0,0" VerticalAlignment="Center">
-                        <TextBlock Text="v1.6" Foreground="#D5D9FF" FontSize="9" FontWeight="SemiBold"/>
+                        <TextBlock Text="v1.6.1" Foreground="#D5D9FF" FontSize="9" FontWeight="SemiBold"/>
                     </Border>
                 </StackPanel>
                 <TextBlock x:Name="DashboardText" Text="자동전송 상태를 준비하고 있습니다." Foreground="{StaticResource Muted}" FontSize="11" Margin="0,5,0,0"/>
@@ -36,8 +36,8 @@
         <Border Grid.Row="1" Background="{StaticResource Panel}" CornerRadius="12" Padding="14,9">
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <Border Width="30" Height="30" Background="{StaticResource AccentSoft}" CornerRadius="15" VerticalAlignment="Center">
-                    <TextBlock Text="●" Foreground="{StaticResource Accent}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <Border x:Name="LicenseStateBadge" Width="30" Height="30" Background="{StaticResource Panel3}" CornerRadius="15" VerticalAlignment="Center">
+                    <TextBlock x:Name="LicenseStateDot" Text="●" Foreground="{StaticResource Muted}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
                 <StackPanel Grid.Column="1" Margin="10,0,18,0" VerticalAlignment="Center">
                     <TextBlock x:Name="LicenseStatusText" Text="라이선스 확인 중" FontSize="12" FontWeight="SemiBold"/>
@@ -69,9 +69,10 @@
                     <Grid Grid.Row="1" Margin="0,11,0,9">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="8"/><ColumnDefinition Width="8"/><ColumnDefinition/></Grid.ColumnDefinitions>
                         <Ellipse Width="7" Height="7" Fill="{StaticResource Accent}" VerticalAlignment="Center"/>
-                        <TextBlock x:Name="PairingStatusText" Grid.Column="2" Text="카카오톡 입력칸 클릭 → Ctrl+Shift+F8" Foreground="{StaticResource Muted}" FontSize="9" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="PairingStatusText" Grid.Column="2" Text="카카오톡 입력칸 클릭 후 Ctrl+Shift+F8" Foreground="{StaticResource Muted}" FontSize="9" TextWrapping="Wrap" VerticalAlignment="Center"/>
                     </Grid>
                     <StackPanel Grid.Row="2" Margin="0,0,0,9">
+                        <TextBlock Text="방 검색" Foreground="{StaticResource Muted}" FontSize="9" Margin="1,0,0,5"/>
                         <TextBox x:Name="RoomSearchBox" ToolTip="방 이름 또는 상태 검색" TextChanged="RoomSearch_TextChanged" Margin="0,0,0,7"/>
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="7"/><ColumnDefinition/></Grid.ColumnDefinitions>
@@ -91,7 +92,24 @@
                                     <StackPanel>
                                         <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis"/>
                                         <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                            <TextBlock Text="{Binding BindingSummary}" Foreground="{StaticResource Success}" FontSize="9" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding BindingSummary}" FontSize="9" FontWeight="SemiBold">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{StaticResource Muted}"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding BindingValid}" Value="True">
+                                                                <Setter Property="Foreground" Value="{StaticResource Success}"/>
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding BindingValid}" Value="False">
+                                                                <Setter Property="Foreground" Value="{StaticResource Danger}"/>
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Binding}" Value="{x:Null}">
+                                                                <Setter Property="Foreground" Value="{StaticResource Warning}"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
                                             <TextBlock Text="  ·  " Foreground="{StaticResource Muted2}" FontSize="9"/>
                                             <TextBlock Text="{Binding ScheduleSummary}" Foreground="{StaticResource Muted}" FontSize="9"/>
                                         </StackPanel>
@@ -122,12 +140,12 @@
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="방 설정" FontSize="22" FontWeight="Bold"/>
                                     <TextBlock x:Name="BoundRoomText" Text="왼쪽에서 방 하나를 선택하세요." Foreground="{StaticResource Muted}" FontSize="10" Margin="0,4,0,0"/>
-                                    <TextBlock x:Name="EditorSaveStatusText" Text="변경사항은 자동으로 저장됩니다." Foreground="{StaticResource Accent}" FontSize="9" Margin="0,3,0,0"/>
+                                    <TextBlock x:Name="EditorSaveStatusText" Text="변경사항은 자동으로 저장됩니다." Foreground="{StaticResource Muted}" FontSize="9" Margin="0,3,0,0"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Button x:Name="SaveRoomButton" Content="저장" Click="SaveRoom_Click" Visibility="Collapsed"/>
                                     <Button Style="{StaticResource GhostButton}" Content="연결 확인" Click="ValidateSelected_Click" Margin="0,0,6,0"/>
-                                    <Button Content="일시정지" Click="StopSelected_Click" Margin="0,0,6,0"/>
+                                    <Button Style="{StaticResource QuietButton}" Content="이 방 중지" Click="StopSelected_Click" Margin="0,0,6,0"/>
                                     <Button x:Name="TestSendButton" Style="{StaticResource PrimaryButton}" Content="지금 1회 전송" Click="TestSend_Click" Margin="0,0,6,0"/>
                                     <Button Style="{StaticResource SuccessButton}" Content="이 방 시작" Click="StartSelected_Click"/>
                                 </StackPanel>
@@ -162,25 +180,22 @@
                                             <ComboBox x:Name="ScheduleModeBox" SelectedIndex="0" SelectionChanged="ScheduleModeBox_SelectionChanged">
                                                 <ComboBoxItem Content="간격 반복"/><ComboBoxItem Content="매일 지정 시각"/>
                                             </ComboBox>
-                                            <Grid Margin="0,11,0,0">
-                                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="9"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                                                <StackPanel>
-                                                    <TextBlock Text="하루 최대 전송" Foreground="{StaticResource Muted}" FontSize="9"/>
-                                                    <TextBox x:Name="DailyLimitBox" Margin="0,5,0,0" TextChanged="SingleEditor_Changed" ToolTip="0 = 제한 없음"/>
-                                                </StackPanel>
-                                                <StackPanel Grid.Column="2" x:Name="IntervalPanel">
-                                                    <TextBlock Text="반복 간격 (분)" Foreground="{StaticResource Muted}" FontSize="9"/>
-                                                    <TextBox x:Name="IntervalBox" Text="60" Margin="0,5,0,0" TextChanged="SingleEditor_Changed"/>
-                                                </StackPanel>
-                                            </Grid>
-                                            <WrapPanel Margin="0,8,0,0">
-                                                <Button Style="{StaticResource CompactButton}" Content="1분" Tag="1" Click="IntervalPreset_Click" Margin="0,0,5,5"/>
-                                                <Button Style="{StaticResource CompactButton}" Content="5분" Tag="5" Click="IntervalPreset_Click" Margin="0,0,5,5"/>
-                                                <Button Style="{StaticResource CompactButton}" Content="10분" Tag="10" Click="IntervalPreset_Click" Margin="0,0,5,5"/>
-                                                <Button Style="{StaticResource CompactButton}" Content="30분" Tag="30" Click="IntervalPreset_Click" Margin="0,0,5,5"/>
-                                                <Button Style="{StaticResource CompactButton}" Content="1시간" Tag="60" Click="IntervalPreset_Click" Margin="0,0,0,5"/>
-                                            </WrapPanel>
-                                            <StackPanel x:Name="TimesPanel" Margin="0,8,0,0" Visibility="Collapsed">
+                                            <StackPanel Margin="0,11,0,0">
+                                                <TextBlock Text="하루 최대 전송 (0 = 무제한)" Foreground="{StaticResource Muted}" FontSize="9"/>
+                                                <TextBox x:Name="DailyLimitBox" Margin="0,5,0,0" TextChanged="SingleEditor_Changed"/>
+                                            </StackPanel>
+                                            <StackPanel x:Name="IntervalPanel" Margin="0,11,0,0">
+                                                <TextBlock Text="반복 간격 (분)" Foreground="{StaticResource Muted}" FontSize="9"/>
+                                                <TextBox x:Name="IntervalBox" Text="60" Margin="0,5,0,0" TextChanged="SingleEditor_Changed"/>
+                                                <WrapPanel Margin="0,8,0,0">
+                                                    <Button Style="{StaticResource CompactButton}" Content="1분" Tag="1" Click="IntervalPreset_Click" Margin="0,0,5,5"/>
+                                                    <Button Style="{StaticResource CompactButton}" Content="5분" Tag="5" Click="IntervalPreset_Click" Margin="0,0,5,5"/>
+                                                    <Button Style="{StaticResource CompactButton}" Content="10분" Tag="10" Click="IntervalPreset_Click" Margin="0,0,5,5"/>
+                                                    <Button Style="{StaticResource CompactButton}" Content="30분" Tag="30" Click="IntervalPreset_Click" Margin="0,0,5,5"/>
+                                                    <Button Style="{StaticResource CompactButton}" Content="1시간" Tag="60" Click="IntervalPreset_Click" Margin="0,0,0,5"/>
+                                                </WrapPanel>
+                                            </StackPanel>
+                                            <StackPanel x:Name="TimesPanel" Margin="0,11,0,0" Visibility="Collapsed">
                                                 <TextBlock Text="매일 전송 시각" Foreground="{StaticResource Muted}" FontSize="9"/>
                                                 <TextBox x:Name="TimesBox" Margin="0,5,0,0" Text="09:00" TextChanged="SingleEditor_Changed" ToolTip="예: 09:00, 13:30, 21:00"/>
                                             </StackPanel>
@@ -204,7 +219,7 @@
                                     <TextBlock x:Name="BulkSelectedText" Text="왼쪽에서 여러 방을 선택하세요." Foreground="{StaticResource Muted}" FontSize="10" Margin="0,4,0,0"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Button Style="{StaticResource GhostButton}" Content="첫 방 설정 복사" Click="CopyPrimaryToSelected_Click" Margin="0,0,6,0"/>
+                                    <Button Style="{StaticResource GhostButton}" Content="첫 방 기준 복사" Click="CopyPrimaryToSelected_Click" Margin="0,0,6,0"/>
                                     <Button x:Name="UndoBulkButton" Content="되돌리기" Click="UndoBulk_Click" IsEnabled="False"/>
                                 </StackPanel>
                             </Grid>
@@ -213,7 +228,7 @@
                                     <Border Background="{StaticResource Panel2}" CornerRadius="12" Padding="14">
                                         <StackPanel>
                                             <TextBlock Text="바꿀 항목" FontSize="13" FontWeight="SemiBold"/>
-                                            <TextBlock Text="체크한 항목만 선택된 방에 적용되고, 나머지는 그대로 유지됩니다." Foreground="{StaticResource Muted}" FontSize="9" Margin="0,3,0,12"/>
+                                            <TextBlock Text="체크한 항목만 선택된 방에 적용되고, 체크하지 않은 설정은 그대로 유지됩니다." Foreground="{StaticResource Muted}" FontSize="9" Margin="0,3,0,12"/>
                                             <Grid>
                                                 <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
                                                 <StackPanel>
@@ -222,21 +237,24 @@
                                                 </StackPanel>
                                                 <StackPanel Grid.Column="2">
                                                     <CheckBox x:Name="ApplyScheduleCheck" Content="전송 일정" FontWeight="SemiBold"/>
-                                                    <ComboBox x:Name="BulkScheduleModeBox" IsEnabled="{Binding IsChecked, ElementName=ApplyScheduleCheck}" SelectedIndex="0" Margin="0,7,0,0">
+                                                    <ComboBox x:Name="BulkScheduleModeBox" IsEnabled="{Binding IsChecked, ElementName=ApplyScheduleCheck}" SelectedIndex="0" Margin="0,7,0,0" SelectionChanged="BulkScheduleModeBox_SelectionChanged">
                                                         <ComboBoxItem Content="간격 반복"/><ComboBoxItem Content="매일 지정 시각"/>
                                                     </ComboBox>
-                                                    <Grid Margin="0,7,0,0">
-                                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="8"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                                                        <TextBox x:Name="BulkIntervalBox" IsEnabled="{Binding IsChecked, ElementName=ApplyScheduleCheck}" Text="60" ToolTip="간격 반복일 때 분 단위"/>
-                                                        <TextBox x:Name="BulkTimesBox" Grid.Column="2" IsEnabled="{Binding IsChecked, ElementName=ApplyScheduleCheck}" Text="09:00" ToolTip="지정 시각일 때 예: 09:00, 13:30"/>
-                                                    </Grid>
-                                                    <WrapPanel Margin="0,6,0,0">
-                                                        <Button Style="{StaticResource CompactButton}" Content="1분" Tag="1" Click="BulkIntervalPreset_Click" Margin="0,0,5,0"/>
-                                                        <Button Style="{StaticResource CompactButton}" Content="5분" Tag="5" Click="BulkIntervalPreset_Click" Margin="0,0,5,0"/>
-                                                        <Button Style="{StaticResource CompactButton}" Content="10분" Tag="10" Click="BulkIntervalPreset_Click" Margin="0,0,5,0"/>
-                                                        <Button Style="{StaticResource CompactButton}" Content="30분" Tag="30" Click="BulkIntervalPreset_Click" Margin="0,0,5,0"/>
-                                                        <Button Style="{StaticResource CompactButton}" Content="1시간" Tag="60" Click="BulkIntervalPreset_Click"/>
-                                                    </WrapPanel>
+                                                    <StackPanel x:Name="BulkIntervalPanel" Margin="0,8,0,0">
+                                                        <TextBlock Text="반복 간격 (분)" Foreground="{StaticResource Muted}" FontSize="9"/>
+                                                        <TextBox x:Name="BulkIntervalBox" IsEnabled="{Binding IsChecked, ElementName=ApplyScheduleCheck}" Text="60" Margin="0,5,0,0"/>
+                                                        <WrapPanel Margin="0,6,0,0">
+                                                            <Button Style="{StaticResource CompactButton}" Content="1분" Tag="1" Click="BulkIntervalPreset_Click" Margin="0,0,5,0"/>
+                                                            <Button Style="{StaticResource CompactButton}" Content="5분" Tag="5" Click="BulkIntervalPreset_Click" Margin="0,0,5,0"/>
+                                                            <Button Style="{StaticResource CompactButton}" Content="10분" Tag="10" Click="BulkIntervalPreset_Click" Margin="0,0,5,0"/>
+                                                            <Button Style="{StaticResource CompactButton}" Content="30분" Tag="30" Click="BulkIntervalPreset_Click" Margin="0,0,5,0"/>
+                                                            <Button Style="{StaticResource CompactButton}" Content="1시간" Tag="60" Click="BulkIntervalPreset_Click"/>
+                                                        </WrapPanel>
+                                                    </StackPanel>
+                                                    <StackPanel x:Name="BulkTimesPanel" Margin="0,8,0,0" Visibility="Collapsed">
+                                                        <TextBlock Text="매일 전송 시각" Foreground="{StaticResource Muted}" FontSize="9"/>
+                                                        <TextBox x:Name="BulkTimesBox" IsEnabled="{Binding IsChecked, ElementName=ApplyScheduleCheck}" Text="09:00" Margin="0,5,0,0" ToolTip="예: 09:00, 13:30, 21:00"/>
+                                                    </StackPanel>
                                                 </StackPanel>
                                             </Grid>
                                             <Border Height="1" Background="{StaticResource Border}" Margin="0,14"/>
@@ -260,16 +278,14 @@
                             <Grid Grid.Row="4">
                                 <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel Orientation="Horizontal">
-                                    <Button Style="{StaticResource QuietButton}" Content="사용 켜기" Click="EnableSelected_Click" Margin="0,0,6,0"/>
-                                    <Button Style="{StaticResource QuietButton}" Content="사용 끄기" Click="DisableSelected_Click" Margin="0,0,6,0"/>
-                                    <Button Style="{StaticResource QuietButton}" Content="선택 시작" Click="StartSelected_Click" Margin="0,0,6,0"/>
-                                    <Button Style="{StaticResource QuietButton}" Content="선택 중단" Click="StopSelected_Click" Margin="0,0,6,0"/>
-                                    <Button Style="{StaticResource GhostButton}" Content="연결 확인" Click="ValidateSelected_Click"/>
+                                    <Button Style="{StaticResource SuccessButton}" Content="선택 시작" Click="StartSelected_Click" Margin="0,0,6,0"/>
+                                    <Button Style="{StaticResource QuietButton}" Content="선택 중지" Click="StopSelected_Click" Margin="0,0,6,0"/>
+                                    <Button Style="{StaticResource GhostButton}" Content="연결 확인" Click="ValidateSelected_Click" Margin="0,0,6,0"/>
+                                    <Button Style="{StaticResource GhostButton}" Content="1회 전송" Click="SendSelectedNow_Click"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                    <Button Style="{StaticResource GhostButton}" Content="선택 삭제" Click="RemoveSelected_Click" Margin="0,0,6,0"/>
-                                    <Button Style="{StaticResource GhostButton}" Content="1회 전송" Click="SendSelectedNow_Click" Margin="0,0,6,0"/>
-                                    <Button Style="{StaticResource PrimaryButton}" Content="체크한 변경 적용" Click="ApplyBulk_Click" Padding="18,8"/>
+                                    <Button Style="{StaticResource DangerButton}" Content="선택 삭제" Click="RemoveSelected_Click" Margin="0,0,6,0"/>
+                                    <Button Style="{StaticResource PrimaryButton}" Content="변경 적용" Click="ApplyBulk_Click" Padding="18,8"/>
                                 </StackPanel>
                             </Grid>
                         </Grid>
