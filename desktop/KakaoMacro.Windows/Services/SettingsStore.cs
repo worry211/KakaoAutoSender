@@ -218,6 +218,8 @@ internal sealed class SettingsStore
         {
             room.DisplayName = Clean(room.DisplayName, 120, "카톡방");
             room.Message = Clean(room.Message, 4000, "");
+            if ((room.DailyTimes ?? "").Length > 200)
+                throw new InvalidDataException("예약 시간은 200자 이내로 입력하세요. 일부 시간만 남기는 저장은 수행하지 않습니다.");
             room.DailyTimes = Clean(room.DailyTimes, 200, "");
             room.IntervalMinutes = Math.Clamp(room.IntervalMinutes, 1, 10080);
             room.DailyLimit = Math.Clamp(room.DailyLimit, 0, 9999);

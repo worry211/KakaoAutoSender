@@ -47,5 +47,15 @@ public sealed class SettingsTests : IDisposable
         Assert.False(ScheduleCalculator.IsValid(room));
         Assert.Throws<InvalidDataException>(() => ScheduleCalculator.ComputeNext(room, DateTimeOffset.Now));
     }
+    [Fact]
+    public void OversizedScheduleCannotOverwriteGoodSettingsWithAValidPrefix()
+    {
+        Seed();
+        var before = File.ReadAllText(Primary);
+        var settings = new AppSettings { Rooms = new() { new RoomProfile { ScheduleKind = ScheduleKind.FixedTimes, DailyTimes = "09:00" + new string(' ', 200) + "invalid" } } };
+        Assert.Throws<InvalidDataException>(() => new SettingsStore(_dir).Save(settings));
+        Assert.Equal(before, File.ReadAllText(Primary));
+        Assert.Equal("retained", new SettingsStore(_dir).Load().Rooms[0].Message);
+    }
     public void Dispose() => Directory.Delete(_dir, true);
 }
