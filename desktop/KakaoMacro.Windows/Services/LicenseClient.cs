@@ -42,10 +42,10 @@ internal sealed class LicenseClient : IDisposable
     public event Action<LicenseSnapshot>? Changed;
     public LicenseSnapshot Snapshot => _snapshot;
 
-    public LicenseClient(InstallIdentity identity)
+    public LicenseClient(InstallIdentity identity, HttpMessageHandler? handler = null)
     {
         _identity = identity;
-        _http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+        _http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false })
         {
             BaseAddress = new Uri(ApiOrigin),
             Timeout = TimeSpan.FromSeconds(7),
@@ -287,6 +287,8 @@ internal sealed class LicenseClient : IDisposable
     {
         if (response.ServerTime <= 0 || string.IsNullOrWhiteSpace(response.LicenseId))
             throw new HttpRequestException("invalid_entitlement_metadata");
+        if (response.ExpiresAt is > 0 && response.ExpiresAt <= response.ServerTime)
+            return SetInactive("EXPIRED", StateMessage("EXPIRED"));
         if (!string.IsNullOrWhiteSpace(response.AccessToken)) _accessToken = response.AccessToken;
         if (!string.IsNullOrWhiteSpace(response.RefreshToken)) _refreshToken = response.RefreshToken;
         _validatedTick = Environment.TickCount64;
