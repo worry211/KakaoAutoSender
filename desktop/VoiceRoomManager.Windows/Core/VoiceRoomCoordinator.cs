@@ -6,6 +6,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
     private readonly StateStore _store;
     private readonly KakaoPcAutomation _kakao;
     private readonly IRoomWorkflowDriver _workflowDriver;
+    private readonly Func<RoomState, KakaoPcAutomation.Result> _runtimeGuard;
     private readonly SemaphoreSlim _singleFlight = new(1, 1);
     private readonly Timer _timer;
     private readonly DesktopState _state;
@@ -16,10 +17,11 @@ public sealed class VoiceRoomCoordinator : IDisposable
     public event Action? StateChanged;
     public bool IsBusy { get; private set; }
     public DesktopState Snapshot => _state;
-    public VoiceRoomCoordinator(StateStore store, KakaoPcAutomation kakao, bool schedule = true, Func<RoomState, bool>? canRunAutomatically = null, IRoomWorkflowDriver? workflowDriver = null)
+    public VoiceRoomCoordinator(StateStore store, KakaoPcAutomation kakao, bool schedule = true, Func<RoomState, bool>? canRunAutomatically = null, IRoomWorkflowDriver? workflowDriver = null, Func<RoomState, KakaoPcAutomation.Result>? runtimeGuard = null)
     {
         _store = store; _kakao = kakao; _state = store.Load();
         _workflowDriver = workflowDriver ?? new WindowsWorkflowDriver(kakao);
+        _runtimeGuard = runtimeGuard ?? kakao.RuntimeGuard;
         _canRunAutomatically = canRunAutomatically ?? (room => BackgroundActivityPolicy.CanRun(room));
         LifecyclePolicy.Recover(_state, DateTimeOffset.UtcNow);
 
@@ -145,10 +147,10 @@ public sealed class VoiceRoomCoordinator : IDisposable
                 {
                     if (token.IsCancellationRequested) break;
                     if (!_canRunAutomatically(room)) { Defer(room); continue; }
-                    room.BackgroundDeferred = false;
+                    var wasDeferred = room.BackgroundDeferred;
                     using var op = new AutomationOperation(room, token, background: true);
                     KakaoPcAutomation.Result result;
-                    try { result = await Task.Run(() => _kakao.RuntimeGuard(room)); }
+                    try { result = await Task.Run(() => _runtimeGuard(room)); }
                     catch (BackgroundWorkDeferredException) { Defer(room); continue; }
                     if (token.IsCancellationRequested || _disposed) break;
                     if (result.VerificationPending)
@@ -169,9 +171,11 @@ public sealed class VoiceRoomCoordinator : IDisposable
                     }
                     if (result.Success)
                     {
-                        var changed = room.MicMuted != result.MicMuted || room.SpeakerMuted != result.SpeakerMuted
+                        room.BackgroundDeferred = false;
+                        var changed = wasDeferred || room.MicMuted != result.MicMuted || room.SpeakerMuted != result.SpeakerMuted
                             || result.RejectedRequest || result.RequestToggleDisabled || result.AudioRepaired;
                         room.MicMuted = result.MicMuted; room.SpeakerMuted = result.SpeakerMuted;
+                        room.Stage = "활성 · 보호 확인";
                         if (result.RejectedRequest) _state.SpeakerRequestsRejected++;
                         if (result.RequestToggleDisabled) _state.SpeakerRequestTogglesDisabled++;
                         if (result.AudioRepaired) _state.AudioRepairs++;

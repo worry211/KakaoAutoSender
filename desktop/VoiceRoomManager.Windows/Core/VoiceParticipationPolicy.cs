@@ -15,8 +15,10 @@ internal static class VoiceParticipationPolicy
 
     internal static bool IsSwitchPrompt(IEnumerable<string> lines)
     {
-        var text = string.Concat(lines.SelectMany(l => l.Where(c => !char.IsWhiteSpace(c))));
-        return text.Contains("현재참여하고있는보이스룸을종료하고,새로만들어볼까요?", StringComparison.Ordinal);
+        var text = string.Concat(lines.SelectMany(l => l.Where(c => !char.IsWhiteSpace(c) && c is not ',' and not '?')));
+        // Exact observed caption variants only: local OCR drops the comma and reads 볼 as 몰.
+        return text.Contains("현재참여하고있는보이스룸을종료하고새로만들어볼까요", StringComparison.Ordinal)
+            || text.Contains("현재참여하고있는보이스룸을종료하고새로만들어몰까요", StringComparison.Ordinal);
     }
 
     internal static bool TryCancelSwitchPrompt()

@@ -6,6 +6,16 @@ namespace VoiceRoomManager.Windows.Tests;
 
 public class ManagementPresentationTests
 {
+    [Fact] public async Task ActualKakaoSwitchConfirmationHasExactMessageAndUniqueCancel()
+    {
+        var bytes = System.IO.File.ReadAllBytes(System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", "voice-switch-confirmation.png"));
+        var source = System.Windows.Media.Imaging.BitmapDecoder.Create(new System.IO.MemoryStream(bytes), System.Windows.Media.Imaging.BitmapCreateOptions.None, System.Windows.Media.Imaging.BitmapCacheOption.OnLoad).Frames[0];
+        var reading = await LocalTextSurface.RecognizeAsync(bytes, IntPtr.Zero, new(0, 0, source.PixelWidth, source.PixelHeight));
+        if (reading.Status == LocalTextSurface.ReadStatus.KoreanUnavailable) { Assert.True(reading.RequiresAction); return; }
+        Assert.Equal(LocalTextSurface.ReadStatus.Ready, reading.Status);
+        Assert.True(VoiceParticipationPolicy.IsSwitchPrompt(reading.Frame!.Lines.Select(l => l.Text)), string.Join("|", reading.Frame.Lines.Select(l => l.Text)));
+        Assert.Single(reading.Frame.Lines, l => l.Text.Trim() == "취소");
+    }
     [Fact] public void AddedAndRemovedRoomsReachTheRealWpfGridWithoutRestart()
     {
         Exception? failure = null;

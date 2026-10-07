@@ -25,7 +25,7 @@ public sealed class RoomState
     public string Stage { get; set; } = "준비";
     [JsonIgnore] public bool BackgroundDeferred { get; set; }
     [JsonIgnore] public bool ManagerRunning { get; set; }
-    [JsonIgnore] public string ManagementDisplay => !Enabled ? "관리 대상 OFF" : ManagerRunning ? "자동관리 실행 중" : "관리 대상 ON · 실행 꺼짐";
+    [JsonIgnore] public string ManagementDisplay => !Enabled ? "관리 대상 OFF" : !ManagerRunning ? "관리 대상 ON · 실행 꺼짐" : Status == "WAITING_CAPACITY" ? "관리 대상 ON · 참여 대기" : "자동관리 실행 중";
     [JsonIgnore]
     public string NextCheckDisplay => !Enabled || Status == "STOPPED" ? "—" : BackgroundDeferred ? "작업 후 재개" : !ManagerRunning ? "자동관리 꺼짐" : NextCheckAt?.ToLocalTime().ToString("MM/dd HH:mm:ss") ?? "—";
     [JsonIgnore]
