@@ -17,6 +17,7 @@ public partial class App : System.Windows.Application
         try
         {
             var window = new MainWindow();
+            window.SourceInitialized += (_, _) => window.PrepareCommercialWorkspace();
             MainWindow = window;
             window.Show();
         }
