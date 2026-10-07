@@ -103,7 +103,9 @@ public sealed class VoiceRoomCoordinator : IDisposable
             if (!probe && result.AudioRepaired) _state.AudioRepairs++;
             room.Stage = probe ? "안전 진단 완료" : result.WaitingForCapacity ? "기존 참여 유지 · 전환 없음" : room.Status == "USER_ACTION_REQUIRED" ? "사용자 조치 필요" : result.Success ? "활성 · 보호 확인" : "재시도 대기";
             if (!_state.ManagerActive) room.NextCheckAt = null;
-            room.LastDiagnostic = result.Status; Save(); return result;
+            room.LastDiagnostic = result.Status;
+            _state.LastStatus = room.Title + " · " + result.Status;
+            Save(); return result;
         }
         finally { IsBusy = false; _singleFlight.Release(); Notify(); }
     }

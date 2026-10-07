@@ -216,8 +216,6 @@ public partial class MainWindow : Window
         }
         var result = await _coordinator.LiveCheckAsync(room);
         if (!IsLoaded || result.Cancelled) return;
-        MessageBox.Show(this, result.Status, result.Success ? "점검 완료" : "점검 실패",
-            MessageBoxButton.OK, result.Success ? MessageBoxImage.Information : MessageBoxImage.Warning);
         RefreshUi();
     }
 
