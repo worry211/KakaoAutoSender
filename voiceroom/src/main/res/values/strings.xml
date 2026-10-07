@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">보이스룸 매니저</string>
+    <string name="accessibility_service_name">보이스룸 자동화</string>
+    <string name="accessibility_description">본인 계정으로 로그인된 카카오톡에서 사용자가 등록한 오픈채팅방의 보이스룸 상태 확인과 재개설 작업을 수행합니다.</string>
+</resources>

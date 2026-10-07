@@ -31,16 +31,27 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      # Test convenience only. Production/update signing uses a separate protected release key.
+      - name: Restore test debug keystore cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: kakao-debug-keystore-v1
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Test, lint and build
-        run: ANDROID_HOME=/usr/local/lib/android/sdk ANDROID_SDK_ROOT=/usr/local/lib/android/sdk gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: Test, lint and build both standalone apps
+        run: >-
+          ANDROID_HOME=/usr/local/lib/android/sdk ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+          gradle --no-daemon
+          :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+          :voiceroom:testDebugUnitTest :voiceroom:lintDebug :voiceroom:assembleDebug
       - name: Dump Android test diagnostics
         if: failure()
         run: |
           find app/build/test-results/testDebugUnitTest -type f -name '*.xml' -print -exec cat {} \; || true
-      - name: Validate minified release using ephemeral CI fixture
+          find voiceroom/build/test-results/testDebugUnitTest -type f -name '*.xml' -print -exec cat {} \; || true
+      - name: Validate minified releases using ephemeral CI fixture
         env:
           ANDROID_API_BASE_URL: https://license.example.com
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release-smoke.jks
@@ -49,8 +60,14 @@ jobs:
           ANDROID_KEY_PASSWORD: smoke-password
         run: |
           keytool -genkeypair -keystore "$ANDROID_KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -keypass "$ANDROID_KEY_PASSWORD" -alias smoke -keyalg RSA -keysize 2048 -validity 2 -dname "CN=CI smoke only"
-          gradle --no-daemon :app:validateReleaseConfiguration :app:assembleRelease :app:lintRelease
+          gradle --no-daemon \
+            :app:validateReleaseConfiguration :app:assembleRelease :app:lintRelease \
+            :voiceroom:validateReleaseConfiguration :voiceroom:assembleRelease :voiceroom:lintRelease
       - uses: actions/upload-artifact@v4
         with:
           name: KakaoAutoSender-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KakaoVoiceRoomManager-debug-apk
+          path: voiceroom/build/outputs/apk/debug/voiceroom-debug.apk
