@@ -75,47 +75,53 @@ public sealed class KakaoPcAutomation
         if (!context.Success) return context;
         AutomationOperation.Pause(80);
 
-        var surfaces = ScopedSurfaces();
+        // Dedicated native/visual evidence first: do not enumerate every Kakao UIA window.
+        if (VoiceWindowAdapter.Observe(true) is not null)
+        {
+            AutomationOperation.Pause(120);
+            if (VoiceWindowAdapter.Observe(false) is not null) return VoiceWindowAdapter.Protect("기존 보이스룸 활성 확인");
+        }
 
+        if (VoiceWindowAdapter.TryCloseEnded())
+        {
+            var restored = EnsureRoomContext(room);
+            if (!restored.Success) return new(false, "종료 확인 후 채팅 복귀 재시도", NeedsRecheck: true);
+        }
+        if (VoiceWindowAdapter.HasUnresolvedWindow())
+            return new(false, "기존 보이스룸 창의 활성/종료 재확인 대기 · 추가 생성 없음");
+        if (room.CreationUncertain)
+            return new(false,"이전 생성 요청의 활성 상태 자동 재확인 대기 · 중복 생성 없음");
+
+        var surfaces = ScopedSurfaces();
         if (HasStrongActiveProofHybrid(surfaces))
         {
             AutomationOperation.Pause(120);
-            surfaces = ScopedSurfaces();
             if (HasStrongActiveProofHybrid(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
         }
-
-        VoiceWindowAdapter.TryCloseEnded();
-        surfaces = ScopedSurfaces();
-        if (VoiceWindowAdapter.HasUnresolvedWindow())
-            return new(false, "기존 보이스룸 창의 활성 또는 종료를 확정하지 못했습니다. 중복 생성은 대기합니다.", InterventionRequired: true);
-        if (room.CreationUncertain)
-            return new(false,"이전 생성 요청의 활성 여부가 불명확합니다. Kakao에서 실제 상태를 확인해 주세요. 중복 생성은 대기합니다.",InterventionRequired:true);
 
         // A recognized form resumes directly; opening the menu again would invalidate it.
         var host = AutomationOperation.Current!.Host;
         var form = LocalTextSurface.FindCreateForm(host);
         if (form is null)
         {
-            var voice = FindVoiceMenu(surfaces);
-            if (voice is not null)
+            KakaoSurfaceLocator.Activate(host); AutomationOperation.Pause(120);
+            if (VoiceToolbarAdapter.TryOpen())
+                OperationLog.Write(room, "VOICE_MENU", "verified four-glyph toolbar · no calibration");
+            else if (FindVoiceMenu(ScopedSurfaces()) is { } voice)
             {
                 if (!Invoke(voice)) return new(false, "보이스룸 메뉴 UIA 호출 실패");
                 OperationLog.Write(room, "VOICE_MENU", "UIA exact action");
             }
-            else if (VoiceToolbarAdapter.TryOpen())
-                OperationLog.Write(room, "VOICE_MENU", "verified four-glyph toolbar · no calibration");
             else if (KakaoCalibrationStore.TryClick(KakaoCalibrationStore.VoiceMenu, out _))
                 OperationLog.Write(room, "VOICE_MENU", "compatibility calibration · actual create form still required");
             else
-                return new(false, "보이스룸 메뉴를 확인하지 못했습니다. 해당 방의 보이스룸 메뉴/한국어 OCR을 확인해 주세요.", InterventionRequired: true);
+                return new(false, "보이스룸 메뉴 자동 인식 재시도 · 진단에 원인 기록");
 
             AutomationOperation.Pause(180);
-            surfaces = ScopedSurfaces();
-            if (HasStrongActiveProofHybrid(surfaces))
+            if (VoiceWindowAdapter.Observe(true) is not null)
             {
                 AutomationOperation.Pause(120);
-                surfaces = ScopedSurfaces();
-                if (HasStrongActiveProofHybrid(surfaces)) return ProtectAudio(surfaces, "기존 보이스룸 활성 확인");
+                if (VoiceWindowAdapter.Observe(false) is not null) return VoiceWindowAdapter.Protect("기존 보이스룸 활성 확인");
             }
         }
 
@@ -134,16 +140,14 @@ public sealed class KakaoPcAutomation
         for (var i = 0; i < 16; i++)
         {
             AutomationOperation.Pause(420);
-            surfaces = ScopedSurfaces();
-            if (!HasStrongActiveProofHybrid(surfaces)) continue;
+            if (VoiceWindowAdapter.Observe(true) is null) continue;
             AutomationOperation.Pause(280);
-            surfaces = ScopedSurfaces();
-            if (!HasStrongActiveProofHybrid(surfaces)) continue;
-            return ProtectAudio(surfaces, "보이스룸 생성/활성 확인") with { Created = true };
+            if (VoiceWindowAdapter.Observe(false) is null) continue;
+            return VoiceWindowAdapter.Protect("보이스룸 생성/활성 확인") with { Created = true };
         }
 
         return new(false,
-            "만들기 이후 보이스룸 활성 증거를 2회 확인하지 못함 · " + SurfaceDiagnostic(surfaces), InterventionRequired: true);
+            "생성 제출 후 활성 자동 재확인 대기 · 추가 생성 없음");
     }
 
     private static Result SubmitVerifiedCreateForm(RoomState room, LocalTextSurface.Frame form)
@@ -272,11 +276,9 @@ public sealed class KakaoPcAutomation
         var op = AutomationOperation.Current!;
         if (!op.HasRoomProof) return [];
         // Other Kakao chats/PIP windows cannot establish this room's activity.
-        return GetKakaoSurfaces(false, out _).Where(root =>
-        {
-            try { return KakaoSurfaceLocator.OwnedBy(new IntPtr(root.Current.NativeWindowHandle), op.Host); }
-            catch { return false; }
-        }).ToList();
+        // Avoid desktop-wide UIA enumeration; exact HWND proof is already established.
+        try { return [AutomationElement.FromHandle(op.Host)]; }
+        catch { return []; }
     }
 
     private Result ProtectAudio(IReadOnlyCollection<AutomationElement> roots, string prefix)
@@ -331,48 +333,6 @@ public sealed class KakaoPcAutomation
             catch { }
         }
         return null;
-    }
-
-    private static List<AutomationElement> GetKakaoSurfaces(bool activateMain, out string error)
-    {
-        error = "";
-        var processes = Process.GetProcessesByName("KakaoTalk").ToList();
-        if (processes.Count == 0) { error = "카카오톡 프로세스를 찾지 못함"; return []; }
-        if (activateMain)
-        {
-            var main = KakaoSurfaceLocator.FindMainWindow();
-            if (main != IntPtr.Zero) { KakaoSurfaceLocator.Activate(main); AutomationOperation.Pause(100); }
-        }
-
-        var roots = new List<AutomationElement>();
-        foreach (var process in processes)
-        {
-            try
-            {
-                var condition = new PropertyCondition(AutomationElement.ProcessIdProperty, process.Id);
-                var topLevels = AutomationElement.RootElement.FindAll(TreeScope.Children, condition);
-                foreach (AutomationElement top in topLevels)
-                    if (!roots.Any(r => SameRuntimeId(r, top))) roots.Add(top);
-            }
-            catch { }
-            if (process.MainWindowHandle != IntPtr.Zero)
-            {
-                try
-                {
-                    var fromHandle = AutomationElement.FromHandle(process.MainWindowHandle);
-                    if (fromHandle is not null && !roots.Any(r => SameRuntimeId(r, fromHandle))) roots.Add(fromHandle);
-                }
-                catch { }
-            }
-        }
-        if (roots.Count == 0) error = "카카오톡 UI Automation 창을 찾지 못함";
-        return roots;
-    }
-
-    private static bool SameRuntimeId(AutomationElement a, AutomationElement b)
-    {
-        try { return a.GetRuntimeId().SequenceEqual(b.GetRuntimeId()); }
-        catch { return false; }
     }
 
     private static bool HasStrongActiveProof(IReadOnlyCollection<AutomationElement> roots) => roots.Any(HasStrongActiveProof);

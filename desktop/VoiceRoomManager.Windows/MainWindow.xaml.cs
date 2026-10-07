@@ -156,6 +156,7 @@ public partial class MainWindow : Window
     private static void ResetVerification(RoomState room)
     {
         room.CreationUncertain = false;
+        room.CreationSubmittedAt = null;
         room.LiveVerified = false;
         room.MicMuted = false;
         room.SpeakerMuted = false;

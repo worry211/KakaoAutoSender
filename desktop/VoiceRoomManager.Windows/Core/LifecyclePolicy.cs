@@ -50,6 +50,7 @@ public static class LifecyclePolicy
         {
             room.LiveVerified = room.MicMuted = room.SpeakerMuted = room.CreationUncertain = false;
             room.StartedAt = null; room.NextCheckAt = now; room.Status = "BOOTSTRAP_PENDING";
+            room.CreationSubmittedAt = null;
             room.Stage = "실제 종료 확인 · 재생성 대기";
             return;
         }
@@ -58,8 +59,10 @@ public static class LifecyclePolicy
         room.SpeakerMuted = result.Active && result.SpeakerMuted;
         if (result.Active)
         {
+            if (room.CreationUncertain && room.CreationSubmittedAt is { } submitted && submitted <= now) room.StartedAt = submitted;
             room.CreationUncertain = false;
-            if (result.Created) room.StartedAt = now;
+            if (result.Created) room.StartedAt = room.CreationSubmittedAt is { } time && time <= now ? time : now;
+            room.CreationSubmittedAt = null;
         }
         if (result.Success && result.Active && result.MicMuted && result.SpeakerMuted)
         {
@@ -71,7 +74,7 @@ public static class LifecyclePolicy
         else
         {
             room.Failures++; room.LastFailureAt = now; room.LastError = result.Status;
-            var intervention = result.InterventionRequired || room.CreationUncertain;
+            var intervention = result.InterventionRequired;
             room.Status = intervention ? "USER_ACTION_REQUIRED" : "ERROR";
             room.NextCheckAt = intervention ? null : now.Add(Retry(room.Failures));
         }

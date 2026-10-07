@@ -125,6 +125,7 @@ internal static class LocalTextSurface
             var frame = Observe(host, candidate.Rect).Frame;
             if (frame is not null)
             {
+                if (CreateFormEvidence.CanUseRoomName(frame)) return frame;
                 if (CreateFormEvidence.HasHeadingAndConfirm(frame))
                 {
                     try
@@ -158,7 +159,9 @@ internal static class LocalTextSurface
         var buttons=fresh.Lines.Where(l => Compact(l.Text)=="확인").ToArray();
         if (buttons.Length != 1) return false;
         var b=buttons[0].Bounds;
-        return NativeInput.Click(fresh.Host,(int)(b.Left+b.Width/2),(int)(b.Top+b.Height/2));
+        var submitted = NativeInput.Click(fresh.Host,(int)(b.Left+b.Width/2),(int)(b.Top+b.Height/2));
+        if (submitted) AutomationOperation.MarkCreationSubmitted();
+        return submitted;
     }
 
     public static bool ClickExact(IntPtr host, params string[] labels)

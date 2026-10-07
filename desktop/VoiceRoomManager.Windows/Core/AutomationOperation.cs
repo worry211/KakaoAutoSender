@@ -53,8 +53,13 @@ internal sealed class AutomationOperation : IDisposable
 
     public static void MarkCreationIntent()
     {
-        Check(); Current!.Room.CreationUncertain=true;
+        Check(); Current!.Room.CreationUncertain=true; Current.Room.CreationSubmittedAt = null;
         Stage("생성 요청 · 실제 상태 재확인");
+    }
+    public static void MarkCreationSubmitted()
+    {
+        Current!.Room.CreationSubmittedAt = DateTimeOffset.UtcNow;
+        Current._progress?.Invoke("생성 제출 기록 · 활성 확인 재시도");
     }
     public bool Prove(IntPtr host)
     {

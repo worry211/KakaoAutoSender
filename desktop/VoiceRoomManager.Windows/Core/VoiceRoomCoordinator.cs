@@ -178,6 +178,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
                 stage => AutomationOperation.Stage(RoomWorkflow.Display(stage)));
         }
         catch (BackgroundWorkDeferredException) { return new(false, "다른 작업 중 · 점검 대기", BackgroundDeferred: true); }
+        catch (TimeoutException) when (room.CreationUncertain) { return new(false, "생성 요청 후 활성 자동 재검증 대기 · 중복 생성 차단 유지"); }
         catch (OperationCanceledException) { return new(false, "중단 또는 Windows 잠금 · 입력 중지"); }
         catch (Exception ex) { return new(false, room.Stage + " · " + ex.GetType().Name + ": " + ex.Message); }
         finally { room.LastOperationMilliseconds = duration.ElapsedMilliseconds; }

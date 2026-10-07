@@ -1,3 +1,12 @@
+# Current continuation: Windows RC6 expiry recovery — 2026-10-07
+
+Actual target logs: 16:17 KST explicit ended VoiceRoom was closed, then lost chat foreground caused a menu intervention. 16:18–16:20 repeated desktop UIA scans delayed work by roughly 15 seconds each and verification exceeded 90 seconds after submission. User subsequently cleared uncertainty; the active room was rediscovered with unknown start. Do not fabricate a recovered timestamp for this legacy case.
+
+RC6: native dedicated active/audio evidence first; exact HWND UIA root instead of desktop-wide enumeration; verified default-name create form skips editable UIA; chat re-established after explicit end; toolbar-first auto menu; menu retry rather than permanent intervention; submission timestamp persisted after delivered confirm input; late verified activity restores that epoch; pending submission re-observed automatically under backoff while duplicate-create barrier remains. Exact ended proof clears prior epoch. 132 tests cover submission timeout/restart/date recovery and safety. Android/backend unchanged.
+
+User requested investigation of fully background operation and explicitly said to leave current behavior if unsupported. Current background UIA/capture did not provide reliable controls. No background click/message backend or new foreground-permitting unattended mode was added. RC5 focus-preserving wait remains: other-app foreground also delays expiry work. Calibration remains optional, default menu is automatic. Final CI/package and actual RC6 existing-room verification are recorded in PR #12 and output manifest; modified-binary real 48h regeneration still needs proof.
+
+---
 # RC5: periodic focus stealing fixed
 
 The five-minute health check previously called the complete foreground bootstrap. RC5 gates automatic due checks, retries, runtime work and startup recovery before workflow entry. Other-app foreground defers without a click/activation, failure increment, fresh success or timer/creation-barrier reset. Explicit StartAll/RecheckAll/manual actions remain immediate one-shot work. Automatic operation checks also yield before subsequent input/activation when foreground changes away from controlled surfaces. The manager/exact target room or an unattended desktop (30 seconds idle) permits resume; game/video idle does not. Pending verification is presented explicitly, and audio/request/expiry actions are delayed instead of claiming background proof. 128 tests pass locally. Actual-PC/CI/package evidence is in PR #12 and delivery manifest.

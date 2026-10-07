@@ -52,10 +52,11 @@ public class CreationRecoveryTests
     {
         var room = new RoomState { CreationUncertain = true };
         LifecyclePolicy.Apply(room, new(false, "timeout"), Now);
-        Assert.Equal("USER_ACTION_REQUIRED", room.Status);
-        Assert.Null(room.NextCheckAt);
+        Assert.Equal("ERROR", room.Status);
+        Assert.True(room.CreationUncertain);
+        Assert.True(room.NextCheckAt > Now);
         Assert.Null(room.StartedAt);
-        Assert.Null(LifecyclePolicy.Due([room], Now.AddDays(3)));
+        Assert.Same(room, LifecyclePolicy.Due([room], Now.AddDays(3))); // Re-observe only; submission barrier remains.
     }
     [Fact] public void RestartPreservesSubmissionBarrierAndDiscardsLiveProof()
     {
@@ -66,7 +67,8 @@ public class CreationRecoveryTests
         Assert.False(room.MicMuted);
         Assert.Equal(Now, room.NextCheckAt);
         LifecyclePolicy.Apply(room, new(false, "still unknown"), Now);
-        Assert.Equal("USER_ACTION_REQUIRED", room.Status);
+        Assert.Equal("ERROR", room.Status);
+        Assert.True(room.CreationUncertain);
     }
     [Fact] public void OnlyActiveProofClearsBarrierWithoutInventingCreationTime()
     {

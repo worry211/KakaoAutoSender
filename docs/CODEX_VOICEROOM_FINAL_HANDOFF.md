@@ -1,3 +1,12 @@
+# Current continuation: Windows RC6 expiry recovery — 2026-10-07
+
+Actual target logs: 16:17 KST explicit ended VoiceRoom was closed, then lost chat foreground caused a menu intervention. 16:18–16:20 repeated desktop UIA scans delayed work by roughly 15 seconds each and verification exceeded 90 seconds after submission. User subsequently cleared uncertainty; the active room was rediscovered with unknown start. Do not fabricate a recovered timestamp for this legacy case.
+
+RC6: native dedicated active/audio evidence first; exact HWND UIA root instead of desktop-wide enumeration; verified default-name create form skips editable UIA; chat re-established after explicit end; toolbar-first auto menu; menu retry rather than permanent intervention; submission timestamp persisted after delivered confirm input; late verified activity restores that epoch; pending submission re-observed automatically under backoff while duplicate-create barrier remains. Exact ended proof clears prior epoch. 132 tests cover submission timeout/restart/date recovery and safety. Android/backend unchanged.
+
+User requested investigation of fully background operation and explicitly said to leave current behavior if unsupported. Current background UIA/capture did not provide reliable controls. No background click/message backend or new foreground-permitting unattended mode was added. RC5 focus-preserving wait remains: other-app foreground also delays expiry work. Calibration remains optional, default menu is automatic. Final CI/package and actual RC6 existing-room verification are recorded in PR #12 and output manifest; modified-binary real 48h regeneration still needs proof.
+
+---
 # Current continuation: Windows RC5 focus-preserving checks
 
 RC5 fixes periodic five-minute focus stealing. Timer/bootstrap/retry/recovery and runtime input defer while another app is foreground, including idle games/videos. Start only from manager/exact room or a Windows desktop idle for 30 seconds. Explicit user actions get a one-shot immediate check. Operation checks yield before subsequent input/activation if the user switches to another app. Deferral preserves failures, success time, expiry and creation uncertainty; UI clearly distinguishes historical protection from pending fresh proof. Read-only background existence cannot claim active/audio success. Other-app foreground delays audio/request/expiry work until an allowed surface is available. Windows lock remains separate safe wait.

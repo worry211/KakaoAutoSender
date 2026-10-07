@@ -9,6 +9,7 @@ public sealed class RoomState
     public bool Enabled { get; set; } = true;
     public bool LiveVerified { get; set; }
     public bool CreationUncertain { get; set; }
+    public DateTimeOffset? CreationSubmittedAt { get; set; }
     public bool MicMuted { get; set; }
     public bool SpeakerMuted { get; set; }
     public DateTimeOffset? StartedAt { get; set; }

@@ -77,6 +77,7 @@ internal static class VoiceWindowAdapter
             if (KakaoSurfaceLocator.IsVisible(surface.Hwnd)) continue;
             op.VoiceHost = IntPtr.Zero;
             op.Room.CreationUncertain = false;
+            op.Room.CreationSubmittedAt = null; op.Room.StartedAt = null;
             op.Room.LiveVerified = op.Room.MicMuted = op.Room.SpeakerMuted = false;
             AutomationOperation.Stage("실제 종료 확인 · 재생성 준비");
             OperationLog.Write(op.Room, "VOICE_ENDED", "명시적 종료 안내 2회 확인 · 전용 창 닫힘 확인");
