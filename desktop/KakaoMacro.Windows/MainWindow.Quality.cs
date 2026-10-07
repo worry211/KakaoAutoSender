@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using KakaoMacro.Windows.Services;
+using WpfBrush = System.Windows.Media.Brush;
 using WpfTabControl = System.Windows.Controls.TabControl;
 
 namespace KakaoMacro.Windows;
@@ -17,12 +19,44 @@ public partial class MainWindow
 
         _qualityWorkspaceTabs = FindVisualChild<WpfTabControl>(this);
         RoomList.SelectionChanged += QualityRoomSelectionChanged;
+        _license.Changed += QualityLicenseChanged;
         _qualitySelectionHooked = true;
         RouteSelectionToWorkspace();
+        UpdateBulkSchedulePanels();
+        ApplyLicenseTone(_license.Snapshot);
     }
 
     private void QualityRoomSelectionChanged(object sender, SelectionChangedEventArgs e) =>
         RouteSelectionToWorkspace();
+
+    private void QualityLicenseChanged(LicenseSnapshot snapshot) =>
+        Dispatcher.BeginInvoke(() => ApplyLicenseTone(snapshot));
+
+    private void ApplyLicenseTone(LicenseSnapshot snapshot)
+    {
+        if (LicenseStateBadge is null || LicenseStateDot is null) return;
+
+        var backgroundKey = snapshot.Active
+            ? "SuccessSoft"
+            : snapshot.State == "CHECKING" ? "Panel3" : "WarningSoft";
+        var foregroundKey = snapshot.Active
+            ? "Success"
+            : snapshot.State == "CHECKING" ? "Muted" : "Warning";
+
+        LicenseStateBadge.Background = (WpfBrush)FindResource(backgroundKey);
+        LicenseStateDot.Foreground = (WpfBrush)FindResource(foregroundKey);
+    }
+
+    private void BulkScheduleModeBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateBulkSchedulePanels();
+
+    private void UpdateBulkSchedulePanels()
+    {
+        if (BulkScheduleModeBox is null || BulkIntervalPanel is null || BulkTimesPanel is null) return;
+        var fixedTimes = BulkScheduleModeBox.SelectedIndex == 1;
+        BulkIntervalPanel.Visibility = fixedTimes ? Visibility.Collapsed : Visibility.Visible;
+        BulkTimesPanel.Visibility = fixedTimes ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     private void RouteSelectionToWorkspace()
     {
