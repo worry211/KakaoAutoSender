@@ -10,7 +10,7 @@ internal static class BackgroundActivityPolicy
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, StringBuilder text, int count);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder text, int count);
-    internal static bool Allows(bool manager, bool exactRoom, bool unattendedDesktop) => manager || exactRoom || unattendedDesktop;
+    internal static bool Allows(bool manager, bool exactRoom, bool unattendedDesktop, bool exactPendingEntry = false) => manager || exactRoom || unattendedDesktop || exactPendingEntry;
     internal static bool CanRun(RoomState room, ISet<IntPtr>? operationTargets = null)
     {
         var foreground = GetForegroundWindow();
@@ -26,7 +26,12 @@ internal static class BackgroundActivityPolicy
             && (title.ToString().Trim() == room.Title.Trim() || VoiceWindowAdapter.TitleMatches(title.ToString(), room.Title))
             && kakao;
         var desktop = (type.ToString() is "Progman" or "WorkerW") && DesktopSession.IdleFor() >= TimeSpan.FromSeconds(30);
-        return Allows(manager, exact, desktop);
+        // A failed handoff leaves our own landing page foreground. It is a pending
+        // workflow surface only while room proof is missing, not a general browser
+        // exception. Switching to any other URL/game still yields before input.
+        var entry = !manager && !exact && !desktop && (!room.LiveVerified || operationTargets is not null)
+            && OpenChatLinkLauncher.IsExpectedLanding(foreground, room.OpenChatUrl);
+        return Allows(manager, exact, desktop, entry);
     }
 }
 

@@ -120,6 +120,10 @@ internal static class OpenChatLinkLauncher
         catch { return false; }
     }
 
+    internal static bool IsExpectedLanding(IntPtr foreground, string url) => OpenChatLinkRegistry.IsSupported(url)
+        && EnumerateBrowserWindows().Any(w => w.Hwnd == foreground && LooksLikeOpenChatBrowser(w.Title))
+        && BrowserUrlEvidence.Matches(foreground, url);
+
     internal static (int X, int Y)? ActionPoint(System.Windows.Rect button, KakaoSurfaceLocator.Bounds window)
     {
         if (button.IsEmpty || !double.IsFinite(button.Left) || !double.IsFinite(button.Top)
@@ -176,7 +180,9 @@ internal static class OpenChatLinkLauncher
                                                             x.Contains("Kakao", StringComparison.OrdinalIgnoreCase) ||
                                                             x.Contains("카카오", StringComparison.OrdinalIgnoreCase))
                                                   .Take(8));
-        diagnostic = $"browserWindows={browserWindows} actions={scanned} matches={matches.Count} names=[{names}]";
+        var launchNames = string.Join("|", actionNames.Where(n => n.Contains("열기", StringComparison.Ordinal)
+            || n.Contains("실행", StringComparison.Ordinal) || n.Contains("Open", StringComparison.OrdinalIgnoreCase)).Take(8));
+        diagnostic = $"browserWindows={browserWindows} actions={scanned} matches={matches.Count} names=[{names}] launchNames=[{launchNames}]";
         return matches.Count == 1 ? matches[0] : null;
     }
 

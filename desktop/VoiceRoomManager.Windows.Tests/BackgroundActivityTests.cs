@@ -22,6 +22,10 @@ public class BackgroundActivityTests
     public void AutomaticInputRequiresAnAllowedWorkSurface(bool manager, bool exact, bool desktop, bool expected)
         => Assert.Equal(expected, BackgroundActivityPolicy.Allows(manager, exact, desktop));
 
+    [Theory] [InlineData(false, false)] [InlineData(true, true)]
+    public void PendingEntryCanResumeOnlyOnItsExactVerifiedLanding(bool exactPendingEntry, bool allowed)
+        => Assert.Equal(allowed, BackgroundActivityPolicy.Allows(false, false, false, exactPendingEntry));
+
     [Fact] public void DeferredExpiryDoesNotBecomeFailureSuccessOrPermissionToRecreate()
     {
         var now = DateTimeOffset.UtcNow;
