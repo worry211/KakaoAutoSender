@@ -40,6 +40,14 @@ public static class LifecyclePolicy
         }
         room.BackgroundDeferred = false;
         room.LastDiagnostic = result.Status;
+        if (result.VerificationPending)
+        {
+            room.LiveVerified = room.MicMuted = room.SpeakerMuted = false;
+            room.Failures++; room.LastFailureAt = now; room.LastError = result.Status;
+            room.Status = "ERROR"; room.Stage = "입력 없이 자동 재검증 대기";
+            room.NextCheckAt = now.Add(Retry(room.Failures));
+            return;
+        }
         if (result.NeedsRecheck)
         {
             // Missing UI is not evidence of termination; preserve uncertain-submission barriers and start time.

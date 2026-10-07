@@ -139,6 +139,11 @@ public sealed class VoiceRoomCoordinator : IDisposable
                     KakaoPcAutomation.Result result;
                     try { result = await Task.Run(() => _kakao.RuntimeGuard(room)); }
                     catch (BackgroundWorkDeferredException) { Defer(room); continue; }
+                    if (result.VerificationPending)
+                    {
+                        LifecyclePolicy.Apply(room, result, DateTimeOffset.UtcNow);
+                        Log(room, "VERIFICATION_PENDING", result.Status); Save(); continue;
+                    }
                     if (result.VerifiedEnded || result.NeedsRecheck)
                     {
                         LifecyclePolicy.Apply(room, result, DateTimeOffset.UtcNow);

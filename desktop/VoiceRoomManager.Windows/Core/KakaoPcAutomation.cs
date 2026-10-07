@@ -30,7 +30,8 @@ public sealed class KakaoPcAutomation
         bool VerifiedEnded = false,
         bool NeedsRecheck = false,
         bool BackgroundDeferred = false,
-        bool Cancelled = false);
+        bool Cancelled = false,
+        bool VerificationPending = false);
 
     public Result EnsureKakaoRunning()
     {
@@ -216,7 +217,7 @@ public sealed class KakaoPcAutomation
         var surfaces = requestHost == host ? ScopedSurfaces() : new List<AutomationElement> { AutomationElement.FromHandle(requestHost) };
         var active = pipProtection?.Active == true || HasStrongActiveProofHybrid(surfaces);
         if (!active) return VoiceWindowAdapter.HasUnresolvedWindow()
-            ? new(false, "보이스룸 창의 활성/종료를 확인하지 못했습니다. 추가 생성은 대기합니다.", InterventionRequired: true)
+            ? new(false, "보이스룸 창의 활성/종료 자동 재확인 대기 · 추가 생성 없음", VerificationPending: true)
             : new(false, "보이스룸 창이 사라짐 · 실제 상태 재점검 예약", NeedsRecheck: true);
         var scoped = surfaces;
 

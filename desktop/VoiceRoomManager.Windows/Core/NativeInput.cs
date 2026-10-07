@@ -13,7 +13,8 @@ internal static class NativeInput
     public static bool Hover(IntPtr host, int x, int y)
     {
         AutomationOperation.Check();
-        if (!KakaoSurfaceLocator.IsForeground(host) || !OwnsPoint(host, x, y) || !SetCursorPos(x, y)) return false;
+        if (!KakaoSurfaceLocator.IsForeground(host)) { AutomationOperation.Check(); return false; }
+        if (!OwnsPoint(host, x, y) || !SetCursorPos(x, y)) return false;
         // Kakao's custom tooltip requires a mouse input event, not cursor relocation alone.
         mouse_event(0x0001, 0, 0, 0, UIntPtr.Zero);
         return true;
@@ -21,7 +22,8 @@ internal static class NativeInput
     public static bool Click(IntPtr host, int x, int y)
     {
         AutomationOperation.Check();
-        if (!KakaoSurfaceLocator.IsForeground(host) || !OwnsPoint(host, x, y)) return false;
+        if (!KakaoSurfaceLocator.IsForeground(host)) { AutomationOperation.Check(); return false; }
+        if (!OwnsPoint(host, x, y)) return false;
         if (!SetCursorPos(x, y)) return false;
         AutomationOperation.Check();
         mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);

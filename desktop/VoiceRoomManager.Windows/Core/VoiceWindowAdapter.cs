@@ -124,7 +124,7 @@ internal static class VoiceWindowAdapter
     {
         AutomationOperation.Stage("보이스룸 전용 창 · 오디오 보호");
         var first = Observe(true);
-        if (first is null) return new(false, "보이스룸 전용 창의 방·참여·컨트롤 증거를 다시 확인하지 못했습니다.", InterventionRequired: true);
+        if (first is null) return new(false, "보이스룸 전용 창의 활성/컨트롤 자동 재확인 대기", VerificationPending: true);
         var repaired = false;
         foreach (var microphone in new[] { true, false })
         {
@@ -153,8 +153,12 @@ internal static class VoiceWindowAdapter
         var final = Observe(false);
         var safe = final is not null && final.Controls.MicState == VoiceControlVision.AudioState.Muted && final.Controls.SpeakerState == VoiceControlVision.AudioState.Muted;
         return new(safe, safe ? prefix + " · 전용 창 활성/마이크/스피커 2회 재확인" : "보이스룸 오디오 최종 재확인 실패",
-            Active: final is not null, MicMuted: safe, SpeakerMuted: safe, AudioRepaired: repaired, InterventionRequired: !safe);
-        KakaoPcAutomation.Result Unknown() => new(false, "보이스룸 오디오 아이콘/툴팁을 확정하지 못했습니다. 추가 토글은 대기합니다.", Active: true, InterventionRequired: true);
+            Active: final is not null, MicMuted: safe, SpeakerMuted: safe, AudioRepaired: repaired, VerificationPending: !safe);
+        KakaoPcAutomation.Result Unknown()
+        {
+            AutomationOperation.Check(); // Reclassify a concurrent switch to another app as focus deferral.
+            return new(false, "오디오 상태 자동 재확인 대기 · 확인되지 않은 컨트롤은 토글하지 않음", VerificationPending: true);
+        }
     }
 
     private static Observation? CurrentControls(IntPtr hwnd)
