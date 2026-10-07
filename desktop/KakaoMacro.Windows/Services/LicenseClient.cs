@@ -19,12 +19,12 @@ internal sealed record LicenseSnapshot(
     string DownloadUrl)
 {
     public static LicenseSnapshot Initial { get; } = new(
-        false, "CHECKING", "라이선스 확인 중", "", null, 60, 600, 163, "");
+        false, "CHECKING", "라이선스 확인 중", "", null, 60, 600, 164, "");
 }
 
 internal sealed class LicenseClient : IDisposable
 {
-    public const int AppVersion = 163;
+    public const int AppVersion = 164;
     private const string ClientPlatform = "windows";
     private const string ApiOrigin = "https://kakaomacro-license.ei3921163.workers.dev";
     private readonly InstallIdentity _identity;

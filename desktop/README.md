@@ -1,4 +1,4 @@
-# KakaoMacro PC — Windows v1.6.3
+# KakaoMacro PC — Windows v1.6.4
 
 KakaoMacro PC is the Windows companion to the Android KakaoMacro product. It reuses the commercial entitlement service while using a Windows-only KakaoTalk desktop delivery adapter.
 
@@ -16,7 +16,7 @@ This client intentionally does **not** search for a room name and click the firs
 
 Two separate open-chat windows can therefore remain distinct even when their visible titles are identical. KakaoTalk chat-window sends use the actual input-control UI thread for focus restoration instead of assuming it matches the top-level KakaoTalk window thread.
 
-## v1.6.3 operations and reliability
+## v1.6.4 operations and reliability
 
 - Windows 10/11 WPF client
 - persistent non-exportable P-256 Windows CNG installation identity
