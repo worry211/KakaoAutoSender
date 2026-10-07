@@ -2,6 +2,7 @@
 import { build } from "esbuild";
 import { unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { registerSellerCommands } from "./registration-scope.mjs";
 
 const ADMIN_GUILD_ID = "1550530984783646835";
 const bundleUrl = new URL("../.commands.mjs", import.meta.url);
@@ -34,27 +35,29 @@ const headers = {
   "Content-Type": "application/json",
 };
 
-async function put(path, body) {
+async function request(method, path, body) {
   const response = await fetch(`https://discord.com/api/v10${path}`, {
-    method: "PUT",
+    method,
     headers,
-    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10000),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  const raw = await response.text();
   if (!response.ok)
     throw new Error(`Discord registration failed: HTTP ${response.status}`);
+  if (response.status === 204) return null;
   try {
-    return JSON.parse(raw);
+    return await response.json();
   } catch {
     throw new Error("Discord returned a non-JSON registration response.");
   }
 }
-
-const registered = await put(
-  `/applications/${DISCORD_APPLICATION_ID}/guilds/${DISCORD_GUILD_ID}/commands`,
+const registered = await registerSellerCommands(
+  request,
+  DISCORD_APPLICATION_ID,
+  DISCORD_GUILD_ID,
   commands,
+  process.argv.includes("--verify-only"),
 );
-
 const command = (name) => registered.find((c) => c.name === name);
 const subcommands = (name) =>
   (command(name)?.options ?? []).filter((o) => o.type === 1).map((o) => o.name);
@@ -81,16 +84,8 @@ if (missing.length) {
   );
 }
 
-// Remove any stale global copies so seller commands are not advertised outside the admin guild.
-const global = await put(
-  `/applications/${DISCORD_APPLICATION_ID}/commands`,
-  [],
-);
-if (!Array.isArray(global) || global.length !== 0)
-  throw new Error("Failed to clear stale global commands.");
-
 console.log(
-  `Registered and verified /license and /system (guild ${DISCORD_GUILD_ID}); global command copies cleared.`,
+  `Verified /license and /system (guild ${DISCORD_GUILD_ID}); seller global copies absent; unrelated commands preserved.`,
 );
 console.log(`/license: ${license.join(", ")}`);
 console.log(`/system: ${system.join(", ")}`);
