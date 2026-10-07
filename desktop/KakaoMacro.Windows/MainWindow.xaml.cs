@@ -253,7 +253,7 @@ public partial class MainWindow : Window
         var roomGenerations = targetRooms.ToDictionary(r => r.Id, r => r.StopGeneration);
         var registeredBindings = _rooms.Select(r => r.Binding).ToArray();
         if (targetRooms.Count == 0) return;
-        if (SelectedRooms().Count == 1) SaveEditorToSelected(false);
+        if (SelectedRooms().Count == 1 && !SaveEditorToSelected(false)) return;
         await _license.HeartbeatAsync(_shutdown.Token);
         if (!_license.CanDispatch)
         {
@@ -419,6 +419,12 @@ public partial class MainWindow : Window
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!_license.CanDispatch || (scheduled && !room.Running)) return;
+        if (scheduled && !ScheduleCalculator.IsValid(room))
+        {
+            room.Running = false; room.NextAt = null;
+            room.LastStatus = "예약 시간 오류 · HH:mm 형식으로 수정한 뒤 다시 실행하세요.";
+            return;
+        }
         var stopGeneration = room.StopGeneration;
         if (expectedRoomGeneration is long expected && expected != stopGeneration) return;
         var dispatchGeneration = _dispatchFence.Generation;
@@ -456,7 +462,7 @@ public partial class MainWindow : Window
 
         var result = await _binder.SendTextAsync(binding, message, scheduled, cancellationToken,
             () => !_isShuttingDown && _license.CanDispatch && room.Enabled && room.StopGeneration == stopGeneration &&
-                room.BindingValid is not false && string.IsNullOrWhiteSpace(room.PhotoPath) && ReferenceEquals(room.Binding,binding) && room.Message == message && (!scheduled || room.Running),
+                room.BindingValid is not false && string.IsNullOrWhiteSpace(room.PhotoPath) && ReferenceEquals(room.Binding,binding) && room.Message == message && (!scheduled || (room.Running && ScheduleCalculator.IsValid(room))),
             acceptInput: accept => _dispatchFence.TryAccept(dispatchGeneration, () => { lock (room) { return accept(); } }),
             onSubmitted: () =>
             {
@@ -609,13 +615,20 @@ public partial class MainWindow : Window
             return false;
         }
 
+        var scheduleKind = ScheduleModeBox.SelectedIndex == 1 ? ScheduleKind.FixedTimes : ScheduleKind.Interval;
+        var times = ScheduleCalculator.CanonicalTimes(TimesBox.Text);
+        if (!ScheduleCalculator.IsValid(new RoomProfile { ScheduleKind = scheduleKind, IntervalMinutes = interval, DailyTimes = times }))
+        {
+            if (showErrors) MessageBox.Show("예약 시간은 09:00, 18:30처럼 HH:mm 형식으로 입력하세요. 잘못된 값은 저장하지 않습니다.");
+            return false;
+        }
         room.DisplayName = string.IsNullOrWhiteSpace(DisplayNameBox.Text)
             ? room.Binding?.WindowTitle ?? "카톡방"
             : DisplayNameBox.Text.Trim();
         room.Message = message;
-        room.ScheduleKind = ScheduleModeBox.SelectedIndex == 1 ? ScheduleKind.FixedTimes : ScheduleKind.Interval;
+        room.ScheduleKind = scheduleKind;
         room.IntervalMinutes = interval;
-        room.DailyTimes = ScheduleCalculator.CanonicalTimes(TimesBox.Text);
+        room.DailyTimes = times;
         room.DailyLimit = dailyLimit;
         room.Enabled = EnabledCheck.IsChecked == true;
         if (!room.Enabled)
@@ -785,6 +798,11 @@ public partial class MainWindow : Window
         limit = int.TryParse(BulkDailyLimitBox.Text, out var parsedLimit) ? parsedLimit : 0;
         var scheduleKind = BulkScheduleModeBox.SelectedIndex == 1 ? ScheduleKind.FixedTimes : ScheduleKind.Interval;
         var times = ScheduleCalculator.CanonicalTimes(BulkTimesBox.Text);
+        if (applySchedule && !ScheduleCalculator.IsValid(new RoomProfile { ScheduleKind = scheduleKind, IntervalMinutes = interval, DailyTimes = times }))
+        {
+            MessageBox.Show("일괄 예약 시간을 HH:mm 형식으로 확인하세요. 설정은 변경하지 않았습니다.");
+            return;
+        }
         var now = DateTimeOffset.Now;
 
         CaptureBulkUndo(selected);
@@ -821,6 +839,11 @@ public partial class MainWindow : Window
         if (selected.Count < 2 || RoomList.SelectedItem is not RoomProfile source)
         {
             MessageBox.Show("설정을 복사할 원본 포함 2개 이상의 방을 선택하세요.");
+            return;
+        }
+        if (!ScheduleCalculator.IsValid(source))
+        {
+            MessageBox.Show("원본 방의 예약 시간을 먼저 수정하세요. 설정은 복사하지 않았습니다.");
             return;
         }
         CaptureBulkUndo(selected.Where(r => r.Id != source.Id).ToList());
@@ -891,7 +914,7 @@ public partial class MainWindow : Window
                 MessageBoxImage.Question);
             if (confirm != MessageBoxResult.Yes) return;
         }
-        if (selected.Count == 1) SaveEditorToSelected(false);
+        if (selected.Count == 1 && !SaveEditorToSelected(false)) return;
         var selectedGenerations = selected.ToDictionary(r => r.Id, r => r.StopGeneration);
         await _license.HeartbeatAsync(_shutdown.Token);
         if (!_license.CanDispatch)

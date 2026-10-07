@@ -218,7 +218,7 @@ internal sealed class SettingsStore
         {
             room.DisplayName = Clean(room.DisplayName, 120, "카톡방");
             room.Message = Clean(room.Message, 4000, "");
-            room.DailyTimes = Clean(room.DailyTimes, 200, "09:00");
+            room.DailyTimes = Clean(room.DailyTimes, 200, "");
             room.IntervalMinutes = Math.Clamp(room.IntervalMinutes, 1, 10080);
             room.DailyLimit = Math.Clamp(room.DailyLimit, 0, 9999);
             room.PhotoPath = Clean(room.PhotoPath, 1024, "");

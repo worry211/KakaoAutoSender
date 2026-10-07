@@ -36,5 +36,16 @@ public sealed class SettingsTests : IDisposable
     [Fact]
     public void DuplicateProfileIdsRecoverPreviousGoodCopy()
     { Seed(); var id = Guid.NewGuid(); File.WriteAllText(Primary, $"{{\"Rooms\":[{{\"Id\":\"{id}\"}},{{\"Id\":\"{id}\"}}]}}"); Assert.Equal("retained", new SettingsStore(_dir).Load().Rooms[0].Message); }
+    [Theory]
+    [InlineData("")]
+    [InlineData("09:00, invalid")]
+    public void InvalidFixedTimesStayInvalidAfterSaveAndReload(string times)
+    {
+        new SettingsStore(_dir).Save(new AppSettings { Rooms = new() { new RoomProfile { ScheduleKind = ScheduleKind.FixedTimes, DailyTimes = times } } });
+        var room = new SettingsStore(_dir).Load().Rooms[0];
+        Assert.Equal(times, room.DailyTimes);
+        Assert.False(ScheduleCalculator.IsValid(room));
+        Assert.Throws<InvalidDataException>(() => ScheduleCalculator.ComputeNext(room, DateTimeOffset.Now));
+    }
     public void Dispose() => Directory.Delete(_dir, true);
 }
