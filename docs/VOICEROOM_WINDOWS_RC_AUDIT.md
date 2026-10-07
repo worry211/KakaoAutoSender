@@ -1,4 +1,11 @@
-# Current continuation: Windows RC7 cancellation/startup audit
+# Current continuation: Windows RC8 footer reliability
+
+142 local tests pass. On October 7, controlled termination of the one-participant room was followed by the RC7 unattended default-menu workflow: submit 18:03:50 KST, active/mic-muted/speaker-muted repeated proof 18:03:53, 5087ms operation. The durable epoch matches submission; no manual creation menu or audio click. This proves controlled recovery, not real elapsed 48-hour expiration.
+
+Exit-circle recognition occasionally failed when cursor-overlay illumination connected its background to adjacent pixels while four left circles remained intact. RC8 recovers only the actual exit glyph within the strict right-hand layout slot; it still requires exact title/PID, positive participants, left-control geometry and typed audio readback. Overlay and missing-exit-glyph regression cases cover 100%, 150%, 200%. A missing audio control is never inferred. Final RC8 binary QA/CI/hash evidence is in PR #12 and output manifest. Other-account requests, account multi-room limits, physical monitor OFF/lock/login restart and elapsed 48h remain unverified.
+
+---
+# Previous continuation: Windows RC7 cancellation/startup audit
 
 139 local Windows tests pass. Final target testing exposed an audio readback versus foreground-switch race; transient uncertainty now retries read-only under bounded backoff instead of permanently requiring intervention, and rechecks focus before classifying failed native input. Coordinator logs follow its StateStore directory so fixture/simulation state stores cannot pollute real operational logs. Manual/probe results arriving after Stop/Dispose are marked cancelled and discarded by coordinator and UI. Delivered submit time checkpoints precede cancelled progress callbacks. Startup attempts, loaded window, duplicate instance and startup exceptions are recorded in logs/startup.jsonl. Existing focus-aware wait remains; no background-only backend or unattended focus-stealing mode.
 

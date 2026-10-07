@@ -1,4 +1,11 @@
-# Current continuation: Windows RC7 cancellation/startup audit
+# Current continuation: Windows RC8 footer reliability
+
+142 local Windows regression tests pass. Actual RC7 controlled termination on October 7 was followed by unattended default-menu creation at 18:03:50 KST and active/both-muted proof at 18:03:53, 5087ms from due workflow entry. Persisted StartedAt matches the delivered submission epoch; CreationUncertain is false after proof. No manual creation menu or audio click was used. This is controlled termination recovery, not elapsed 48-hour expiry proof.
+
+Target QA also exposed an exit-circle component joined to cursor-overlay illumination: the left four circles remained intact. RC8 recovers only the exit control from its strict glyph in the bounded right-hand layout slot, retaining exact room/PID/participant, four-control geometry, typed audio and repeated readback. Missing exit glyph still fails closed. Positive and missing-glyph overlay fixtures run at 100%, 150%, 200%. Android/backend unchanged. Final RC8 launch/CI/hashes and residual gates are recorded in PR #12 and output manifest.
+
+---
+# Previous continuation: Windows RC7 cancellation/startup audit
 
 139 local Windows tests pass. Final target testing exposed an audio readback versus foreground-switch race; transient uncertainty now retries read-only under bounded backoff instead of permanently requiring intervention, and rechecks focus before classifying failed native input. Coordinator logs follow its StateStore directory; test stores do not pollute real operational logs. Manual/probe results arriving after Stop/Dispose are marked cancelled and discarded by coordinator and UI. Delivered submit time checkpoints precede cancelled progress callbacks. Startup attempts, loaded window, duplicate instance and startup exceptions are recorded in logs/startup.jsonl. Existing focus-aware wait remains; no background-only backend or unattended focus-stealing mode.
 

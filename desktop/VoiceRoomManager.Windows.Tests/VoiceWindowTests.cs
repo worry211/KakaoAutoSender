@@ -4,6 +4,35 @@ using Xunit;
 namespace VoiceRoomManager.Windows.Tests;
 public class VoiceWindowTests
 {
+    [Theory] [InlineData(1)] [InlineData(1.5)] [InlineData(2)]
+    public void ConnectedExitGlowRequiresActualExitGlyph(double scale)
+    {
+        var layout = VoiceControlVision.Detect(ExitOverlay(scale, removeGlyph: false), out var diagnostic);
+        Assert.True(layout is not null, diagnostic);
+        Assert.Equal(VoiceControlVision.AudioState.Muted, layout.MicState);
+        Assert.Equal(VoiceControlVision.AudioState.Muted, layout.SpeakerState);
+        Assert.InRange(layout.Exit.X, 378 * scale, 382 * scale);
+        Assert.Null(VoiceControlVision.Detect(ExitOverlay(scale, removeGlyph: true)));
+    }
+    private static PixelFrame ExitOverlay(double scale, bool removeGlyph)
+    {
+        var source = System.Windows.Media.Imaging.BitmapDecoder.Create(new Uri(Path.Combine(AppContext.BaseDirectory, "Fixtures", "voice-footer-muted.png")), System.Windows.Media.Imaging.BitmapCreateOptions.None, System.Windows.Media.Imaging.BitmapCacheOption.OnLoad).Frames[0];
+        var converted = new System.Windows.Media.Imaging.FormatConvertedBitmap(source, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+        var pixels = new byte[converted.PixelWidth * converted.PixelHeight * 4];
+        converted.CopyPixels(pixels, converted.PixelWidth * 4, 0);
+        for (var y = 0; y < converted.PixelHeight; y++)
+        for (var x = 320; x < converted.PixelWidth; x++)
+        {
+            var i = (y * converted.PixelWidth + x) * 4;
+            if ((pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3 < 33
+                || (removeGlyph && x is >= 368 and < 392 && y is >= 16 and < 40))
+                pixels[i] = pixels[i + 1] = pixels[i + 2] = 60;
+        }
+        var image = System.Windows.Media.Imaging.BitmapSource.Create(converted.PixelWidth, converted.PixelHeight, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null, pixels, converted.PixelWidth * 4);
+        var resized = new System.Windows.Media.Imaging.TransformedBitmap(image, new System.Windows.Media.ScaleTransform(scale, scale));
+        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder(); encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(resized));
+        using var bytes = new MemoryStream(); encoder.Save(bytes); return new PixelFrame(bytes.ToArray());
+    }
     [Fact] public void MissingMicrophoneGlyphCannotClaimMuted()
     {
         var source = System.Windows.Media.Imaging.BitmapDecoder.Create(new Uri(Path.Combine(AppContext.BaseDirectory, "Fixtures", "voice-footer-muted.png")), System.Windows.Media.Imaging.BitmapCreateOptions.None, System.Windows.Media.Imaging.BitmapCacheOption.OnLoad).Frames[0];

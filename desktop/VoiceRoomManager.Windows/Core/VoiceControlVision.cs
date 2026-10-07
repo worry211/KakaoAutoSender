@@ -51,6 +51,26 @@ internal static class VoiceControlVision
             if (round) components.Add(button);
         }
         diagnostic += " circles=" + components.Count + " boxes=" + string.Join("|", components.Select(b => $"{b.X:0},{b.Y:0},{b.Diameter:0}"));
+        // Hover/overlay illumination can connect the exit circle to surrounding pixels.
+        // Recover only that non-audio control, using its actual glyph in the narrow
+        // right-hand layout slot. Missing audio circles still fail closed.
+        if (components.Count == 4)
+        {
+            var leftControls = components.OrderBy(b => b.X).ToArray();
+            var diameter = leftControls.Average(b => b.Diameter);
+            if (leftControls[3].X < width - diameter * 3)
+            {
+                Button? exit = null; var best = .08;
+                for (var y = Math.Ceiling((leftControls[0].Y - diameter * .15) * 2) / 2; y <= leftControls[0].Y + diameter * .15; y += .5)
+                for (var x = Math.Ceiling((width - diameter * 1.25) * 2) / 2; x <= width - diameter * .65; x += .5)
+                {
+                    var candidate = new Button(x, y, diameter);
+                    var score = Score(image, candidate, "exit", false);
+                    if (score <= best) { best = score; exit = candidate; }
+                }
+                if (exit is not null) { components.Add(exit); diagnostic += $" exitGlyphRecovery={best:0.000}"; }
+            }
+        }
         if (components.Count != 5) return null;
         var controls = components.OrderBy(b => b.X).ToArray();
         var size = controls.Average(b => b.Diameter);
