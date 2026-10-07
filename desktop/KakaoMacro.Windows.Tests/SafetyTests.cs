@@ -123,4 +123,24 @@ public sealed class SafetyTests
         var loaded = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(settings))!;
         Assert.False(loaded.Rooms[0].Running); Assert.Null(loaded.Rooms[0].NextAt); Assert.Equal(0, loaded.Rooms[0].StopGeneration);
     }
+    [Fact]
+    public async Task StopBeforeNativeAcceptanceNeverTypes()
+    {
+        using var fence = new DispatchFence();
+        var generation = fence.Generation;
+        var api = new FakeApi();
+        var result = await new KakaoWindowBinder(api).SendTextAsync(Binding(), "hello", false, CancellationToken.None,
+            acceptInput: accept => { fence.Cancel(); return fence.TryAccept(generation, accept); });
+        Assert.Equal(SendFailure.Stopped, result.Failure);
+        Assert.Empty(api.Batches);
+    }
+    [Fact]
+    public async Task NewlineAtBoundaryNeverLeavesShiftHeld()
+    {
+        var api = new FakeApi();
+        await new KakaoWindowBinder(api).SendTextAsync(Binding(), new string('a', 127) + "\nmore", false, CancellationToken.None);
+        var newlineBatch = api.Batches[1];
+        Assert.Equal((ushort)0x10, newlineBatch[^1].VirtualKey);
+        Assert.True(newlineBatch[^1].Up);
+    }
 }

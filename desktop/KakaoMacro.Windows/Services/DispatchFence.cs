@@ -8,6 +8,8 @@ internal sealed class DispatchFence : IDisposable
     public (long Generation, CancellationToken Token) Capture(){lock(_gate)return(_generation,_source.Token);}
     public bool TryOpen(long expected)
     {lock(_gate){if(expected!=_generation)return false;if(_source.IsCancellationRequested){_source.Dispose();_source=new();}return true;}}
+    public bool TryAccept(long expected, Func<bool> accept)
+    { lock (_gate) { return expected == _generation && !_source.IsCancellationRequested && accept(); } }
     public void Cancel(){lock(_gate){_generation++;_source.Cancel();}}
     public void Dispose(){lock(_gate){_generation++;_source.Cancel();_source.Dispose();}}
 }

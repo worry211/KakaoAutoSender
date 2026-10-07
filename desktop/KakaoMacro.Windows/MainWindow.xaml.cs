@@ -419,6 +419,7 @@ public partial class MainWindow : Window
         cancellationToken.ThrowIfCancellationRequested();
         if (!_license.CanDispatch || (scheduled && !room.Running)) return;
         var stopGeneration = room.StopGeneration;
+        var dispatchGeneration = _dispatchFence.Generation;
         var binding = room.Binding;
         var message = room.Message;
         if (await Dispatcher.InvokeAsync(() => _rooms.Count(other => BindingIdentity.SameWindow(other.Binding, binding)) > 1))
@@ -453,7 +454,8 @@ public partial class MainWindow : Window
 
         var result = await _binder.SendTextAsync(binding, message, scheduled, cancellationToken,
             () => !_isShuttingDown && _license.CanDispatch && room.Enabled && room.StopGeneration == stopGeneration &&
-                room.BindingValid is not false && string.IsNullOrWhiteSpace(room.PhotoPath) && ReferenceEquals(room.Binding,binding) && room.Message == message && (!scheduled || room.Running)).ConfigureAwait(false);
+                room.BindingValid is not false && string.IsNullOrWhiteSpace(room.PhotoPath) && ReferenceEquals(room.Binding,binding) && room.Message == message && (!scheduled || room.Running),
+            acceptInput: accept => _dispatchFence.TryAccept(dispatchGeneration, () => { lock (room) { return accept(); } })).ConfigureAwait(false);
         lock(room)
         {
         if (result.Success)

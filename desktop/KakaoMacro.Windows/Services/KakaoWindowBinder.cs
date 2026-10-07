@@ -54,7 +54,7 @@ internal sealed class KakaoWindowBinder
         catch{return(false,"카카오톡 연결을 확인하지 못했습니다. 다시 연결해 주세요.");}
     }
     public async Task<SendResult> SendTextAsync(KakaoBinding? binding,string message,bool scheduled,
-        CancellationToken cancellationToken,Func<bool>? canSend=null)
+        CancellationToken cancellationToken,Func<bool>? canSend=null,Func<Func<bool>,bool>? acceptInput=null)
     {
         if(string.IsNullOrWhiteSpace(message))return new(false,"메시지가 비어 있습니다.",SendFailure.SendInputFailed);
         var initial=Validate(binding);if(!initial.Valid)return new(false,initial.Message,SendFailure.InvalidBinding);
@@ -78,15 +78,30 @@ internal sealed class KakaoWindowBinder
             }
             SendResult? Batch(IReadOnlyList<KeyStroke> keys)
             {
-                var failure=Guard();if(failure is not null)return failure;
-                return _api.SendKeys(keys)?null:new(false,"Windows 입력이 일부만 처리되었습니다. 방을 확인하고 다시 연결하세요.",SendFailure.SendInputFailed);
+                SendResult? failure = null;
+                var invoked = false;
+                bool Accept()
+                {
+                    invoked = true;
+                    failure = Guard();
+                    return failure is null && _api.SendKeys(keys);
+                }
+                var accepted = acceptInput is null ? Accept() : acceptInput(Accept);
+                if (failure is not null) return failure;
+                if (!invoked) return Stopped();
+                return accepted ? null : new(false,"Windows 입력이 일부만 처리되었습니다. 방을 확인하고 다시 연결하세요.",SendFailure.SendInputFailed);
             }
             var clear=Batch(new[]{Key(0x11,false),Key(0x41,false),Key(0x41,true),Key(0x11,true),Key(0x08,false),Key(0x08,true)});
             if(clear is not null)return clear;
             await Task.Delay(25,cancellationToken).ConfigureAwait(false);
-            var text=MessageKeys(message);
-            for(var offset=0;offset<text.Count;offset+=512)
-            {var result=Batch(text.Skip(offset).Take(512).ToArray());if(result is not null)return result;}
+            for(var offset=0;offset<message.Length;)
+            {
+                var length = Math.Min(128, message.Length-offset);
+                if (offset+length<message.Length && char.IsHighSurrogate(message[offset+length-1])) length--;
+                var result=Batch(MessageKeys(message.Substring(offset,length)));
+                if(result is not null)return result;
+                offset+=length;
+            }
             var submit=Batch(new[]{Key(0x0D,false),Key(0x0D,true)});if(submit is not null)return submit;
             // Enter was accepted: a later Stop must not erase the accepted send count.
             return new(true,"전송 완료");
