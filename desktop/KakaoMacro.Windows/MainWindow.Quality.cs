@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using KakaoMacro.Windows.Services;
+using WpfBrush = System.Windows.Media.Brush;
 using WpfTabControl = System.Windows.Controls.TabControl;
 
 namespace KakaoMacro.Windows;
@@ -42,8 +43,8 @@ public partial class MainWindow
             ? "Success"
             : snapshot.State == "CHECKING" ? "Muted" : "Warning";
 
-        LicenseStateBadge.Background = (Brush)FindResource(backgroundKey);
-        LicenseStateDot.Foreground = (Brush)FindResource(foregroundKey);
+        LicenseStateBadge.Background = (WpfBrush)FindResource(backgroundKey);
+        LicenseStateDot.Foreground = (WpfBrush)FindResource(foregroundKey);
     }
 
     private void BulkScheduleModeBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
