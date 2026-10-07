@@ -50,6 +50,15 @@ function parseEntitlementQuery(url: URL) {
   };
 }
 
+function deploymentMetadata(env: Env) {
+  const version = (env as any).CF_VERSION_METADATA;
+  return {
+    state: "DEPLOYMENT",
+    tag: String(version?.tag ?? ""),
+    deployed_at: String(version?.timestamp ?? ""),
+  };
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext) {
     const request = id("REQ-"),
@@ -63,6 +72,7 @@ export default {
       "/api/v1/entitlement",
       "/api/v1/deactivate-session",
       "/api/v1/client-config",
+      "/api/v1/deployment",
       "/discord/interactions",
     ];
     let result = "OK";
@@ -77,6 +87,8 @@ export default {
       ];
       if (path === "/api/v1/client-config" && req.method === "GET")
         return json(metadata(await config(env), null, "CONFIG"), 200, request);
+      if (path === "/api/v1/deployment" && req.method === "GET")
+        return json(deploymentMetadata(env), 200, request);
       if (path === "/discord/interactions" && req.method === "POST") {
         const raw = await boundedBody(req);
         enforceDiscordScope(raw, env);
