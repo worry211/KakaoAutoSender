@@ -31,7 +31,8 @@ public sealed class KakaoPcAutomation
         bool NeedsRecheck = false,
         bool BackgroundDeferred = false,
         bool Cancelled = false,
-        bool VerificationPending = false);
+        bool VerificationPending = false,
+        bool WaitingForCapacity = false);
 
     public Result EnsureKakaoRunning()
     {
@@ -91,6 +92,9 @@ public sealed class KakaoPcAutomation
         }
         if (VoiceWindowAdapter.HasUnresolvedWindow())
             return new(false, "기존 보이스룸 창의 활성/종료 재확인 대기 · 추가 생성 없음");
+        if (VoiceParticipationPolicy.TryCancelSwitchPrompt())
+            return new(false, "기존 보이스룸 유지 · 새 방 전환을 취소하고 대기합니다.", WaitingForCapacity: true);
+        if (VoiceParticipationPolicy.Check(room) is { } capacity) return capacity;
         if (room.CreationUncertain)
             return new(false,"이전 생성 요청의 활성 상태 자동 재확인 대기 · 중복 생성 없음");
 
@@ -142,6 +146,8 @@ public sealed class KakaoPcAutomation
         for (var i = 0; i < 16; i++)
         {
             AutomationOperation.Pause(420);
+            if (VoiceParticipationPolicy.Check(room) is not null && VoiceParticipationPolicy.TryCancelSwitchPrompt())
+                return new(false, "기존 보이스룸 유지 · 새 방 전환을 취소하고 대기합니다.", WaitingForCapacity: true);
             if (VoiceWindowAdapter.Observe(true) is null) continue;
             AutomationOperation.Pause(280);
             if (VoiceWindowAdapter.Observe(false) is null) continue;

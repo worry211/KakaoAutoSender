@@ -11,6 +11,7 @@ public partial class MainWindow : Window
     private readonly StateStore _store;
     private readonly KakaoPcAutomation _kakao = new();
     private readonly VoiceRoomCoordinator _coordinator;
+    private readonly RoomListPresentation _roomList = new();
 
     public MainWindow(bool preview = false)
     {
@@ -39,8 +40,9 @@ public partial class MainWindow : Window
     private void RefreshUi()
     {
         var selectedId = (RoomsGrid.SelectedItem as RoomState)?.Id;
-        if (!ReferenceEquals(RoomsGrid.ItemsSource, State.Rooms)) RoomsGrid.ItemsSource = State.Rooms;
-        else RoomsGrid.Items.Refresh();
+        _roomList.Synchronize(State);
+        if (!ReferenceEquals(RoomsGrid.ItemsSource, _roomList.Rows)) RoomsGrid.ItemsSource = _roomList.Rows;
+        RoomsGrid.Items.Refresh();
         if (selectedId is not null) RoomsGrid.SelectedItem = State.Rooms.FirstOrDefault(r => r.Id == selectedId);
 
         var version = typeof(MainWindow).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0];
@@ -50,7 +52,7 @@ public partial class MainWindow : Window
         MasterStatus.Text = State.ManagerActive
             ? attention ? "● 사용자 확인이 필요합니다" : "● 보이스룸 자동관리 실행 중"
             : State.Rooms.Any(r => r.LiveVerified)
-                ? "● 보이스룸 활성 · 자동관리 꺼짐"
+                ? "● 마지막 확인: 보이스룸 활성 · 자동관리 꺼짐"
                 : "● 보이스룸 자동관리 중지됨";
         MasterStatus.Foreground = State.ManagerActive
             ? (System.Windows.Media.Brush)FindResource(attention ? "Warn" : "Good")
@@ -65,7 +67,7 @@ public partial class MainWindow : Window
             + (State.ManagerActive ? " · PC 절전 방지 ON / 모니터 OFF 허용" : "");
         RuntimeStats.Text = $"요청 자동거절 {State.SpeakerRequestsRejected}회 · 요청받기 차단 {State.SpeakerRequestTogglesDisabled}회 · 오디오 재보호 {State.AudioRepairs}회 · {KakaoCalibrationStore.Summary()}";
         LastStatus.Text = State.LastStatus;
-        RoomSummary.Text = $"등록 {State.Rooms.Count} · 관리 ON {State.Rooms.Count(r => r.Enabled)} · 조치 필요 {State.Rooms.Count(r => r.Status == "USER_ACTION_REQUIRED")}";
+        RoomSummary.Text = $"등록 {State.Rooms.Count} · 관리 대상 {State.Rooms.Count(r => r.Enabled)} · 실행 {(State.ManagerActive ? "ON" : "OFF")} · 대기 {State.Rooms.Count(r => r.Status == "WAITING_CAPACITY")} · 조치 필요 {State.Rooms.Count(r => r.Status == "USER_ACTION_REQUIRED")}";
         EmptyState.Visibility = State.Rooms.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         StartButton.IsEnabled = !_coordinator.IsBusy;
         RecheckAllButton.IsEnabled = State.ManagerActive && !_coordinator.IsBusy;
@@ -185,9 +187,7 @@ public partial class MainWindow : Window
         if (_coordinator.IsBusy) return;
         var room = SelectedRoom();
         if (room is null) return;
-        room.Enabled = !room.Enabled;
-        State.LastStatus = room.Title + (room.Enabled ? " · 관리 ON" : " · 관리 OFF");
-        _coordinator.Save();
+        _coordinator.SetRoomEnabled(room, !room.Enabled);
         RefreshUi();
     }
 
@@ -291,7 +291,7 @@ public partial class MainWindow : Window
         ClearCreationButton.Visibility = RoomsGrid.SelectedItem is RoomState { CreationUncertain: true } ? Visibility.Visible : Visibility.Collapsed;
         ClearCreationButton.IsEnabled = !_coordinator.IsBusy;
         if (RoomsGrid.SelectedItem is not RoomState room) { SelectedStatus.Text = "방을 선택하면 보호 상태와 필요한 조치를 확인할 수 있습니다."; SelectedError.Text = ""; return; }
-        SelectedStatus.Text = room.Title + " · " + (room.Enabled ? "관리 ON" : "관리 OFF") + " · " + room.AudioDisplay + " · " + room.DurationDisplay
+        SelectedStatus.Text = room.Title + " · " + room.ManagementDisplay + " · " + room.AudioDisplay + " · " + room.DurationDisplay
             + (room.LastFailureAt is null ? "" : " · 최근 실패 " + room.LastFailureAt.Value.ToLocalTime().ToString("MM/dd HH:mm"));
         SelectedError.Text = DiagnosticPresentation.Summary(room.LastError);
         LastStatus.Text = room.LastDiagnostic;
@@ -304,6 +304,7 @@ public partial class MainWindow : Window
             "Kakao에서 이 방의 보이스룸이 종료됐거나 생성되지 않은 것을 직접 확인했나요?\n활성 보이스룸이 있다면 ‘아니요’를 누르고 ‘지금 확인’을 사용하세요.\n‘예’를 누르면 다음 실제 점검에서 생성할 수 있습니다.",
             "중복 생성 방지 대기 해제", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
         room.CreationUncertain = false;
+        room.CreationSubmittedAt = null;
         room.LiveVerified = room.MicMuted = room.SpeakerMuted = false;
         room.StartedAt = null;
         room.Status = "BOOTSTRAP_PENDING";

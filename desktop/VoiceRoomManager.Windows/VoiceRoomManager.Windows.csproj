@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>VoiceRoomManager.Windows</AssemblyName>
     <RootNamespace>VoiceRoomManager.Windows</RootNamespace>
-    <Version>0.4.0-rc.9</Version>
+    <Version>0.4.0-rc.10</Version>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -15,5 +15,3 @@
   </PropertyGroup>
   <ItemGroup><EmbeddedResource Include="Core/Assets/*.png" /></ItemGroup>
 </Project>
-
-

@@ -24,12 +24,14 @@ public sealed class RoomState
     [JsonIgnore] public string DurationDisplay => LastOperationMilliseconds > 0 ? $"최근 점검 {LastOperationMilliseconds / 1000d:0.0}초" : "점검 기록 없음";
     public string Stage { get; set; } = "준비";
     [JsonIgnore] public bool BackgroundDeferred { get; set; }
+    [JsonIgnore] public bool ManagerRunning { get; set; }
+    [JsonIgnore] public string ManagementDisplay => !Enabled ? "관리 대상 OFF" : ManagerRunning ? "자동관리 실행 중" : "관리 대상 ON · 실행 꺼짐";
     [JsonIgnore]
-    public string NextCheckDisplay => !Enabled || Status == "STOPPED" ? "—" : BackgroundDeferred ? "작업 후 재개" : NextCheckAt?.ToLocalTime().ToString("MM/dd HH:mm:ss") ?? "—";
+    public string NextCheckDisplay => !Enabled || Status == "STOPPED" ? "—" : BackgroundDeferred ? "작업 후 재개" : !ManagerRunning ? "자동관리 꺼짐" : NextCheckAt?.ToLocalTime().ToString("MM/dd HH:mm:ss") ?? "—";
     [JsonIgnore]
     public string LastSuccessDisplay => LastSuccessAt?.ToLocalTime().ToString("MM/dd HH:mm") ?? "아직 없음";
     [JsonIgnore]
-    public string AudioDisplay => BackgroundDeferred ? "마지막 보호 결과 · 재확인 대기" : MicMuted && SpeakerMuted ? "마이크 · 스피커 보호 확인" : "오디오 보호 확인 필요";
+    public string AudioDisplay => BackgroundDeferred ? "마지막 보호 결과 · 재확인 대기" : MicMuted && SpeakerMuted ? (ManagerRunning ? "마이크 · 스피커 보호 확인" : "마지막 점검: 마이크 · 스피커 보호 확인") : "오디오 보호 확인 필요";
 
     [JsonIgnore]
     public string LinkDisplay => OpenChatLinkRegistry.IsSupported(OpenChatUrl) ? "등록됨" : "미등록";
@@ -41,10 +43,11 @@ public sealed class RoomState
         "BOOTSTRAP_PENDING" => "자동 시작 대기",
         "BOOTSTRAPPING" => "자동 시작 중",
         "PROBE_OK" => "진단 통과",
-        "ACTIVE" => Enabled ? "보룸 활성 · 관리 ON" : "보룸 활성 · 관리 OFF",
+        "ACTIVE" => "보룸 활성 · " + (Enabled && ManagerRunning ? "자동관리 중" : "자동관리 꺼짐"),
         "ACTIVE_UNKNOWN_START" => "보룸 활성 · 시작시각 확인 중",
         "CHECK_DUE" => "자동 점검 중",
         "WAITING_UNLOCK" => "잠금 해제 대기",
+        "WAITING_CAPACITY" => "다른 보이스룸 참여 중 · 대기",
         "USER_ACTION_REQUIRED" => "사용자 조치 필요",
         "STOPPED" => "관리 중단",
         "OPENING_KAKAO" => "카카오톡 여는 중",

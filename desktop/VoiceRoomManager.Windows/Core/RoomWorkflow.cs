@@ -4,6 +4,7 @@ public enum WorkflowStage { Configured, EnsureKakao, OpenLink, VerifyRoom, Check
 public interface IRoomWorkflowDriver
 {
     KakaoPcAutomation.Result EnsureKakao();
+    KakaoPcAutomation.Result? CheckCapacity(RoomState room) => null;
     KakaoPcAutomation.Result EnterRoom(RoomState room);
     bool HasRoomProof(RoomState room);
     KakaoPcAutomation.Result InspectVoiceRoom(RoomState room, bool probe);
@@ -23,6 +24,7 @@ public sealed class RoomWorkflow(IRoomWorkflowDriver driver)
         Stage(WorkflowStage.EnsureKakao);
         var result = driver.EnsureKakao();
         if (!result.Success) return result;
+        if (!probe && driver.CheckCapacity(room) is { } capacity) return capacity;
         Stage(WorkflowStage.OpenLink);
         result = driver.EnterRoom(room);
         if (!result.Success) return result;
@@ -52,6 +54,7 @@ public sealed class RoomWorkflow(IRoomWorkflowDriver driver)
 internal sealed class WindowsWorkflowDriver(KakaoPcAutomation kakao) : IRoomWorkflowDriver
 {
     public KakaoPcAutomation.Result EnsureKakao() => kakao.EnsureKakaoRunning();
+    public KakaoPcAutomation.Result? CheckCapacity(RoomState room) => room.CreationUncertain ? null : VoiceParticipationPolicy.Check(room);
     public KakaoPcAutomation.Result EnterRoom(RoomState room)
     {
         var entry = OpenChatLinkLauncher.TryOpen(room);

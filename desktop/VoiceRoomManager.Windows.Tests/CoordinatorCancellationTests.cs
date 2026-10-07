@@ -4,6 +4,41 @@ using Xunit;
 namespace VoiceRoomManager.Windows.Tests;
 public class CoordinatorCancellationTests
 {
+    [Fact] public async Task ManualSuccessWhileManagerIsOffDoesNotScheduleAutomaticWork()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        var driver = new HeldInspection(); driver.Release.Set();
+        try
+        {
+            var store = new StateStore(path);
+            store.Save(new DesktopState { Rooms = [new() { Title = "test", OpenChatUrl = "https://open.kakao.com/o/test" }] });
+            using var coordinator = new VoiceRoomCoordinator(store, new KakaoPcAutomation(), schedule: false, workflowDriver: driver);
+            var room = Assert.Single(coordinator.Snapshot.Rooms);
+            Assert.True((await coordinator.LiveCheckAsync(room)).Success);
+            Assert.False(coordinator.Snapshot.ManagerActive); Assert.True(room.LiveVerified); Assert.Null(room.NextCheckAt);
+            new RoomListPresentation().Synchronize(coordinator.Snapshot);
+            Assert.Contains("꺼짐", room.ManagementDisplay);
+        }
+        finally { if (Directory.Exists(path)) Directory.Delete(path, true); }
+    }
+    [Fact] public void ReenabledRoomIsScheduledWithoutResettingItsCreationEpochOrBarrier()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        try
+        {
+            var store = new StateStore(path); var epoch = DateTimeOffset.UtcNow.AddHours(-1);
+            store.Save(new DesktopState { ManagerActive = true, Rooms = [new() { Enabled = false, StartedAt = epoch, CreationUncertain = true }] });
+            using var coordinator = new VoiceRoomCoordinator(store, new KakaoPcAutomation(), schedule: false);
+            var room = Assert.Single(coordinator.Snapshot.Rooms);
+            coordinator.SetRoomEnabled(room, true);
+            Assert.Equal("BOOTSTRAP_PENDING", room.Status); Assert.NotNull(room.NextCheckAt);
+            Assert.Equal(epoch, room.StartedAt); Assert.True(room.CreationUncertain);
+            coordinator.SetRoomEnabled(room, false);
+            Assert.Equal("STOPPED", room.Status); Assert.Null(room.NextCheckAt);
+            Assert.True(room.CreationUncertain); Assert.Equal(epoch, room.StartedAt);
+        }
+        finally { if (Directory.Exists(path)) Directory.Delete(path, true); }
+    }
     [Theory] [InlineData(false)] [InlineData(true)]
     public async Task StoppedManualOrProbeCannotOverwriteTheStoppedSchedule(bool probe)
     {

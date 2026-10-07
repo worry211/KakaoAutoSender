@@ -40,6 +40,14 @@ public static class LifecyclePolicy
         }
         room.BackgroundDeferred = false;
         room.LastDiagnostic = result.Status;
+        if (result.WaitingForCapacity)
+        {
+            room.LiveVerified = room.MicMuted = room.SpeakerMuted = false;
+            room.Status = "WAITING_CAPACITY"; room.Stage = "기존 참여 유지 · 전환 없음";
+            room.LastError = "";
+            room.NextCheckAt = now.AddSeconds(30);
+            return; // Not an automation failure, and never evidence that an uncertain submission ended.
+        }
         if (result.VerificationPending)
         {
             room.LiveVerified = room.MicMuted = room.SpeakerMuted = false;
