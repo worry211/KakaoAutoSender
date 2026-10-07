@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private readonly Queue<string> _logLines = new();
     private readonly TrayService _tray;
     private readonly DispatchFence _dispatchFence = new();
+    internal bool IsShuttingDown => _isShuttingDown;
     private CancellationTokenSource? _saveDebounce;
     private CancellationTokenSource? _searchDebounce;
     private CancellationTokenSource? _editorSaveDebounce;
@@ -456,7 +457,15 @@ public partial class MainWindow : Window
         var result = await _binder.SendTextAsync(binding, message, scheduled, cancellationToken,
             () => !_isShuttingDown && _license.CanDispatch && room.Enabled && room.StopGeneration == stopGeneration &&
                 room.BindingValid is not false && string.IsNullOrWhiteSpace(room.PhotoPath) && ReferenceEquals(room.Binding,binding) && room.Message == message && (!scheduled || room.Running),
-            acceptInput: accept => _dispatchFence.TryAccept(dispatchGeneration, () => { lock (room) { return accept(); } })).ConfigureAwait(false);
+            acceptInput: accept => _dispatchFence.TryAccept(dispatchGeneration, () => { lock (room) { return accept(); } }),
+            onSubmitted: () =>
+            {
+                if (scheduled)
+                {
+                    ScheduleCalculator.NormalizeDailyCount(room, DateTimeOffset.Now);
+                    room.TodayCount++;
+                }
+            }).ConfigureAwait(false);
         lock(room)
         {
         if (result.Success)
@@ -466,7 +475,6 @@ public partial class MainWindow : Window
             room.FailureStreak = 0;
             if (scheduled)
             {
-                room.TodayCount++;
                 if (room.Running && room.StopGeneration == stopGeneration && !cancellationToken.IsCancellationRequested)
                 {
                     room.NextAt = ScheduleCalculator.ComputeNext(room, DateTimeOffset.Now);

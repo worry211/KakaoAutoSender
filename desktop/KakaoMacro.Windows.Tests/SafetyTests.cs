@@ -143,4 +143,24 @@ public sealed class SafetyTests
         Assert.Equal((ushort)0x10, newlineBatch[^1].VirtualKey);
         Assert.True(newlineBatch[^1].Up);
     }
+    [Fact]
+    public async Task AcceptedSubmitIsCountedBeforeStopCanSaveSettings()
+    {
+        using var stop = new CancellationTokenSource();
+        var api = new FakeApi();
+        var count = 0;
+        api.OnBatch = n => { if (n == 3) stop.Cancel(); };
+        var result = await new KakaoWindowBinder(api).SendTextAsync(Binding(), "hello", false, stop.Token, onSubmitted: () => count++);
+        Assert.True(result.Success);
+        Assert.True(stop.IsCancellationRequested);
+        Assert.Equal(1, count);
+    }
+    [Fact]
+    public async Task RejectedInputNeverIncrementsAcceptedSendCount()
+    {
+        var api = new FakeApi { Accept = false };
+        var count = 0;
+        await new KakaoWindowBinder(api).SendTextAsync(Binding(), "hello", false, CancellationToken.None, onSubmitted: () => count++);
+        Assert.Equal(0, count);
+    }
 }

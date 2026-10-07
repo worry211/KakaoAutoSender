@@ -54,7 +54,7 @@ internal sealed class KakaoWindowBinder
         catch { return (false, "카카오톡 연결을 확인하지 못했습니다. 다시 연결해 주세요."); }
     }
     public async Task<SendResult> SendTextAsync(KakaoBinding? binding, string message, bool scheduled,
-        CancellationToken cancellationToken, Func<bool>? canSend = null, Func<Func<bool>, bool>? acceptInput = null)
+        CancellationToken cancellationToken, Func<bool>? canSend = null, Func<Func<bool>, bool>? acceptInput = null, Action? onSubmitted = null)
     {
         if (string.IsNullOrWhiteSpace(message)) return new(false, "메시지가 비어 있습니다.", SendFailure.SendInputFailed);
         var initial = Validate(binding); if (!initial.Valid) return new(false, initial.Message, SendFailure.InvalidBinding);
@@ -76,7 +76,7 @@ internal sealed class KakaoWindowBinder
                     return new(false, "다른 창 또는 입력칸으로 이동해 전송을 중단했습니다.", SendFailure.FocusFailed);
                 return null;
             }
-            SendResult? Batch(IReadOnlyList<KeyStroke> keys)
+            SendResult? Batch(IReadOnlyList<KeyStroke> keys, bool submit = false)
             {
                 SendResult? failure = null;
                 var invoked = false;
@@ -84,7 +84,9 @@ internal sealed class KakaoWindowBinder
                 {
                     invoked = true;
                     failure = Guard();
-                    return failure is null && _api.SendKeys(keys);
+                    if (failure is not null || !_api.SendKeys(keys)) return false;
+                    if (submit) onSubmitted?.Invoke();
+                    return true;
                 }
                 var accepted = acceptInput is null ? Accept() : acceptInput(Accept);
                 if (failure is not null) return failure;
@@ -102,7 +104,7 @@ internal sealed class KakaoWindowBinder
                 if (result is not null) return result;
                 offset += length;
             }
-            var submit = Batch(new[] { Key(0x0D, false), Key(0x0D, true) }); if (submit is not null) return submit;
+            var submit = Batch(new[] { Key(0x0D, false), Key(0x0D, true) }, submit: true); if (submit is not null) return submit;
             // Enter was accepted: a later Stop must not erase the accepted send count.
             return new(true, "전송 완료");
         }

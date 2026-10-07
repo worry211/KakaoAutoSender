@@ -65,6 +65,13 @@ public partial class App : System.Windows.Application
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
+        // Closing cancels in-flight startup/activation/button awaits. Their expected
+        // cancellation must not open a crash dialog while the application is exiting.
+        if (e.Exception is OperationCanceledException && MainWindow is MainWindow window && window.IsShuttingDown)
+        {
+            e.Handled = true;
+            return;
+        }
         var path = CrashReporter.Write("dispatcher", e.Exception);
         try
         {
