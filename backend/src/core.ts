@@ -5,6 +5,10 @@ export interface Env {
   ADMIN_DISCORD_IDS: string;
   DISCORD_PUBLIC_KEY: string;
   DISCORD_APPLICATION_ID: string;
+  PC_SERVER_MODE?: "d1" | "pc" | "local";
+  PC_BOOTSTRAP_ENABLED?: string;
+  PC_BRIDGE_TOKEN?: string;
+  PC_RELAY?: DurableObjectNamespace;
 }
 export type Row = Record<string, any>;
 export class ApiError extends Error {

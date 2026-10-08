@@ -9,7 +9,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "register": "node scripts/register.mjs",
-    "lint": "prettier --check src test scripts"
+    "lint": "prettier --check src test scripts pc-server",
+    "pc:build": "node pc-server/build.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261004.1",
@@ -24,5 +25,8 @@
   "overrides": {
     "undici": "7.29.1",
     "sharp": "0.35.5"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
   }
 }

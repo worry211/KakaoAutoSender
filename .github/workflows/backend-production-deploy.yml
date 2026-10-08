@@ -12,6 +12,11 @@ on:
           - verify
           - deploy_worker
           - deploy_and_register
+      pc_bootstrap:
+        description: 'Temporarily allow protected, read-only PC migration bootstrap'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -49,6 +54,8 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PC_BRIDGE_TOKEN: ${{ secrets.PC_BRIDGE_TOKEN }}
+      PC_SERVER_MODE: ${{ vars.PC_SERVER_MODE || 'd1' }}
     steps:
       - name: Refuse non-main production deploys
         shell: bash
@@ -74,9 +81,21 @@ jobs:
       - name: Refuse outdated main revision
         shell: bash
         run: test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+      - name: Validate PC hosting mode
+        shell: bash
+        run: |
+          case "$PC_SERVER_MODE" in d1|pc) ;; *) echo 'Invalid PC_SERVER_MODE' >&2; exit 1;; esac
+          if [ "$PC_SERVER_MODE" = 'pc' ]; then
+            test -n "$PC_BRIDGE_TOKEN" || { echo 'Missing owner bridge secret' >&2; exit 1; }
+          fi
+      - name: Install protected owner bridge secret
+        if: env.PC_BRIDGE_TOKEN != ''
+        working-directory: backend
+        shell: bash
+        run: printf '%s' "$PC_BRIDGE_TOKEN" | npx wrangler secret put PC_BRIDGE_TOKEN
       - name: Deploy Worker
         working-directory: backend
-        run: npm run deploy -- --tag "${GITHUB_SHA}" --message "GitHub production ${GITHUB_SHA}"
+        run: npm run deploy -- --tag "${GITHUB_SHA}" --message "GitHub production ${GITHUB_SHA}" --var "PC_SERVER_MODE:${PC_SERVER_MODE}" --var "PC_BOOTSTRAP_ENABLED:${{ inputs.pc_bootstrap && 'true' || 'false' }}"
       - name: Smoke public client config and deployment provenance
         working-directory: backend
         run: node scripts/verify-production.mjs
