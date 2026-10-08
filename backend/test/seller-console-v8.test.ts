@@ -19,18 +19,19 @@ const activeLicense = {
 };
 
 describe("seller console v8 mobile operations UX", () => {
-  it("keeps the five highest-frequency seller actions in the first mobile row", () => {
+  it("keeps quick issue periods and customer support in the first mobile row", () => {
     const message = renderDiscordPanel({ kind: "license_help" });
     expect(message.embeds[0].title).toContain("판매자 콘솔");
     expect(labels(message.components[0])).toEqual([
+      "＋ 7일 발급",
       "＋ 30일 발급",
       "＋ 영구 발급",
       "고객 찾기",
       "오늘 처리할 일",
-      "판매 현황",
     ]);
     expect(labels(message.components[1])).toEqual(
       expect.arrayContaining([
+        "판매 현황",
         "기타 기간 발급",
         "7일 내 만료",
         "미사용 키",

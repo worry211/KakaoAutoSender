@@ -43,15 +43,17 @@ const modal = (customId: string, title: string, components: unknown[]) => ({
 });
 
 export function sellerModalFor(customId: string) {
-  const createPreset = customId.match(/^modal:create(?::(30d|permanent))?$/);
+  const createPreset = customId.match(/^modal:create(?::(7d|30d|permanent))?$/);
   if (createPreset) {
     const preset = createPreset[1] ?? "30d";
     const title =
       preset === "permanent"
         ? "영구 라이선스 발급"
-        : customId === "modal:create:30d"
-          ? "30일 라이선스 발급"
-          : "새 라이선스 발급";
+        : customId === "modal:create:7d"
+          ? "7일 라이선스 발급"
+          : customId === "modal:create:30d"
+            ? "30일 라이선스 발급"
+            : "새 라이선스 발급";
     return modal("form:create", title, [
       textInput("duration", "사용 기간", {
         placeholder: "7d / 30d / 90d / 180d / 365d / permanent",

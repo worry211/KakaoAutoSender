@@ -396,7 +396,7 @@ export function renderDiscordPanel(result: any, command?: Command) {
           fields: [
             {
               name: "① 새 판매",
-              value: "가장 많이 쓰는 **30일 / 영구 발급**을 바로 시작합니다.",
+              value: "**7일 / 30일 / 영구 발급**을 바로 시작합니다.",
               inline: true,
             },
             {
@@ -420,16 +420,17 @@ export function renderDiscordPanel(result: any, command?: Command) {
         {
           type: 1,
           components: [
+            button("＋ 7일 발급", "modal:create:7d", 3),
             button("＋ 30일 발급", "modal:create:30d", 3),
             button("＋ 영구 발급", "modal:create:permanent", 3),
             button("고객 찾기", "modal:search", 1),
             button("오늘 처리할 일", "nav:attention", 1),
-            button("판매 현황", "nav:stats", 2),
           ],
         },
         {
           type: 1,
           components: [
+            button("판매 현황", "nav:stats", 2),
             button("기타 기간 발급", "modal:create", 2),
             button("7일 내 만료", "nav:exp:7:1", 2),
             button("미사용 키", "nav:list:UNUSED:1", 2),
