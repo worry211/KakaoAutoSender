@@ -66,7 +66,48 @@ describe("Discord seller console v2", () => {
     expect(message.embeds[0].fields[0].value).not.toContain("영구");
     expect(message.components[0].components).toHaveLength(3);
     expect(message.components[0].components[2].label).toContain("다음");
+    const ids = message.components.flatMap((row: any) =>
+      row.components.map((item: any) => item.custom_id),
+    );
+    expect(new Set(ids).size).toBe(ids.length);
   });
+
+  it.each(["list", "expiring", "history"])(
+    "keeps first-page %s pagination IDs unique",
+    (action) => {
+      const result =
+        action === "history"
+          ? {
+              kind: "history",
+              license_id: "LIC-26faf17a-3175-4322-868e-fafa49ba8838",
+              events: [],
+              page: 1,
+              has_more: false,
+            }
+          : {
+              kind: action === "expiring" ? "expiring" : "license_list",
+              licenses: [],
+              days: 7,
+              page: 1,
+              has_more: false,
+            };
+      const panel = renderDiscordPanel(result, {
+        group: "license",
+        action,
+        params: {
+          days: 7,
+          page: 1,
+          "key-or-id": "LIC-26faf17a-3175-4322-868e-fafa49ba8838",
+        },
+      });
+      const buttons = panel.components.flatMap((row: any) => row.components);
+      const ids = buttons.map((item: any) => item.custom_id);
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(
+        buttons.find((item: any) => item.label === "◀ 이전")?.disabled,
+      ).toBe(true);
+    },
+  );
 
   it("renders seller help as a navigable operations console", () => {
     const message = renderDiscordPanel({ kind: "license_help" });
@@ -74,13 +115,43 @@ describe("Discord seller console v2", () => {
     const labels = message.components[0].components.map(
       (item: any) => item.label,
     );
+    expect(labels).toContain("＋ 7일 발급");
     expect(labels).toContain("＋ 30일 발급");
     expect(labels).toContain("＋ 영구 발급");
     expect(labels).toContain("고객 찾기");
-    expect(labels).toContain("판매 현황");
+    expect(
+      message.components[1].components.map((item: any) => item.label),
+    ).toContain("판매 현황");
+    for (const row of message.components)
+      expect(row.components.length).toBeLessThanOrEqual(5);
     expect(
       message.components[1].components.map((item: any) => item.label),
     ).toContain("7일 내 만료");
+  });
+
+  it("opens the seven-day preset and preserves it through modal submission", () => {
+    const home = renderDiscordPanel({ kind: "license_help" });
+    const shortcut = home.components
+      .flatMap((row: any) => row.components)
+      .find((item: any) => item.label === "＋ 7일 발급");
+    const modal = sellerModalFor(shortcut.custom_id)!;
+    expect(modal.type).toBe(9);
+    expect(modal.data.title).toBe("7일 라이선스 발급");
+    const submission = {
+      custom_id: modal.data.custom_id,
+      components: modal.data.components.map((row: any) => ({
+        components: row.components.map((item: any) => ({
+          type: item.type,
+          custom_id: item.custom_id,
+          value: item.value ?? "",
+        })),
+      })),
+    };
+    expect(commandFromSellerModal({ data: submission })).toEqual({
+      group: "license",
+      action: "create",
+      params: { duration: "7d", quantity: 1 },
+    });
   });
 
   it("renders newly issued keys as customer handoff cards", () => {
