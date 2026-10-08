@@ -66,7 +66,48 @@ describe("Discord seller console v2", () => {
     expect(message.embeds[0].fields[0].value).not.toContain("영구");
     expect(message.components[0].components).toHaveLength(3);
     expect(message.components[0].components[2].label).toContain("다음");
+    const ids = message.components.flatMap((row: any) =>
+      row.components.map((item: any) => item.custom_id),
+    );
+    expect(new Set(ids).size).toBe(ids.length);
   });
+
+  it.each(["list", "expiring", "history"])(
+    "keeps first-page %s pagination IDs unique",
+    (action) => {
+      const result =
+        action === "history"
+          ? {
+              kind: "history",
+              license_id: "LIC-26faf17a-3175-4322-868e-fafa49ba8838",
+              events: [],
+              page: 1,
+              has_more: false,
+            }
+          : {
+              kind: action === "expiring" ? "expiring" : "license_list",
+              licenses: [],
+              days: 7,
+              page: 1,
+              has_more: false,
+            };
+      const panel = renderDiscordPanel(result, {
+        group: "license",
+        action,
+        params: {
+          days: 7,
+          page: 1,
+          "key-or-id": "LIC-26faf17a-3175-4322-868e-fafa49ba8838",
+        },
+      });
+      const buttons = panel.components.flatMap((row: any) => row.components);
+      const ids = buttons.map((item: any) => item.custom_id);
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(
+        buttons.find((item: any) => item.label === "◀ 이전")?.disabled,
+      ).toBe(true);
+    },
+  );
 
   it("renders seller help as a navigable operations console", () => {
     const message = renderDiscordPanel({ kind: "license_help" });

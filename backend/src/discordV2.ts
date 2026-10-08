@@ -326,7 +326,12 @@ function pager(command: Command | undefined, result: any) {
     {
       type: 1,
       components: [
-        button("◀ 이전", prefix + prev, 2, page <= 1),
+        button(
+          "◀ 이전",
+          (page <= 1 ? "disabled:prev:" : "") + prefix + prev,
+          2,
+          page <= 1,
+        ),
         button("↻ 새로고침", prefix + page, 1),
         button("다음 ▶", prefix + next, 2, !result?.has_more),
       ],
