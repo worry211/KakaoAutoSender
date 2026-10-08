@@ -118,16 +118,27 @@ export class PcLicenseRelay {
       return;
     }
     const headers: Record<string, string> = {
-      "Content-Type": "application/json", "Cache-Control": "no-store",
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
     };
-    if (typeof value.request_id === "string" && /^REQ-[0-9a-f-]{36}$/.test(value.request_id))
+    if (
+      typeof value.request_id === "string" &&
+      /^REQ-[0-9a-f-]{36}$/.test(value.request_id)
+    )
       headers["X-Request-Id"] = value.request_id;
-    try { pending.resolve(
-      new Response([204, 205, 304].includes(value.status) ? null : value.body, {
-        status: value.status,
-        headers,
-      }),
-    ); } catch { pending.resolve(this.unavailable()); }
+    try {
+      pending.resolve(
+        new Response(
+          [204, 205, 304].includes(value.status) ? null : value.body,
+          {
+            status: value.status,
+            headers,
+          },
+        ),
+      );
+    } catch {
+      pending.resolve(this.unavailable());
+    }
   }
   webSocketClose(socket: WebSocket) {
     this.failSocket(socket);
