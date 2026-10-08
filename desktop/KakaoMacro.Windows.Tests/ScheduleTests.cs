@@ -25,4 +25,11 @@ public class ScheduleTests
         var local = new DateTimeOffset(new DateTime(2026,10,8,12,0,0), TimeZoneInfo.Local.GetUtcOffset(new DateTime(2026,10,8)));
         Assert.False(ScheduleCalculator.DailyLimitReached(room,local));Assert.Equal(0,room.TodayCount);
     }
+    [Fact] public void OversizedScheduleCannotHideAnInvalidTail()
+    {
+        var raw = "09:00" + new string(' ', 200) + "invalid";
+        var room = new RoomProfile { ScheduleKind = ScheduleKind.FixedTimes, DailyTimes = raw };
+        Assert.False(ScheduleCalculator.IsValid(room));
+        Assert.Equal(raw, ScheduleCalculator.CanonicalTimes(raw));
+    }
 }

@@ -9,6 +9,7 @@ internal static class ScheduleCalculator
     {
         if (room.ScheduleKind == ScheduleKind.Interval) return room.IntervalMinutes is >= 1 and <= 10080;
         if (room.ScheduleKind != ScheduleKind.FixedTimes) return false;
+        if ((room.DailyTimes ?? "").Length > 200) return false;
         var tokens = (room.DailyTimes ?? "").Split(new[] { ',', ';', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
         return tokens.Length > 0 && tokens.All(token => TimeOnly.TryParseExact(token.Trim(), "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out _));
     }
