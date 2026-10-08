@@ -1,4 +1,4 @@
-# KakaoMacro PC — Windows v1.6.4
+# KakaoMacro PC — Windows v1.6.5
 
 KakaoMacro PC is the Windows companion to the Android KakaoMacro product. It reuses the commercial entitlement service while using a Windows-only KakaoTalk desktop delivery adapter.
 
@@ -10,13 +10,17 @@ This client intentionally does **not** search for a room name and click the firs
 
 1. Open a KakaoTalk chat as its own window.
 2. Click the chat input area so the intended room owns keyboard focus.
-3. Press `Ctrl+Shift+F8` or use the in-app room-pairing action.
+3. Use the hotkey shown in the app (`Ctrl+Shift+F8`, falling back to F9/F10 when occupied), or use the in-app room-pairing action.
 4. KakaoMacro records and validates the exact KakaoTalk window/input identity.
 5. Every send revalidates the binding. If KakaoTalk restarts, the room window changes, or the input identity cannot be restored, dispatch fails closed and requires re-pairing.
 
 Two separate open-chat windows can therefore remain distinct even when their visible titles are identical. KakaoTalk chat-window sends use the actual input-control UI thread for focus restoration instead of assuming it matches the top-level KakaoTalk window thread.
 
-## v1.6.4 operations and reliability
+## v1.6.5 operations and reliability
+
+After KakaoTalk restarts, select the existing profile and use **이 방 다시 연결**. Click the intended live chat input during the countdown, then confirm the displayed profile and actual room title. Existing message/schedule/counts remain; sending stays stopped until explicitly started. Another profile's bound window cannot be selected as a duplicate target.
+
+Profiles with a saved photo remain blocked. **저장된 사진 설정 지우기** explicitly removes that setting after confirmation and keeps sending stopped; the next explicit start uses text only. Monitor/DPI changes re-fit the workspace, and room-action buttons wrap within the available width.
 
 - Windows 10/11 WPF client
 - persistent non-exportable P-256 Windows CNG installation identity
