@@ -1,6 +1,8 @@
 import { Env, ApiError, now, id, json, rate, config, metadata } from "./core";
 import { activate, entitlement, deactivate, recover } from "./license";
 import { discord } from "./discordV2";
+import { pcGateway } from "./pcGateway";
+export { PcLicenseRelay } from "./pcRelay";
 
 async function boundedBody(req: Request) {
   if (Number(req.headers.get("Content-Length") ?? 0) > 16384)
@@ -86,6 +88,11 @@ export default {
     ];
     let result = "OK";
     try {
+      const gateway = await pcGateway(req, env, boundedBody);
+      if (gateway) {
+        result = gateway.status >= 500 ? "SERVER_ERROR" : "PC_PROXY";
+        return gateway;
+      }
       const routes = [
         "/api/v1/activate",
         "/api/v1/session/refresh",
@@ -171,6 +178,7 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ) {
+    if (env.PC_SERVER_MODE === "pc") return;
     ctx.waitUntil(
       env.DB.batch(
         ["request_nonces", "rate_buckets", "interactions", "confirmations"].map(

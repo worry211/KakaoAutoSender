@@ -3,6 +3,18 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 workers_dev = true
 
+[vars]
+PC_SERVER_MODE = "d1"
+PC_BOOTSTRAP_ENABLED = "false"
+
+[[durable_objects.bindings]]
+name = "PC_RELAY"
+class_name = "PcLicenseRelay"
+
+[[migrations]]
+tag = "pc-relay-v1"
+new_sqlite_classes = ["PcLicenseRelay"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "kakaomacro-license"
