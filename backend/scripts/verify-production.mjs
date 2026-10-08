@@ -1,4 +1,51 @@
 import { pathToFileURL } from "node:url";
+import { createHash, generateKeyPairSync, randomUUID, sign } from "node:crypto";
+
+class AuthenticationProbeError extends Error {}
+
+// A fresh installation has no customer license. This exercises proof, rate-limit
+// and nonce writes without issuing, recovering or changing a customer session.
+export async function probeRecovery(origin) {
+  const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const publicKey = pair.publicKey
+    .export({ type: "spki", format: "der" })
+    .toString("base64");
+  const path = "/api/v1/session/recover";
+  const body = JSON.stringify({ app_version: 35, public_key: publicKey });
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const nonce = randomUUID().replaceAll("-", "");
+  const sha = (value) => createHash("sha256").update(value).digest("hex");
+  const canonical = `KM1\nPOST\n${path}\n${timestamp}\n${nonce}\n${sha(body)}\n${sha("")}`;
+  const signature = sign("sha256", Buffer.from(canonical), {
+    key: pair.privateKey,
+    dsaEncoding: "ieee-p1363",
+  }).toString("base64");
+  const response = await fetch(origin + path, {
+    method: "POST",
+    body,
+    signal: AbortSignal.timeout(10000),
+    headers: {
+      "Content-Type": "application/json",
+      "X-Install-Time": timestamp,
+      "X-Install-Nonce": nonce,
+      "X-Install-Signature": signature,
+    },
+  });
+  if (!response.ok)
+    throw new AuthenticationProbeError(
+      `Production authentication probe HTTP ${response.status}; config/provenance alone do not prove authentication availability`,
+    );
+  const result = await response.json();
+  if (
+    result.state !== "NOT_FOUND" ||
+    result.license_id !== "" ||
+    "access_token" in result ||
+    "refresh_token" in result
+  )
+    throw new AuthenticationProbeError(
+      "Production authentication probe did not reject the unregistered installation safely",
+    );
+}
 
 export function validateProduction(config, deployment, expected) {
   if (!/^[0-9a-f]{40}$/.test(expected))
@@ -45,8 +92,13 @@ export async function verifyProduction(expected, attempts = 8) {
       console.log(
         `Client config PASS · maintenance=${config.maintenance} kill_switch=${config.kill_switch} min=${config.min_version} latest=${config.latest_version}`,
       );
+      await probeRecovery(origin);
+      console.log(
+        "Authentication write path PASS · unregistered installation rejected without customer mutation",
+      );
       return;
     } catch (error) {
+      if (error instanceof AuthenticationProbeError) throw error;
       if (attempt === attempts - 1) throw error;
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }

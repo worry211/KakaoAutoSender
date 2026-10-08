@@ -214,9 +214,9 @@ export async function entitlement(
   if (expired) throw new ApiError(refresh ? "INVALID" : "ACCESS_EXPIRED", 401);
   if (!refresh) {
     await env.DB.prepare(
-      "UPDATE licenses SET last_seen_at=? WHERE license_id=?",
+      "UPDATE licenses SET last_seen_at=? WHERE license_id=? AND (last_seen_at IS NULL OR last_seen_at<=?)",
     )
-      .bind(now(), s.license_id)
+      .bind(now(), s.license_id, now() - 60)
       .run();
     return clientMetadata(c, s, "ACTIVE", platform, b.app_version);
   }
@@ -283,7 +283,7 @@ export async function recover(
    AND status='ACTIVE' AND (expires_at IS NULL OR expires_at>?) AND public_key=?`,
     ).bind(requestId, t, l!.license_id, l!.generation, t, b.public_key),
     env.DB.prepare(
-      `UPDATE sessions SET revoked=1 WHERE license_id=? AND EXISTS(SELECT 1 FROM licenses WHERE license_id=? AND last_request=?)`,
+      `UPDATE sessions SET revoked=1 WHERE license_id=? AND revoked=0 AND EXISTS(SELECT 1 FROM licenses WHERE license_id=? AND last_request=?)`,
     ).bind(l!.license_id, l!.license_id, requestId),
     env.DB.prepare(
       `INSERT INTO sessions SELECT ?,license_id,generation,?,?,?,?,0,? FROM licenses WHERE license_id=? AND last_request=?`,
