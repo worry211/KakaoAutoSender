@@ -18,6 +18,8 @@ public partial class MainWindow
 
     private WpfTabControl? _qualityWorkspaceTabs;
     private bool _qualitySelectionHooked;
+    private bool _workspaceSizingHooked;
+    private string? _workspaceScreen;
 
     internal void PrepareCommercialWorkspace()
     {
@@ -29,6 +31,7 @@ public partial class MainWindow
         var dpi = VisualTreeHelper.GetDpi(this);
         var handle = new WindowInteropHelper(this).Handle;
         var screen = handle != IntPtr.Zero ? WinFormsScreen.FromHandle(handle) : WinFormsScreen.PrimaryScreen;
+        _workspaceScreen = screen?.DeviceName;
 
         double workWidth;
         double workHeight;
@@ -63,8 +66,21 @@ public partial class MainWindow
 
         MinWidth = Math.Min(CommercialDesignMinWidth * scale, usableWidth);
         MinHeight = Math.Min(CommercialDesignMinHeight * scale, usableHeight);
+        MaxWidth = usableWidth;
+        MaxHeight = usableHeight;
         Width = Math.Max(MinWidth, Math.Min(CommercialDesignWidth * scale, usableWidth));
         Height = Math.Max(MinHeight, Math.Min(CommercialDesignHeight * scale, usableHeight));
+        if (!_workspaceSizingHooked)
+        {
+            _workspaceSizingHooked = true;
+            DpiChanged += (_, _) => Dispatcher.BeginInvoke(PrepareCommercialWorkspace);
+            LocationChanged += (_, _) =>
+            {
+                if (WindowState == WindowState.Minimized || handle == IntPtr.Zero) return;
+                if (WinFormsScreen.FromHandle(handle).DeviceName != _workspaceScreen)
+                    Dispatcher.BeginInvoke(PrepareCommercialWorkspace);
+            };
+        }
     }
 
     protected override void OnContentRendered(EventArgs e)

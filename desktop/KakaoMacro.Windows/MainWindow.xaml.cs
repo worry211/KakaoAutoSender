@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     private const int WmHotkey = 0x0312;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
+    private const uint ModNoRepeat = 0x4000;
     private const uint VkF8 = 0x77;
     private const int MaxLogLines = 250;
     private static readonly TimeSpan SchedulerResolution = TimeSpan.FromSeconds(1);
@@ -53,6 +54,7 @@ public partial class MainWindow : Window
     private bool _loadingSingleEditor;
     private bool _editorDirty;
     private Guid? _editingRoomId;
+    private bool _pairingInProgress;
 
     public MainWindow()
     {
@@ -105,10 +107,17 @@ public partial class MainWindow : Window
         base.OnSourceInitialized(e);
         _windowHandle = new WindowInteropHelper(this).Handle;
         HwndSource.FromHwnd(_windowHandle)?.AddHook(WndProc);
-        if (!RegisterHotKey(_windowHandle, HotkeyId, ModControl | ModShift, VkF8))
+        var registeredKey = new[] { VkF8, VkF8 + 1, VkF8 + 2 }.FirstOrDefault(key =>
+            RegisterHotKey(_windowHandle, HotkeyId, ModControl | ModShift | ModNoRepeat, key));
+        if (registeredKey == 0)
         {
-            PairingStatusText.Text = "Ctrl+Shift+F8 등록 실패 · ‘현재 방 연결’ 버튼을 사용하세요.";
+            PairingStatusText.Text = "방 연결 단축키 사용 중 · ‘+ 방 연결’ 버튼을 사용하세요.";
             AppendLog("방 연결 단축키 등록 실패");
+        }
+        else
+        {
+            PairingStatusText.Text = $"카카오톡 입력칸 클릭 후 Ctrl+Shift+F{8 + registeredKey - VkF8}";
+            if (registeredKey != VkF8) AppendLog("기본 방 연결 단축키 사용 중 · 대체 단축키 등록");
         }
     }
 
@@ -131,7 +140,7 @@ public partial class MainWindow : Window
         if (msg == WmHotkey && wParam.ToInt32() == HotkeyId)
         {
             handled = true;
-            CaptureCurrentKakaoRoom();
+            if (!_pairingInProgress && !_isShuttingDown) CaptureCurrentKakaoRoom();
         }
         return IntPtr.Zero;
     }
@@ -151,17 +160,36 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void PairCurrent_Click(object sender, RoutedEventArgs e)
+    private async void PairCurrent_Click(object sender, RoutedEventArgs e) => await BeginPairingAsync(null);
+
+    private async void ReconnectSelected_Click(object sender, RoutedEventArgs e)
     {
-        PairingStatusText.Text = "2.5초 안에 카카오톡 채팅방 입력칸을 클릭하세요…";
-        AppendLog("버튼 방 연결 모드 시작");
-        WindowState = WindowState.Minimized;
-        await Task.Delay(2500);
-        CaptureCurrentKakaoRoom();
+        var selected = SelectedRooms();
+        if (selected.Count != 1) { MessageBox.Show("다시 연결할 방 하나를 선택하세요.", "KakaoMacro PC"); return; }
+        if (_pairingInProgress || !SaveEditorToSelected(true)) return;
+        StopRooms(selected, false, "다시 연결 준비");
+        await BeginPairingAsync(selected[0].Id);
     }
 
-    private void CaptureCurrentKakaoRoom()
+    private async Task BeginPairingAsync(Guid? reconnectId)
     {
+        if (_pairingInProgress || _isShuttingDown) return;
+        _pairingInProgress = true;
+        try
+        {
+            PairingStatusText.Text = "2.5초 안에 연결할 카카오톡 방의 입력칸을 클릭하세요…";
+            AppendLog(reconnectId is null ? "버튼 방 연결 모드 시작" : "선택 프로필 다시 연결 준비");
+            WindowState = WindowState.Minimized;
+            await Task.Delay(2500, _shutdown.Token);
+            if (!_isShuttingDown) CaptureCurrentKakaoRoom(reconnectId);
+        }
+        catch (OperationCanceledException) { }
+        finally { _pairingInProgress = false; }
+    }
+
+    private void CaptureCurrentKakaoRoom(Guid? reconnectId = null)
+    {
+        if (_isShuttingDown) return;
         var capture = _binder.CaptureFocusedRoom();
         if (!capture.Success || capture.Binding is null)
         {
@@ -172,7 +200,29 @@ public partial class MainWindow : Window
         }
 
         var binding = capture.Binding;
-        var existing = _rooms.FirstOrDefault(r => BindingIdentity.SameWindow(r.Binding, binding));
+        RoomProfile? existing;
+        if (reconnectId is Guid targetId)
+        {
+            existing = _rooms.FirstOrDefault(room => room.Id == targetId);
+            if (existing is null) { PairingStatusText.Text = "다시 연결할 프로필이 없어 취소했습니다."; ShowFromTray(); return; }
+            ShowFromTray();
+            var confirmation = MessageBox.Show(
+                $"기존 설정을 유지하고 아래 방으로 다시 연결할까요?\n\n프로필: {existing.DisplayName} (방 구분 {existing.RoomCode})\n새 카카오톡 방: {binding.WindowTitle}\n\n이후 전송 대상이 이 방으로 바뀝니다. 메시지·예약·전송 횟수는 유지하며 자동전송은 정지 상태입니다.",
+                "KakaoMacro PC 방 다시 연결", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (confirmation != MessageBoxResult.Yes) { PairingStatusText.Text = "다시 연결 취소 · 기존 설정 유지 · 전송 정지"; return; }
+            if (_isShuttingDown || !_rooms.Contains(existing)) return;
+            var validation = _binder.Validate(binding);
+            if (!validation.Valid) { PairingStatusText.Text = validation.Message; return; }
+            if (!RoomRecovery.TryRebind(existing, binding, _rooms))
+            {
+                PairingStatusText.Text = "다른 프로필에 이미 연결된 방입니다. 중복 전송을 막기 위해 연결하지 않았습니다.";
+                return;
+            }
+            BoundRoomText.Text = $"카카오톡 방 연결됨 · {binding.WindowTitle}";
+        }
+        else
+        {
+        existing = _rooms.FirstOrDefault(r => BindingIdentity.SameWindow(r.Binding, binding));
         if (existing is null)
         {
             existing = new RoomProfile
@@ -186,10 +236,16 @@ public partial class MainWindow : Window
         else
         {
             var oldTitle = existing.Binding?.WindowTitle ?? "";
-            existing.Binding = binding;
+            if (!RoomRecovery.TryRebind(existing, binding, _rooms))
+            {
+                PairingStatusText.Text = "이미 다른 프로필에 연결된 방입니다.";
+                ShowFromTray();
+                return;
+            }
             if (string.Equals(existing.DisplayName, oldTitle, StringComparison.Ordinal))
                 existing.DisplayName = binding.WindowTitle;
-            existing.LastStatus = "방 연결 갱신 완료";
+            existing.LastStatus = "방 연결 갱신 완료 · 직접 시작 필요";
+        }
         }
         existing.BindingValid = true;
         existing.BindingHealthMessage = "연결 정상";
@@ -201,6 +257,28 @@ public partial class MainWindow : Window
         AppendLog($"방 연결 완료 · 프로필 {ShortId(existing.Id)} · 실제 제목 길이 {binding.WindowTitle.Length}");
         ShowFromTray();
         RefreshRoomUi();
+    }
+
+    private void ClearPhoto_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = SelectedRooms();
+        if (selected.Count != 1 || string.IsNullOrWhiteSpace(selected[0].PhotoPath)) return;
+        var room = selected[0];
+        if (!SaveEditorToSelected(true)) return;
+        if (MessageBox.Show("이 방의 저장된 사진 설정을 제거할까요?\n\n메시지와 일정은 유지하고 전송은 중지합니다. 사진 없이 텍스트만 보내려면 이후 직접 시작하세요.",
+            "KakaoMacro PC 사진 설정 제거", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        RoomRecovery.ClearPhoto(room);
+        UpdatePhotoConfiguration(room);
+        QueueSaveSettings();
+        RefreshRoomUi();
+        AppendLog($"프로필 {ShortId(room.Id)} 사진 설정 제거 · 전송 정지");
+    }
+
+    private void UpdatePhotoConfiguration(RoomProfile? room)
+    {
+        var hasPhoto = !string.IsNullOrWhiteSpace(room?.PhotoPath);
+        ClearPhotoButton.Visibility = hasPhoto ? Visibility.Visible : Visibility.Collapsed;
+        PhotoConfigurationText.Text = hasPhoto ? "저장된 사진 설정 있음 · 이 방의 전체 전송이 차단됩니다." : "PC 사진 전송은 아직 지원하지 않습니다. 텍스트 전송만 사용할 수 있습니다.";
     }
 
     private async void Activate_Click(object sender, RoutedEventArgs e)
@@ -590,6 +668,7 @@ public partial class MainWindow : Window
         var selected = SelectedRooms();
         if (selected.Count != 1)
         {
+            UpdatePhotoConfiguration(null);
             if (showErrors) MessageBox.Show("개별 설정은 방 하나만 선택했을 때 수정할 수 있습니다.");
             return false;
         }
@@ -654,6 +733,7 @@ public partial class MainWindow : Window
             BoundRoomText.Text = selected.Count == 0
                 ? "방 하나를 선택하면 세부 설정을 편집할 수 있습니다."
                 : $"{selected.Count}개 방 선택됨 · 일괄 편집 탭을 사용하세요.";
+            UpdatePhotoConfiguration(null);
             SetSingleEditorEnabled(false);
             _editingRoomId = null;
             _editorDirty = false;
@@ -661,6 +741,7 @@ public partial class MainWindow : Window
         }
 
         var room = selected[0];
+        UpdatePhotoConfiguration(room);
         SetSingleEditorEnabled(true);
         _loadingSingleEditor = true;
         DisplayNameBox.Text = room.DisplayName;
@@ -1007,14 +1088,14 @@ public partial class MainWindow : Window
         var results = await Task.Run(() => snapshot.Select(item =>
         {
             var validation = _binder.Validate(item.Binding);
-            return (item.Id, validation.Valid, validation.Message);
+            return (item.Id, item.Binding, validation.Valid, validation.Message);
         }).ToList(), _shutdown.Token);
 
         foreach (var result in results)
         {
             var room = _rooms.FirstOrDefault(candidate => candidate.Id == result.Id);
             if (room is null) continue;
-            ApplyBindingValidation(room, result.Valid, result.Message, true);
+            RoomRecovery.TryApplyValidation(room, result.Binding, result.Valid, result.Message);
         }
         RefreshRoomUi();
         AppendLog($"{label} 연결 상태 확인 완료");
@@ -1042,7 +1123,7 @@ public partial class MainWindow : Window
         var results = await Task.Run(() => snapshot.Select(item =>
         {
             var validation = _binder.Validate(item.Binding);
-            return (item.Id, validation.Valid, validation.Message);
+            return (item.Id, item.Binding, validation.Valid, validation.Message);
         }).ToList(), cancellationToken);
 
         await Dispatcher.InvokeAsync(() =>
@@ -1051,25 +1132,13 @@ public partial class MainWindow : Window
             foreach (var result in results)
             {
                 var room = _rooms.FirstOrDefault(candidate => candidate.Id == result.Id);
-                if (room is null) continue;
+                if (room is null || !ReferenceEquals(room.Binding, result.Binding)) continue;
                 if (!result.Valid && room.Running) stopped++;
-                ApplyBindingValidation(room, result.Valid, result.Message, true);
+                RoomRecovery.TryApplyValidation(room, result.Binding, result.Valid, result.Message);
             }
             if (stopped > 0) AppendLog($"연결 이상 감지 · 실행 중 {stopped}개 방 자동 중지");
             RefreshRoomUi();
         });
-    }
-
-    private static void ApplyBindingValidation(RoomProfile room, bool valid, string message, bool stopOnFailure)
-    {
-        room.BindingValid = valid;
-        room.BindingHealthMessage = message;
-        if (!valid && stopOnFailure && room.Running)
-        {
-            room.Running = false;
-            room.NextAt = null;
-            room.LastStatus = message + " · 자동 중지";
-        }
     }
 
     private void RemoveSelected_Click(object sender, RoutedEventArgs e)

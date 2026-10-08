@@ -9,10 +9,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>KakaoMacro.Windows</AssemblyName>
     <RootNamespace>KakaoMacro.Windows</RootNamespace>
-    <Version>1.6.4</Version>
-    <AssemblyVersion>1.6.4.0</AssemblyVersion>
-    <FileVersion>1.6.4.0</FileVersion>
-    <InformationalVersion>1.6.4</InformationalVersion>
+    <Version>1.6.5</Version>
+    <AssemblyVersion>1.6.5.0</AssemblyVersion>
+    <FileVersion>1.6.5.0</FileVersion>
+    <InformationalVersion>1.6.5</InformationalVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x64</Platforms>
   </PropertyGroup>
