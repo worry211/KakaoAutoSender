@@ -537,6 +537,73 @@ describe("sessions, request proof and operations", () => {
     expect(r.state).toBe("ACTIVE");
     expect((await heartbeat(a)).state).toBe("DEVICE_MISMATCH");
   });
+  it("recovery does not rewrite previously revoked sessions", async () => {
+    const a = await active();
+    const body = { public_key: a.device.public_key, app_version: 20 };
+    const first = await call("/api/v1/session/recover", body, a.device);
+    expect(first.state).toBe("ACTIVE");
+    await env.DB.exec(
+      "CREATE TRIGGER reject_redundant_revoke BEFORE UPDATE OF revoked ON sessions WHEN OLD.revoked=1 BEGIN SELECT RAISE(ABORT,'redundant revoked-session write'); END",
+    );
+    try {
+      const next = await call("/api/v1/session/recover", body, a.device);
+      expect(next.state).toBe("ACTIVE");
+      expect(
+        (
+          await call(
+            "/api/v1/heartbeat",
+            { app_version: 20 },
+            a.device,
+            first.access_token,
+          )
+        ).state,
+      ).toBe("DEVICE_MISMATCH");
+      expect(
+        (
+          await call(
+            "/api/v1/heartbeat",
+            { app_version: 20 },
+            a.device,
+            next.access_token,
+          )
+        ).state,
+      ).toBe("ACTIVE");
+    } finally {
+      await env.DB.exec("DROP TRIGGER reject_redundant_revoke");
+    }
+  });
+  it("repeated heartbeats validate authority without rewriting recent last-seen time", async () => {
+    const a = await active();
+    await env.DB.prepare(
+      "UPDATE licenses SET last_seen_at=? WHERE license_id=?",
+    )
+      .bind(now(), a.l.license_id)
+      .run();
+    await env.DB.exec(
+      "CREATE TRIGGER reject_recent_seen BEFORE UPDATE OF last_seen_at ON licenses WHEN OLD.last_seen_at>unixepoch()-60 BEGIN SELECT RAISE(ABORT,'redundant last-seen write'); END",
+    );
+    try {
+      expect((await heartbeat(a)).state).toBe("ACTIVE");
+      expect((await heartbeat(a)).state).toBe("ACTIVE");
+      await env.DB.exec("DROP TRIGGER reject_recent_seen");
+      await env.DB.prepare(
+        "UPDATE licenses SET last_seen_at=? WHERE license_id=?",
+      )
+        .bind(now() - 61, a.l.license_id)
+        .run();
+      expect((await heartbeat(a)).state).toBe("ACTIVE");
+      const row = await env.DB.prepare(
+        "SELECT last_seen_at FROM licenses WHERE license_id=?",
+      )
+        .bind(a.l.license_id)
+        .first<any>();
+      expect(row.last_seen_at).toBeGreaterThanOrEqual(now() - 2);
+      await mutate("revoke", a.l.license_id);
+      expect((await heartbeat(a)).state).toBe("REVOKED");
+    } finally {
+      await env.DB.exec("DROP TRIGGER IF EXISTS reject_recent_seen");
+    }
+  });
   it("expired access asks for refresh", async () => {
     const a = await active();
     await env.DB.prepare(
