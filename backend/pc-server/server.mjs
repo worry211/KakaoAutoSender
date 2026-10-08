@@ -95,8 +95,16 @@ export async function startServer(dataDir, bundlePath, sourceSha, port = 9783) {
     db.close();
     throw new Error("license database corrupted; restore a verified backup");
   }
-  const worker = (await import(pathToFileURL(resolve(bundlePath)).href))
-    .default;
+  let worker;
+  try {
+    worker = (await import(pathToFileURL(resolve(bundlePath)).href)).default;
+    if (typeof worker?.fetch !== "function")
+      throw new Error("invalid worker bundle");
+  } catch (error) {
+    statusServer.close();
+    db.close();
+    throw error;
+  }
   const env = { ...secrets, DB: db, PC_SERVER_MODE: "local" };
   const ctx = {
     waitUntil: (promise) =>
@@ -117,7 +125,13 @@ export async function startServer(dataDir, bundlePath, sourceSha, port = 9783) {
     await db.backup(join(directory, `licenses-${stamp}.sqlite`));
     state.last_backup = new Date().toISOString();
   }
-  await backupDatabase();
+  try {
+    await backupDatabase();
+  } catch (error) {
+    statusServer.close();
+    db.close();
+    throw error;
+  }
   const backupTimer = setInterval(
     () =>
       backupDatabase().catch(() => {
@@ -235,15 +249,19 @@ export async function startServer(dataDir, bundlePath, sourceSha, port = 9783) {
     socket.send("ping");
   }, 30000);
   const cleanupTimer = setInterval(() => {
-    for (const table of [
-      "request_nonces",
-      "rate_buckets",
-      "interactions",
-      "confirmations",
-    ])
-      db.native
-        .prepare(`DELETE FROM ${table} WHERE expires_at<?`)
-        .run(Math.floor(Date.now() / 1000));
+    try {
+      for (const table of [
+        "request_nonces",
+        "rate_buckets",
+        "interactions",
+        "confirmations",
+      ])
+        db.native
+          .prepare(`DELETE FROM ${table} WHERE expires_at<?`)
+          .run(Math.floor(Date.now() / 1000));
+    } catch {
+      state.error = "DATABASE_CLEANUP";
+    }
   }, 3600000);
   connect();
   writeFileSync(join(root, "runtime.pid"), String(process.pid));
