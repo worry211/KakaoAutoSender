@@ -27,9 +27,11 @@ final class LicenseManager {
   private static final java.util.concurrent.locks.ReentrantLock REQUEST_LOCK =
       new java.util.concurrent.locks.ReentrantLock();
   private static final ThreadLocal<Long> DEADLINE = new ThreadLocal<>();
-  private static final long FOREGROUND_DEADLINE_MS = 12_000L;
-  private static final int CONNECT_TIMEOUT_MS = 3_000;
-  private static final int READ_TIMEOUT_MS = 3_500;
+  // Mobile TLS and the owner-PC relay can exceed the former 3.5-second read window.
+  // Recovery still shares a bounded overall budget; entitlement grace is unchanged.
+  private static final long FOREGROUND_DEADLINE_MS = 25_000L;
+  private static final int CONNECT_TIMEOUT_MS = 5_000;
+  private static final int READ_TIMEOUT_MS = 8_000;
 
   interface Callback {
     void done(Verification v);

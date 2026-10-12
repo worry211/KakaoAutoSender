@@ -94,7 +94,7 @@ async function gateway(req) {
     ...(req.method === "POST" ? { body: await req.text() } : {}),
   });
 }
-async function bridge(db, reply = true) {
+async function bridge(db, reply = true, delayMs = 0) {
   const response = await mf.dispatchFetch(
     "https://license.test/internal/pc/connect",
     {
@@ -109,6 +109,7 @@ async function bridge(db, reply = true) {
     if (!reply) return;
     const envelope = JSON.parse(event.data);
     if (envelope.type !== "request") return;
+    if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
     const r = envelope.request;
     const result = await direct(
       new Request("https://license.test" + r.path, {
@@ -362,13 +363,21 @@ describe("PC-owned storage", () => {
         .count,
     ).toBe(1);
   });
+  it("accepts a delayed PC response beyond the former 2.5-second limit", async () => {
+    await bridge(database(), true, 3000);
+    const response = await gateway(
+      new Request("https://license.test/api/v1/client-config"),
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()).state).toBe("CONFIG");
+  }, 8000);
   it("times out silent PC connections without granting entitlement", async () => {
     await bridge(database(), false);
     const response = await gateway(
       new Request("https://license.test/api/v1/client-config"),
     );
     expect(response.status).toBe(503);
-  });
+  }, 8000);
   it("rejects oversized or malformed UTF-8 requests before forwarding to the PC", async () => {
     const tooBig = await mf.dispatchFetch(
       "https://license.test/api/v1/activate",
