@@ -71,7 +71,7 @@ export class PcLicenseRelay {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         resolve(this.unavailable());
-      }, 2500);
+      }, 5000);
       this.pending.set(id, { socket, timer, resolve });
       try {
         socket.send(JSON.stringify({ type: "request", id, request }));
