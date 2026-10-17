@@ -1,0 +1,1 @@
+RC11 scope: fix real 380x640 VoiceRoom footer crop false-negative and add exact-caption speaker-request disable/readback. No platform/security/authentication bypass. Device acceptance remains required.
