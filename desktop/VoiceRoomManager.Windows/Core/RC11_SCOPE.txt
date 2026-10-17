@@ -1,0 +1,1 @@
+Targeted RC11 only: footer proof + speaker request disable flow. Existing RC10 participation/focus/lifecycle behavior remains unchanged.
