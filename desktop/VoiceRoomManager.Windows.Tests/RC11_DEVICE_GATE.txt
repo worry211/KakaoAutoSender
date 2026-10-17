@@ -1,0 +1,1 @@
+Device gate remains: fresh create, ACTIVE, both audio muted, request disable confirmation/readback, second-account request, long-run lifecycle.
