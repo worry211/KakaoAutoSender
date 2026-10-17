@@ -1,1 +1,0 @@
-No CAPTCHA, authentication, security, account-limit, or platform-limit bypass is added by RC11.
