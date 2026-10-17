@@ -1,0 +1,1 @@
+Expected: a visible exact VoiceRoom must not fail solely because the old 65px footer crop clipped the control row. Speaker requests are disabled only through exact observed list/confirmation/readback captions.
