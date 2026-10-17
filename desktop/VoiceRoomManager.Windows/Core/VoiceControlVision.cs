@@ -7,7 +7,7 @@ internal static class VoiceControlVision
 {
     internal enum AudioState { Unknown, Enabled, Muted }
     internal sealed record Button(double X, double Y, double Diameter);
-    internal sealed record Layout(Button Microphone, Button Speaker, Button Exit, AudioState MicState, AudioState SpeakerState, bool MicEnabledIcon = false, bool SpeakerEnabledIcon = false);
+    internal sealed record Layout(Button Microphone, Button Speaker, Button Exit, AudioState MicState, AudioState SpeakerState, bool MicEnabledIcon = false, bool SpeakerEnabledIcon = false, Button? Hand = null);
     private static readonly Dictionary<string, bool[]> Masks = new();
     private static readonly object Gate = new();
     private static readonly (int X, int Y)[] Neighbors = [(-1, 0), (1, 0), (0, -1), (0, 1)];
@@ -81,7 +81,7 @@ internal static class VoiceControlVision
         if (Score(image, controls[0], "heart", false) > .12 || Score(image, controls[3], "hand", false) > .12 || Score(image, controls[4], "exit", false) > .12) return null;
         diagnostic += $" audio={State(image, controls[1], "microphone")},{State(image, controls[2], "speaker")} muteGlyphs={Score(image, controls[1], "microphone", true):0.000},{Score(image, controls[2], "speaker", true):0.000}";
         return new(controls[1], controls[2], controls[4], State(image, controls[1], "microphone"), State(image, controls[2], "speaker"),
-            Score(image, controls[1], "microphone-enabled", false) <= .08, Score(image, controls[2], "speaker-enabled", false) <= .08);
+            Score(image, controls[1], "microphone-enabled", false) <= .08, Score(image, controls[2], "speaker-enabled", false) <= .08, controls[3]);
     }
 
     private static AudioState State(PixelFrame image, Button button, string kind)

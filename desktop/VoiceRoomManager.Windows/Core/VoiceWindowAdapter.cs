@@ -8,6 +8,7 @@ internal static class VoiceWindowAdapter
 
     internal static bool TitleMatches(string title, string room) => !string.IsNullOrWhiteSpace(room) && title.Trim() == "보이스룸: " + room.Trim();
     internal static bool Participants(IEnumerable<string> lines) => lines.Any(t => Regex.IsMatch(t, @"(?<!\d)[1-9]\d*\s*명\s*참여\s*중"));
+    internal static int FooterCaptureHeight(int width) => Math.Clamp((int)Math.Round(width * .31), 96, 280);
 
     internal static bool HasUnresolvedWindow() => AutomationOperation.Current is { HasRoomProof: true } op
         && KakaoSurfaceLocator.VisibleTopLevels().Any(s => TitleMatches(s.Title, op.Room.Title)
@@ -107,7 +108,11 @@ internal static class VoiceWindowAdapter
 
     private static Observation? ReadControlsOnce(KakaoSurfaceLocator.Surface surface)
     {
-        var footerHeight = Math.Clamp((int)Math.Round(surface.Rect.Width * .155), 65, 220);
+        // Current 380x640 Kakao VoiceRoom places the 42px control row roughly 55-80px
+        // above the bottom edge. The old 65px crop clipped the top of the circles and
+        // produced footerControls=0 even though the dedicated VoiceRoom was visible.
+        // Capture a DPI-scaled lower band while keeping the vision model's 280px cap.
+        var footerHeight = FooterCaptureHeight(surface.Rect.Width);
         var footer = new KakaoSurfaceLocator.Bounds(surface.Rect.Left, surface.Rect.Bottom - footerHeight, surface.Rect.Right, surface.Rect.Bottom);
         // Hide hover glow/tooltips before state readback; never click this neutral point.
         if (!NativeInput.Hover(surface.Hwnd, surface.Rect.Left + surface.Rect.Width * 3 / 4, surface.Rect.Top + surface.Rect.Height * 2 / 3)) return null;
@@ -152,8 +157,23 @@ internal static class VoiceWindowAdapter
         AutomationOperation.Pause(100);
         var final = Observe(false);
         var safe = final is not null && final.Controls.MicState == VoiceControlVision.AudioState.Muted && final.Controls.SpeakerState == VoiceControlVision.AudioState.Muted;
-        return new(safe, safe ? prefix + " · 전용 창 활성/마이크/스피커 2회 재확인" : "보이스룸 오디오 최종 재확인 실패",
-            Active: final is not null, MicMuted: safe, SpeakerMuted: safe, AudioRepaired: repaired, VerificationPending: !safe);
+        SpeakerRequestGuard.Outcome? request = null;
+        // Do the visual request-policy check during bootstrap/health checks, not on every
+        // 5-second runtime pass. This prevents needless panel churn while still restoring
+        // the policy on startup and each scheduled health check.
+        if (safe && final is not null && !prefix.StartsWith("런타임", StringComparison.Ordinal))
+        {
+            request = SpeakerRequestGuard.TryDisable(final);
+            if (request.VerificationPending) OperationLog.Write(AutomationOperation.Current!.Room, "SPEAKER_REQUEST_PENDING", request.Diagnostic);
+            if (!KakaoSurfaceLocator.IsForeground(final.Host))
+            { KakaoSurfaceLocator.Activate(final.Host); AutomationOperation.Pause(80); }
+        }
+        var status = safe ? prefix + " · 전용 창 활성/마이크/스피커 2회 재확인" : "보이스룸 오디오 최종 재확인 실패";
+        if (request?.Disabled == true) status += request.Changed ? " · 스피커 요청 자동 비활성화 확인" : " · 스피커 요청 비활성 상태 확인";
+        else if (request?.VerificationPending == true) status += " · 스피커 요청 상태 재확인 대기";
+        return new(safe, status,
+            Active: final is not null, MicMuted: safe, SpeakerMuted: safe, RequestToggleDisabled: request?.Changed == true,
+            AudioRepaired: repaired, VerificationPending: !safe);
         KakaoPcAutomation.Result Unknown()
         {
             AutomationOperation.Check(); // Reclassify a concurrent switch to another app as focus deferral.
