@@ -32,7 +32,8 @@ public sealed class KakaoPcAutomation
         bool BackgroundDeferred = false,
         bool Cancelled = false,
         bool VerificationPending = false,
-        bool WaitingForCapacity = false);
+        bool WaitingForCapacity = false,
+        bool? RequestsBlocked = null);
 
     public Result EnsureKakaoRunning()
     {

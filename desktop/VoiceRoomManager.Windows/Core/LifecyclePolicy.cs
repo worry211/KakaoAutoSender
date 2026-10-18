@@ -23,6 +23,7 @@ public static class LifecyclePolicy
         foreach (var room in state.Rooms)
         {
             room.LiveVerified = room.MicMuted = room.SpeakerMuted = false;
+            room.SpeakerRequestsBlocked = null;
             if (room.StartedAt > now) room.StartedAt = null;
             if (state.ManagerActive && room.Enabled) { room.NextCheckAt = now; room.Status = "BOOTSTRAP_PENDING"; }
             else if (room.Status is "ACTIVE" or "ACTIVE_UNKNOWN_START" or "BOOTSTRAPPING" or "BOOTSTRAP_PENDING" or "WAITING_UNLOCK")
@@ -40,6 +41,7 @@ public static class LifecyclePolicy
         }
         room.BackgroundDeferred = false;
         room.LastDiagnostic = result.Status;
+        room.SpeakerRequestsBlocked = null;
         if (result.WaitingForCapacity)
         {
             room.LiveVerified = room.MicMuted = room.SpeakerMuted = false;
@@ -72,6 +74,7 @@ public static class LifecyclePolicy
             return;
         }
         room.LiveVerified = result.Active;
+        room.SpeakerRequestsBlocked = result.Active ? result.RequestsBlocked : null;
         room.MicMuted = result.Active && result.MicMuted;
         room.SpeakerMuted = result.Active && result.SpeakerMuted;
         if (result.Active)

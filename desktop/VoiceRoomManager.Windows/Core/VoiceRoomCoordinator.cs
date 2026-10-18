@@ -45,7 +45,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
         _run.Cancel(); _run = new CancellationTokenSource();
         _state.ManagerActive = true; PowerPolicy.SetKeepSystemAwake(true);
         foreach (var room in enabled)
-        { _explicitChecks[room.Id] = 0; room.BackgroundDeferred = false; room.LiveVerified = room.MicMuted = room.SpeakerMuted = false; room.NextCheckAt = DateTimeOffset.UtcNow; room.Status = "BOOTSTRAP_PENDING"; room.Failures = 0; room.LastError = ""; room.Stage = "자동 시작 대기"; }
+        { _explicitChecks[room.Id] = 0; room.BackgroundDeferred = false; room.LiveVerified = room.MicMuted = room.SpeakerMuted = false; room.SpeakerRequestsBlocked = null; room.NextCheckAt = DateTimeOffset.UtcNow; room.Status = "BOOTSTRAP_PENDING"; room.Failures = 0; room.LastError = ""; room.Stage = "자동 시작 대기"; }
         _state.LastStatus = $"{enabled.Length}개 방 자동관리 시작"; Save(); Notify();
         _ = TickAsync();
     }
@@ -62,7 +62,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
         foreach (var room in _state.Rooms.Where(r => r.Enabled))
         {
             _explicitChecks[room.Id] = 0; room.BackgroundDeferred = false;
-            room.LiveVerified = room.MicMuted = room.SpeakerMuted = false;
+            room.LiveVerified = room.MicMuted = room.SpeakerMuted = false; room.SpeakerRequestsBlocked = null;
             room.NextCheckAt = DateTimeOffset.UtcNow;
             room.Status = "BOOTSTRAP_PENDING";
             room.Stage = "전체 재점검 대기";
@@ -100,7 +100,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
                 _state.LastStatus = room.Title + " · " + result.Status;
             }
             if (!probe && !token.IsCancellationRequested) LifecyclePolicy.Apply(room, result, DateTimeOffset.UtcNow);
-            if (!probe && result.AudioRepaired) _state.AudioRepairs++;
+            if (!probe) ApplyCounters(result);
             room.Stage = probe ? "안전 진단 완료" : result.WaitingForCapacity ? "기존 참여 유지 · 전환 없음" : room.Status == "USER_ACTION_REQUIRED" ? "사용자 조치 필요" : result.Success ? "활성 · 보호 확인" : "재시도 대기";
             if (!_state.ManagerActive) room.NextCheckAt = null;
             room.LastDiagnostic = result.Status;
@@ -137,7 +137,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
                 {
                     if (result.BackgroundDeferred) { Defer(due); return; }
                     LifecyclePolicy.Apply(due, result, DateTimeOffset.UtcNow);
-                    if (result.AudioRepaired) _state.AudioRepairs++;
+                    ApplyCounters(result);
                     due.Stage = result.WaitingForCapacity ? "기존 참여 유지 · 전환 없음" : result.Success ? "활성 · 보호 확인" : due.Status == "USER_ACTION_REQUIRED" ? "사용자 조치 필요" : "재시도 대기";
                     _state.LastStatus = due.Title + " · " + result.Status;
                     Log(due, due.Status, result.Status); Save();
@@ -175,12 +175,11 @@ public sealed class VoiceRoomCoordinator : IDisposable
                     {
                         room.BackgroundDeferred = false;
                         var changed = wasDeferred || room.MicMuted != result.MicMuted || room.SpeakerMuted != result.SpeakerMuted
-                            || result.RejectedRequest || result.RequestToggleDisabled || result.AudioRepaired;
+                            || room.SpeakerRequestsBlocked != result.RequestsBlocked || result.RejectedRequest || result.RequestToggleDisabled || result.AudioRepaired;
                         room.MicMuted = result.MicMuted; room.SpeakerMuted = result.SpeakerMuted;
+                        room.SpeakerRequestsBlocked = result.RequestsBlocked;
                         room.Stage = "활성 · 보호 확인";
-                        if (result.RejectedRequest) _state.SpeakerRequestsRejected++;
-                        if (result.RequestToggleDisabled) _state.SpeakerRequestTogglesDisabled++;
-                        if (result.AudioRepaired) _state.AudioRepairs++;
+                        ApplyCounters(result);
                         if (changed)
                         {
                             _state.LastStatus = room.Title + " · " + result.Status;
@@ -201,6 +200,12 @@ public sealed class VoiceRoomCoordinator : IDisposable
         LifecyclePolicy.Apply(room, new(false, "다른 작업 중 · 포커스 유지", BackgroundDeferred: true), DateTimeOffset.UtcNow);
         Log(room, "BACKGROUND_DEFERRED", "게임/다른 작업의 포커스 유지 · 매니저/해당 방 또는 유휴 바탕화면에서 재개");
         Save();
+    }
+    private void ApplyCounters(KakaoPcAutomation.Result result)
+    {
+        if (result.RejectedRequest) _state.SpeakerRequestsRejected++;
+        if (result.RequestToggleDisabled) _state.SpeakerRequestTogglesDisabled++;
+        if (result.AudioRepaired) _state.AudioRepairs++;
     }
     private KakaoPcAutomation.Result Process(RoomState room, bool probe, CancellationToken token, bool background = false)
     {

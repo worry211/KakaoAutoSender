@@ -12,6 +12,9 @@ public sealed class RoomState
     public DateTimeOffset? CreationSubmittedAt { get; set; }
     public bool MicMuted { get; set; }
     public bool SpeakerMuted { get; set; }
+    public bool? SpeakerRequestsBlocked { get; set; }
+    [JsonIgnore] public string RequestProtectionDisplay => (SpeakerRequestsBlocked is not null && (BackgroundDeferred || !ManagerRunning) ? "마지막 점검: " : "")
+        + (SpeakerRequestsBlocked == true ? "스피커 요청 차단 확인" : SpeakerRequestsBlocked == false ? "스피커 요청 허용 · 차단 대기" : "스피커 요청 차단 미확인");
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? NextCheckAt { get; set; }
     public string Status { get; set; } = "NEW";

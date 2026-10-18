@@ -6,8 +6,9 @@ namespace VoiceRoomManager.Windows.Core;
 internal static class VoiceControlVision
 {
     internal enum AudioState { Unknown, Enabled, Muted }
+    internal enum RequestState { Unknown, Allowed, Blocked }
     internal sealed record Button(double X, double Y, double Diameter);
-    internal sealed record Layout(Button Microphone, Button Speaker, Button Exit, AudioState MicState, AudioState SpeakerState, bool MicEnabledIcon = false, bool SpeakerEnabledIcon = false);
+    internal sealed record Layout(Button Microphone, Button Speaker, Button Exit, AudioState MicState, AudioState SpeakerState, bool MicEnabledIcon = false, bool SpeakerEnabledIcon = false, Button? Requests = null, RequestState RequestsState = RequestState.Unknown);
     private static readonly Dictionary<string, bool[]> Masks = new();
     private static readonly object Gate = new();
     private static readonly (int X, int Y)[] Neighbors = [(-1, 0), (1, 0), (0, -1), (0, 1)];
@@ -78,10 +79,14 @@ internal static class VoiceControlVision
         if (Enumerable.Range(1, 3).Any(i => controls[i].X - controls[i - 1].X < size * 1.1 || controls[i].X - controls[i - 1].X > size * 1.6)) return null;
         if (controls[4].X - controls[3].X < size * 2 || width - controls[4].X > size * 1.25) return null;
         diagnostic += $" glyphs={Score(image, controls[0], "heart", false):0.000},{Score(image, controls[3], "hand", false):0.000},{Score(image, controls[4], "exit", false):0.000}";
-        if (Score(image, controls[0], "heart", false) > .12 || Score(image, controls[3], "hand", false) > .12 || Score(image, controls[4], "exit", false) > .12) return null;
+        if (Score(image, controls[0], "heart", false) > .12 || Score(image, controls[4], "exit", false) > .12) return null;
+        // Request controls have independent ON/OFF glyphs. Their state is not audio evidence.
+        var requests = Score(image, controls[3], "hand-blocked", true) <= .08 ? RequestState.Blocked
+            : Score(image, controls[3], "hand", false) <= .08 ? RequestState.Allowed : RequestState.Unknown;
+        diagnostic += " requests=" + requests;
         diagnostic += $" audio={State(image, controls[1], "microphone")},{State(image, controls[2], "speaker")} muteGlyphs={Score(image, controls[1], "microphone", true):0.000},{Score(image, controls[2], "speaker", true):0.000}";
         return new(controls[1], controls[2], controls[4], State(image, controls[1], "microphone"), State(image, controls[2], "speaker"),
-            Score(image, controls[1], "microphone-enabled", false) <= .08, Score(image, controls[2], "speaker-enabled", false) <= .08);
+            Score(image, controls[1], "microphone-enabled", false) <= .08, Score(image, controls[2], "speaker-enabled", false) <= .08, controls[3], requests);
     }
 
     private static AudioState State(PixelFrame image, Button button, string kind)
@@ -125,7 +130,7 @@ internal static class VoiceControlVision
             using var resource = typeof(VoiceControlVision).Assembly.GetManifestResourceStream($"VoiceRoomManager.Windows.Core.Assets.{kind}.png")!;
             using var bytes = new MemoryStream(); resource.CopyTo(bytes);
             var frame = new PixelFrame(bytes.ToArray());
-            var dark = kind is "microphone" or "speaker" || kind.StartsWith("toolbar-", StringComparison.Ordinal);
+            var dark = kind is "microphone" or "speaker" or "hand-blocked" || kind.StartsWith("toolbar-", StringComparison.Ordinal);
             var result = Enumerable.Range(0, 576).Select(i => dark ? Luminance(frame.Pixel(i % 24, i / 24)) < 125 : Luminance(frame.Pixel(i % 24, i / 24)) > 175).ToArray();
             Masks[kind] = result; return result;
         }

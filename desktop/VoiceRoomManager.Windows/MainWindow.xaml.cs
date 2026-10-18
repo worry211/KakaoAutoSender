@@ -162,6 +162,7 @@ public partial class MainWindow : Window
         room.LiveVerified = false;
         room.MicMuted = false;
         room.SpeakerMuted = false;
+        room.SpeakerRequestsBlocked = null;
         room.StartedAt = null;
         room.NextCheckAt = null;
         room.Status = "NEW";
@@ -289,7 +290,7 @@ public partial class MainWindow : Window
         ClearCreationButton.Visibility = RoomsGrid.SelectedItem is RoomState { CreationUncertain: true } ? Visibility.Visible : Visibility.Collapsed;
         ClearCreationButton.IsEnabled = !_coordinator.IsBusy;
         if (RoomsGrid.SelectedItem is not RoomState room) { SelectedStatus.Text = "방을 선택하면 보호 상태와 필요한 조치를 확인할 수 있습니다."; SelectedError.Text = ""; return; }
-        SelectedStatus.Text = room.Title + " · " + room.ManagementDisplay + " · " + room.AudioDisplay + " · " + room.DurationDisplay
+        SelectedStatus.Text = room.Title + " · " + room.ManagementDisplay + " · " + room.AudioDisplay + " · " + room.RequestProtectionDisplay + " · " + room.DurationDisplay
             + (room.LastFailureAt is null ? "" : " · 최근 실패 " + room.LastFailureAt.Value.ToLocalTime().ToString("MM/dd HH:mm"));
         SelectedError.Text = DiagnosticPresentation.Summary(room.LastError);
         LastStatus.Text = room.LastDiagnostic;

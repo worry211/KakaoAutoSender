@@ -8,6 +8,9 @@ internal static class VoiceWindowAdapter
 
     internal static bool TitleMatches(string title, string room) => !string.IsNullOrWhiteSpace(room) && title.Trim() == "보이스룸: " + room.Trim();
     internal static bool Participants(IEnumerable<string> lines) => lines.Any(t => Regex.IsMatch(t, @"(?<!\d)[1-9]\d*\s*명\s*참여\s*중"));
+    internal static KakaoSurfaceLocator.Bounds ParticipantRegion(KakaoSurfaceLocator.Bounds bounds, double scale) => new(
+        bounds.Left + (int)Math.Round(15 * scale), bounds.Top + (int)Math.Round(48 * scale),
+        Math.Min(bounds.Right, bounds.Left + (int)Math.Round(280 * scale)), bounds.Top + (int)Math.Round(112 * scale));
 
     internal static bool HasUnresolvedWindow() => AutomationOperation.Current is { HasRoomProof: true } op
         && KakaoSurfaceLocator.VisibleTopLevels().Any(s => TitleMatches(s.Title, op.Room.Title)
@@ -25,12 +28,12 @@ internal static class VoiceWindowAdapter
         if (activate && !KakaoSurfaceLocator.IsForeground(surface.Hwnd))
         { KakaoSurfaceLocator.Activate(surface.Hwnd); AutomationOperation.Pause(100); }
         if (!KakaoSurfaceLocator.IsForeground(surface.Hwnd)) { OperationLog.Write(op.Room, "VOICE_PROOF", "notForeground · " + KakaoSurfaceLocator.ForegroundDiagnostic(surface.Hwnd)); return null; }
+        surface = KakaoSurfaceLocator.VisibleTopLevels().SingleOrDefault(s => s.Hwnd == surface.Hwnd && s.Title == surface.Title) ?? surface;
         if (surface.Rect.Width is < 260 or > 1400 || surface.Rect.Height < 380) return null;
         var observation = ReadControls(surface);
         if (observation is null) { OperationLog.Write(op.Room, "VOICE_PROOF", "footerControls=0"); return null; }
         var scale = observation.Controls.Microphone.Diameter / 42d;
-        var header = new KakaoSurfaceLocator.Bounds(surface.Rect.Left + (int)Math.Round(15 * scale), surface.Rect.Top + (int)Math.Round(58 * scale),
-            Math.Min(surface.Rect.Right, surface.Rect.Left + (int)Math.Round(280 * scale)), surface.Rect.Top + (int)Math.Round(90 * scale));
+        var header = ParticipantRegion(surface.Rect, scale);
         var bytes = LocalTextSurface.Capture(header);
         if (bytes is null) return null;
         var reading = LocalTextSurface.RecognizeAsync(new PixelFrame(bytes).HighContrastText(), surface.Hwnd, header, coordinatesRequired: false).GetAwaiter().GetResult();
@@ -152,8 +155,11 @@ internal static class VoiceWindowAdapter
         AutomationOperation.Pause(100);
         var final = Observe(false);
         var safe = final is not null && final.Controls.MicState == VoiceControlVision.AudioState.Muted && final.Controls.SpeakerState == VoiceControlVision.AudioState.Muted;
-        return new(safe, safe ? prefix + " · 전용 창 활성/마이크/스피커 2회 재확인" : "보이스룸 오디오 최종 재확인 실패",
-            Active: final is not null, MicMuted: safe, SpeakerMuted: safe, AudioRepaired: repaired, VerificationPending: !safe);
+        if (!safe) return new(false, "보이스룸 오디오 최종 재확인 실패", Active: final is not null, VerificationPending: true);
+        var requests = SpeakerRequestGuard.EnsureBlocked(final!);
+        return new(true, prefix + " · 전용 창 활성/마이크/스피커 2회 재확인 · " + requests.Diagnostic,
+            Active: true, MicMuted: true, SpeakerMuted: true, AudioRepaired: repaired,
+            RequestToggleDisabled: requests.Changed, RequestsBlocked: requests.Blocked);
         KakaoPcAutomation.Result Unknown()
         {
             AutomationOperation.Check(); // Reclassify a concurrent switch to another app as focus deferral.
@@ -161,7 +167,7 @@ internal static class VoiceWindowAdapter
         }
     }
 
-    private static Observation? CurrentControls(IntPtr hwnd)
+    internal static Observation? CurrentControls(IntPtr hwnd)
     {
         AutomationOperation.Check();
         var surface = KakaoSurfaceLocator.VisibleTopLevels().SingleOrDefault(s => s.Hwnd == hwnd);
