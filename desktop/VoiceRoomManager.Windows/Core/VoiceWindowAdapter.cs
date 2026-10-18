@@ -7,7 +7,8 @@ internal static class VoiceWindowAdapter
     internal sealed record Observation(IntPtr Host, KakaoSurfaceLocator.Bounds Bounds, KakaoSurfaceLocator.Bounds Footer, VoiceControlVision.Layout Controls);
 
     internal static bool TitleMatches(string title, string room) => !string.IsNullOrWhiteSpace(room) && title.Trim() == "보이스룸: " + room.Trim();
-    internal static bool Participants(IEnumerable<string> lines) => lines.Any(t => Regex.IsMatch(t, @"(?<!\d)[1-9]\d*\s*명\s*참여\s*중"));
+    // Korean OCR can read 명 as 멈 in the small grey caption. Require the entire caption.
+    internal static bool Participants(IEnumerable<string> lines) => lines.Any(t => Regex.IsMatch(t, @"^\s*[1-9]\d*\s*(?:명|멈)\s*참여\s*중\s*$"));
     internal static KakaoSurfaceLocator.Bounds ParticipantRegion(KakaoSurfaceLocator.Bounds bounds, double scale) => new(
         bounds.Left + (int)Math.Round(15 * scale), bounds.Top + (int)Math.Round(48 * scale),
         Math.Min(bounds.Right, bounds.Left + (int)Math.Round(280 * scale)), bounds.Top + (int)Math.Round(112 * scale));
@@ -34,10 +35,17 @@ internal static class VoiceWindowAdapter
         if (observation is null) { OperationLog.Write(op.Room, "VOICE_PROOF", "footerControls=0"); return null; }
         var scale = observation.Controls.Microphone.Diameter / 42d;
         var header = ParticipantRegion(surface.Rect, scale);
-        var bytes = LocalTextSurface.Capture(header);
-        if (bytes is null) return null;
-        var reading = LocalTextSurface.RecognizeAsync(new PixelFrame(bytes).HighContrastText(), surface.Hwnd, header, coordinatesRequired: false).GetAwaiter().GetResult();
-        if (reading.Frame is null || !Participants(reading.Frame.Lines.Select(l => l.Text))) { OperationLog.Write(op.Room, "VOICE_PROOF", "participant=0 · " + reading.Diagnostic); return null; }
+        var captionOnly = header with { Top = surface.Rect.Top + (int)Math.Round(84 * scale) };
+        var participant = false;
+        foreach (var region in new[] { header, captionOnly })
+        {
+            var bytes = LocalTextSurface.Capture(region);
+            if (bytes is null) continue;
+            var reading = LocalTextSurface.RecognizeAsync(new PixelFrame(bytes).HighContrastText(), surface.Hwnd, region, coordinatesRequired: false).GetAwaiter().GetResult();
+            if (reading.Frame is not null && Participants(reading.Frame.Lines.Select(l => l.Text))) { participant = true; break; }
+            OperationLog.Write(op.Room, "VOICE_PARTICIPANT", reading.Diagnostic + " captions=" + string.Join("|", reading.Frame?.Lines.Select(l => l.Text) ?? []));
+        }
+        if (!participant) { OperationLog.Write(op.Room, "VOICE_PROOF", "participant=0 · broad/caption-only readback failed"); return null; }
         op.VoiceHost = surface.Hwnd;
         return observation;
     }

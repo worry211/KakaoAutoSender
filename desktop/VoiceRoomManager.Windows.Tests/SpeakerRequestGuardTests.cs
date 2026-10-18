@@ -8,6 +8,15 @@ namespace VoiceRoomManager.Windows.Tests;
 
 public class SpeakerRequestGuardTests
 {
+    [Theory] [InlineData("1 멈 참여 중",true)] [InlineData("0 멈 참여 중",false)] [InlineData("방 이름 1 명 참여 중",false)]
+    public void CaptionConfusionStillRequiresPositiveWholeParticipantCaption(string text,bool expected) => Assert.Equal(expected,VoiceWindowAdapter.Participants([text]));
+    [Fact] public async Task ActualWrappedTitleParticipantCaptionIsRecognizedIndependently()
+    {
+        var bytes=File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory,"Fixtures","voice-wrapped-participant.png"));
+        var reading=await LocalTextSurface.RecognizeAsync(new PixelFrame(bytes).HighContrastText(),IntPtr.Zero,new(0,0,265,30),coordinatesRequired:false);
+        if(reading.Status==LocalTextSurface.ReadStatus.KoreanUnavailable) { Assert.True(reading.RequiresAction);return; }
+        Assert.True(reading.Frame is not null && VoiceWindowAdapter.Participants(reading.Frame.Lines.Select(l=>l.Text)),string.Join("|",reading.Frame?.Lines.Select(l=>l.Text)??[]));
+    }
     [Fact] public void UnknownRequestGlyphDoesNotInvalidateIndependentAudioEvidence()
     {
         var source=BitmapDecoder.Create(new Uri(Path.Combine(AppContext.BaseDirectory,"Fixtures","voice-footer-muted.png")),BitmapCreateOptions.None,BitmapCacheOption.OnLoad).Frames[0];
