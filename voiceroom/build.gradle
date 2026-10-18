@@ -1,0 +1,65 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.local.kakaovoiceroom'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.local.kakaovoiceroom'
+        minSdk 26
+        targetSdk 35
+        versionCode 13
+        versionName '0.5.1'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        release {
+            def ksPath = System.getenv('ANDROID_KEYSTORE_PATH')
+            if (ksPath != null && !ksPath.trim().isEmpty()) {
+                storeFile file(ksPath)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+tasks.register('validateReleaseConfiguration') {
+    doLast {
+        ['ANDROID_KEYSTORE_PATH', 'ANDROID_KEYSTORE_PASSWORD',
+         'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD'].each { name ->
+            if (!System.getenv(name)?.trim()) throw new GradleException('Missing release variable: ' + name)
+        }
+        if (!file(System.getenv('ANDROID_KEYSTORE_PATH')).exists()) {
+            throw new GradleException('Release keystore does not exist')
+        }
+    }
+}
+tasks.configureEach { task ->
+    if (task.name == 'preReleaseBuild') task.dependsOn 'validateReleaseConfiguration'
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}

@@ -81,3 +81,15 @@ Legacy offline KAS1 licenses are removed from v2 and require seller migration.
 * [Architecture, API, states, recovery and limitations](docs/COMMERCIAL_ARCHITECTURE.md)
 * [Pre-change baseline audit](docs/BASELINE_AUDIT.md)
 * [Security, UX, reliability, privacy and regression review](docs/COMMERCIAL_REVIEW.md)
+
+## Standalone VoiceRoom products
+
+Android VoiceRoom Manager v0.5.1 remains a separate, previously device-proven app. Windows VoiceRoom Manager v0.4.0 RC9 has a unified workflow, dark dashboard, dedicated icon-only VoiceRoom verification, automatic microphone/speaker mute, configuration backup, recovery and 154 regression tests with focus-preserving automatic checks. Actual create/PIP and automatic ON-to-OFF audio transitions were observed on the target PC; Controlled automatic regeneration with the default menu, active/audio readback and durable start time was observed on October 7; speaker requests and real 48h operation remain unverified.
+
+- [Android VoiceRoom](voiceroom/README.md)
+- [Windows RC7 setup and verified limits](desktop/VoiceRoomManager.Windows/README.md)
+- [Windows audit](docs/VOICEROOM_WINDOWS_RC_AUDIT.md)
+- [Minimum real-PC checklist](docs/VOICEROOM_WINDOWS_RC_CHECKLIST.md)
+
+
+

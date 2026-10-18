@@ -1,0 +1,59 @@
+name: VoiceRoom signed release APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/voiceroom-release.jks
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - run: node scripts/secret-scan.mjs
+      - name: Decode stable signing key
+        shell: bash
+        run: |
+          for field in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            test -n "${!field}" || { echo "Missing production signing setting: $field"; exit 1; }
+          done
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+      - name: Test, lint and build VoiceRoom release
+        run: >-
+          gradle --no-daemon
+          :voiceroom:testDebugUnitTest
+          :voiceroom:lintDebug
+          :voiceroom:validateReleaseConfiguration
+          :voiceroom:assembleRelease
+          :voiceroom:lintRelease
+      - name: Verify release signature
+        run: "$ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs voiceroom/build/outputs/apk/release/voiceroom-release.apk"
+      - name: Generate checksum
+        run: sha256sum voiceroom/build/outputs/apk/release/voiceroom-release.apk > voiceroom-release.apk.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KakaoVoiceRoomManager-release
+          path: |
+            voiceroom/build/outputs/apk/release/voiceroom-release.apk
+            voiceroom-release.apk.sha256
+          if-no-files-found: error
+      - name: Remove temporary signing material
+        if: always()
+        run: rm -f "$ANDROID_KEYSTORE_PATH"
