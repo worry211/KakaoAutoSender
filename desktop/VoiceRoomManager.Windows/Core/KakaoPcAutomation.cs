@@ -86,6 +86,7 @@ public sealed class KakaoPcAutomation
             if (VoiceWindowAdapter.Observe(false) is not null) return VoiceWindowAdapter.Protect("기존 보이스룸 활성 확인");
         }
 
+        if (VoiceWindowAdapter.HasUnresolvedWindow() && !VoiceWindowAdapter.IsOwnedVoiceForeground(room)) return VoiceWindowAdapter.FocusWait();
         if (SpeakerRequestGuard.TryResumeCurrentRoom() is { } resumed)
             return resumed.Blocked == true
                 ? VoiceWindowAdapter.Protect("요청 차단 팝업 복구") with { RequestToggleDisabled = resumed.Changed }
@@ -227,6 +228,7 @@ public sealed class KakaoPcAutomation
             pipProtection = VoiceWindowAdapter.Protect("런타임 전용 창 보호");
             if (!pipProtection.Success) return pipProtection;
         }
+        else if (!VoiceWindowAdapter.IsOwnedVoiceForeground(room)) return VoiceWindowAdapter.FocusWait();
         else if (VoiceWindowAdapter.TryCloseEnded())
             return new(false, "실제 종료 확인 · 자동 재생성 대기", VerifiedEnded: true);
         var requestHost = AutomationOperation.Current.VoiceHost != IntPtr.Zero ? AutomationOperation.Current.VoiceHost : host;

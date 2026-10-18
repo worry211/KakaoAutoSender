@@ -5,6 +5,21 @@ namespace VoiceRoomManager.Windows.Tests;
 
 public class RuntimeGuardLifecycleTests
 {
+    [Fact] public async Task ForegroundChangeIsAWaitNotAnAudioFailure()
+    {
+        var path=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString());
+        try
+        {
+            var store=new StateStore(path);store.Save(new DesktopState { ManagerActive=true, Rooms=[new() { Title="fixture" }] });
+            using var coordinator=new VoiceRoomCoordinator(store,new KakaoPcAutomation(),schedule:false,canRunAutomatically:_=>true,
+                runtimeGuard:_=>new(false,"focus changed",BackgroundDeferred:true));
+            var room=Ready(coordinator);room.SpeakerRequestsBlocked=true;
+            await coordinator.TickAsync();
+            Assert.True(room.BackgroundDeferred);Assert.Equal("ACTIVE",room.Status);Assert.Equal(0,room.Failures);
+            Assert.True(room.LiveVerified);Assert.True(room.MicMuted);Assert.True(room.SpeakerMuted);Assert.True(room.SpeakerRequestsBlocked);
+        }
+        finally { if(Directory.Exists(path)) Directory.Delete(path,true); }
+    }
     [Fact] public async Task StopDiscardsLateRuntimeAudioAndRequestResults()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());

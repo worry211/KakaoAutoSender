@@ -133,8 +133,10 @@ internal static class VoiceWindowAdapter
         // Hide hover glow/tooltips before state readback; never click this neutral point.
         if (!NativeInput.Hover(surface.Hwnd, surface.Rect.Left + surface.Rect.Width * 3 / 4, surface.Rect.Top + surface.Rect.Height * 2 / 3)) return null;
         AutomationOperation.Pause(60);
+        if (!KakaoSurfaceLocator.IsForeground(surface.Hwnd)) return null;
         var bytes = LocalTextSurface.Capture(footer);
         if (bytes is null) return null;
+        if (!KakaoSurfaceLocator.IsForeground(surface.Hwnd)) return null;
         var controls = VoiceControlVision.Detect(new PixelFrame(bytes), out var diagnostic);
         if (controls is not null && (controls.MicState == VoiceControlVision.AudioState.Unknown || controls.SpeakerState == VoiceControlVision.AudioState.Unknown)) OperationLog.Write(AutomationOperation.Current!.Room, "VOICE_AUDIO_UNKNOWN", diagnostic);
         if (controls is null) OperationLog.Write(AutomationOperation.Current!.Room, "VOICE_CONTROLS", $"rect={footer} " + diagnostic);
@@ -145,7 +147,12 @@ internal static class VoiceWindowAdapter
     {
         AutomationOperation.Stage("보이스룸 전용 창 · 오디오 보호");
         var first = Observe(true);
-        if (first is null) return new(false, "보이스룸 전용 창의 활성/컨트롤 자동 재확인 대기", VerificationPending: true);
+        if (first is null)
+        {
+            var known = AutomationOperation.Current!.VoiceHost;
+            return known != IntPtr.Zero && LostForeground(known) ? FocusWait()
+                : new(false, "보이스룸 전용 창의 활성/컨트롤 자동 재확인 대기", VerificationPending: true);
+        }
         var repaired = false;
         foreach (var microphone in new[] { true, false })
         {
@@ -173,7 +180,7 @@ internal static class VoiceWindowAdapter
         AutomationOperation.Pause(100);
         var final = Observe(false);
         var safe = final is not null && final.Controls.MicState == VoiceControlVision.AudioState.Muted && final.Controls.SpeakerState == VoiceControlVision.AudioState.Muted;
-        if (!safe) return new(false, "보이스룸 오디오 최종 재확인 실패", Active: final is not null, VerificationPending: true);
+        if (!safe) return LostForeground(first.Host) ? FocusWait() : new(false, "보이스룸 오디오 최종 재확인 실패", Active: final is not null, VerificationPending: true);
         var requests = SpeakerRequestGuard.EnsureBlocked(final!);
         return new(true, prefix + " · 전용 창 활성/마이크/스피커 2회 재확인 · " + requests.Diagnostic,
             Active: true, MicMuted: true, SpeakerMuted: true, AudioRepaired: repaired,
@@ -181,9 +188,12 @@ internal static class VoiceWindowAdapter
         KakaoPcAutomation.Result Unknown()
         {
             AutomationOperation.Check(); // Reclassify a concurrent switch to another app as focus deferral.
+            if (LostForeground(first.Host)) return FocusWait();
             return new(false, "오디오 상태 자동 재확인 대기 · 확인되지 않은 컨트롤은 토글하지 않음", VerificationPending: true);
         }
     }
+    private static bool LostForeground(IntPtr host) => !KakaoSurfaceLocator.IsForeground(KakaoSurfaceLocator.ActiveOwnedSurface(host));
+    internal static KakaoPcAutomation.Result FocusWait() => new(false, "보이스룸 화면 전환 · 입력 없이 재확인 대기", BackgroundDeferred: true);
 
     internal static Observation? CurrentControls(IntPtr hwnd)
     {

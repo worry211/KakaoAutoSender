@@ -155,6 +155,7 @@ public sealed class VoiceRoomCoordinator : IDisposable
                     try { result = await Task.Run(() => _runtimeGuard(room)); }
                     catch (BackgroundWorkDeferredException) { Defer(room); continue; }
                     if (token.IsCancellationRequested || _disposed) break;
+                    if (result.BackgroundDeferred) { Defer(room); continue; }
                     if (result.VerificationPending)
                     {
                         LifecyclePolicy.Apply(room, result, DateTimeOffset.UtcNow);
