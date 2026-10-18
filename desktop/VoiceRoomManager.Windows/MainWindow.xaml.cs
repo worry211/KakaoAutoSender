@@ -289,10 +289,12 @@ public partial class MainWindow : Window
         if (SelectedStatus is null) return;
         ClearCreationButton.Visibility = RoomsGrid.SelectedItem is RoomState { CreationUncertain: true } ? Visibility.Visible : Visibility.Collapsed;
         ClearCreationButton.IsEnabled = !_coordinator.IsBusy;
-        if (RoomsGrid.SelectedItem is not RoomState room) { SelectedStatus.Text = "방을 선택하면 보호 상태와 필요한 조치를 확인할 수 있습니다."; SelectedError.Text = ""; return; }
+        if (RoomsGrid.SelectedItem is not RoomState room) { SelectedStatus.Text = "방을 선택하면 보호 상태와 필요한 조치를 확인할 수 있습니다."; SelectedError.Text = ""; SelectedLifetime.Visibility = Visibility.Collapsed; return; }
         SelectedStatus.Text = room.Title + " · " + room.ManagementDisplay + " · " + room.AudioDisplay + " · " + room.RequestProtectionDisplay + " · " + room.DurationDisplay
             + (room.LastFailureAt is null ? "" : " · 최근 실패 " + room.LastFailureAt.Value.ToLocalTime().ToString("MM/dd HH:mm"));
         SelectedError.Text = DiagnosticPresentation.Summary(room.LastError);
+        SelectedLifetime.Text = room.LifetimeDetail;
+        SelectedLifetime.Visibility = Visibility.Visible;
         LastStatus.Text = room.LastDiagnostic;
     }
     private void ClearCreation_Click(object sender, RoutedEventArgs e)

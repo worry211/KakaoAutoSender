@@ -1,3 +1,7 @@
+# RC13 시작시각 표시 확인
+
+RC13은 시작시각 오안내를 수정합니다. 기존 데이터에 생성 기록이 없으면 정확한 시각을 복원했다고 표시하지 않습니다. 남은 실기 게이트는 아래 RC12 기록에서 이어집니다.
+
 # Windows RC12 최소 실기 체크리스트
 
 Windows 0.4.0-rc.12, 시험 EXE 코드 `c38ce6120532c5a31645b4c4be8db9e1471484c2`. 판매 승인 미완료. 로컬 194/194 실행·통과(실패/skip 0). CI VoiceRoom Windows #123, Windows client #196, APK/backend #692 success. CI 한국어 미설치 시 명시적 capability-error를 검증하며 실제 한국어 OCR 성공은 이 PC 실기와 구분한다.

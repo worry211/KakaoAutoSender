@@ -47,7 +47,7 @@ public sealed class RoomState
         "BOOTSTRAPPING" => "자동 시작 중",
         "PROBE_OK" => "진단 통과",
         "ACTIVE" => "보룸 활성 · " + (Enabled && ManagerRunning ? "자동관리 중" : "자동관리 꺼짐"),
-        "ACTIVE_UNKNOWN_START" => "보룸 활성 · 시작시각 확인 중",
+        "ACTIVE_UNKNOWN_START" => "보룸 활성 · " + (Enabled && ManagerRunning ? "종료 감시 중" : "자동관리 꺼짐"),
         "CHECK_DUE" => "자동 점검 중",
         "WAITING_UNLOCK" => "잠금 해제 대기",
         "WAITING_CAPACITY" => "다른 보이스룸 참여 중 · 대기",
@@ -83,12 +83,17 @@ public sealed class RoomState
     {
         get
         {
-            if (StartedAt is null) return LiveVerified ? "시작시각 재확인 필요" : "시작시간 미확인";
+            if (StartedAt is null) return "시작시각 기록 없음";
             var remaining = StartedAt.Value.AddHours(48) - DateTimeOffset.Now;
             if (remaining <= TimeSpan.Zero) return "종료 확인 중";
             return $"{Math.Floor(remaining.TotalHours):0}시간 {remaining.Minutes:00}분";
         }
     }
+
+    [JsonIgnore]
+    public string LifetimeDetail => StartedAt is { } start
+        ? $"기록된 생성 시각 {start.ToLocalTime():yyyy-MM-dd HH:mm:ss} · 48시간 기준 예상 종료 {start.AddHours(48).ToLocalTime():MM-dd HH:mm:ss}. 실제 종료 확인 후 재생성을 시도합니다."
+        : "생성 시각 기록이 없어 남은 시간을 계산할 수 없습니다. 자동관리 중에는 실제 상태를 정기 점검하고, 종료가 확인되면 재생성을 시도합니다. 다른 작업·잠금 중에는 대기합니다.";
 }
 
 public sealed class DesktopState
