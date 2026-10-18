@@ -7,8 +7,9 @@ internal static class VoiceWindowAdapter
     internal sealed record Observation(IntPtr Host, KakaoSurfaceLocator.Bounds Bounds, KakaoSurfaceLocator.Bounds Footer, VoiceControlVision.Layout Controls);
 
     internal static bool TitleMatches(string title, string room) => !string.IsNullOrWhiteSpace(room) && title.Trim() == "보이스룸: " + room.Trim();
-    // Korean OCR can read 명 as 멈 in the small grey caption. Require the entire caption.
-    internal static bool Participants(IEnumerable<string> lines) => lines.Any(t => Regex.IsMatch(t, @"^\s*[1-9]\d*\s*(?:명|멈)\s*참여\s*중\s*$"));
+    // The small grey 명 can be read as 멈 or omitted. Still require a positive count and
+    // the entire 참여 중 caption inside the dedicated native voice header, on both samples.
+    internal static bool Participants(IEnumerable<string> lines) => lines.Any(t => Regex.IsMatch(t, @"^\s*[1-9]\d*\s*(?:명|멈)?\s*참여\s*중\s*$"));
     internal static KakaoSurfaceLocator.Bounds ParticipantRegion(KakaoSurfaceLocator.Bounds bounds, double scale) => new(
         bounds.Left + (int)Math.Round(15 * scale), bounds.Top + (int)Math.Round(48 * scale),
         Math.Min(bounds.Right, bounds.Left + (int)Math.Round(280 * scale)), bounds.Top + (int)Math.Round(112 * scale));

@@ -9,6 +9,7 @@ namespace VoiceRoomManager.Windows.Tests;
 public class SpeakerRequestGuardTests
 {
     [Theory] [InlineData("1 멈 참여 중",true)] [InlineData("0 멈 참여 중",false)] [InlineData("방 이름 1 명 참여 중",false)]
+    [InlineData("1 참여 중",true)] [InlineData("0 참여 중",false)] [InlineData("1 참여 종료 중",false)]
     public void CaptionConfusionStillRequiresPositiveWholeParticipantCaption(string text,bool expected) => Assert.Equal(expected,VoiceWindowAdapter.Participants([text]));
     [Fact] public async Task ActualWrappedTitleParticipantCaptionIsRecognizedIndependently()
     {
