@@ -35,16 +35,39 @@ internal static class SpeakerRequestGuard
         AutomationOperation.Stage("스피커 요청 자동 차단");
         if (!NativeInput.Click(voice.Host, fresh.Footer.Left + (int)Math.Round(hand.X), fresh.Footer.Top + (int)Math.Round(hand.Y))) return Pending();
         var list = ReadTwice(voice.Host, IsList);
-        if (list is null || !ClickExact(list, "스피커 요청 비활성화")) return Pending();
-        var confirmation = ReadTwice(voice.Host, IsConfirmation);
-        if (confirmation is null || !ClickExact(confirmation, "확인")) return Pending();
+        return list is null ? Pending() : Finish(voice.Host, list);
+    }
+    internal static Outcome? TryResumeCurrentRoom()
+    {
+        var op = AutomationOperation.Current!;
+        if (!op.HasRoomProof) return null;
+        var voices = KakaoSurfaceLocator.VisibleTopLevels().Where(s => VoiceWindowAdapter.TitleMatches(s.Title, op.Room.Title)
+            && KakaoSurfaceLocator.ProcessId(s.Hwnd) == KakaoSurfaceLocator.ProcessId(op.Host)).ToArray();
+        if (voices.Length != 1) return null;
+        var active = KakaoSurfaceLocator.ActiveOwnedSurface(voices[0].Hwnd);
+        if (active == voices[0].Hwnd || !KakaoSurfaceLocator.IsForeground(active)) return null;
+        var known = ReadTwice(voices[0].Hwnd, frame => IsList(frame) || IsConfirmation(frame));
+        if (known is null) return new(null, false, "보이스룸 요청 팝업 인식 대기 · 미확인 입력 없음");
+        OperationLog.Write(op.Room, "SPEAKER_REQUESTS_RESUMING", IsConfirmation(known) ? "confirmed scoped reset dialog" : "confirmed scoped request list");
+        return Finish(voices[0].Hwnd, known);
+    }
+    private static Outcome Finish(IntPtr voiceHost, LocalTextSurface.Frame known)
+    {
+        Outcome Pending() => new(null, false, "스피커 요청 차단 미확인 · 재확인 대기");
+        var confirmation = known;
+        if (IsList(known))
+        {
+            if (!ClickExact(known, "스피커 요청 비활성화")) return Pending();
+            confirmation = ReadTwice(voiceHost, IsConfirmation);
+        }
+        if (confirmation is null || !IsConfirmation(confirmation) || !ClickExact(confirmation, "확인")) return Pending();
         for (var attempt = 0; attempt < 12; attempt++)
         {
             AutomationOperation.Pause(100);
-            var after = VoiceWindowAdapter.CurrentControls(voice.Host);
+            var after = VoiceWindowAdapter.CurrentControls(voiceHost);
             if (after?.Controls.RequestsState != VoiceControlVision.RequestState.Blocked) continue;
             AutomationOperation.Pause(80);
-            if (VoiceWindowAdapter.CurrentControls(voice.Host)?.Controls.RequestsState != VoiceControlVision.RequestState.Blocked) return Pending();
+            if (VoiceWindowAdapter.CurrentControls(voiceHost)?.Controls.RequestsState != VoiceControlVision.RequestState.Blocked) return Pending();
             OperationLog.Write(AutomationOperation.Current!.Room, "SPEAKER_REQUESTS_BLOCKED", "요청 목록/비활성화 확인 2회 · 확인 입력 · 차단 아이콘 2회 확인");
             return new(true, true, "스피커 요청 자동 비활성화 · 차단 재확인");
         }

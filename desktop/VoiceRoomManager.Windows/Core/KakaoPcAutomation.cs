@@ -86,6 +86,11 @@ public sealed class KakaoPcAutomation
             if (VoiceWindowAdapter.Observe(false) is not null) return VoiceWindowAdapter.Protect("기존 보이스룸 활성 확인");
         }
 
+        if (SpeakerRequestGuard.TryResumeCurrentRoom() is { } resumed)
+            return resumed.Blocked == true
+                ? VoiceWindowAdapter.Protect("요청 차단 팝업 복구") with { RequestToggleDisabled = resumed.Changed }
+                : new(false, resumed.Diagnostic, VerificationPending: true);
+
         if (VoiceWindowAdapter.TryCloseEnded())
         {
             var restored = EnsureRoomContext(room);
@@ -208,10 +213,14 @@ public sealed class KakaoPcAutomation
             var foreground = KakaoSurfaceLocator.VisibleTopLevels().FirstOrDefault(s => KakaoSurfaceLocator.IsForeground(s.Hwnd));
             if (foreground is not null && LocalTextSurface.Read(foreground.Hwnd)?.HasRoom(room.Title) == true) host = foreground.Hwnd;
         }
-        var foregroundVoice = KakaoSurfaceLocator.VisibleTopLevels().Any(s => VoiceWindowAdapter.TitleMatches(s.Title, room.Title) && KakaoSurfaceLocator.IsForeground(s.Hwnd));
+        var foregroundVoice = VoiceWindowAdapter.IsOwnedVoiceForeground(room);
         if (host == IntPtr.Zero) return new(false, "채팅 창이 사라짐 · 실제 상태 재점검 예약", NeedsRecheck: true);
         if (!KakaoSurfaceLocator.IsForeground(host) && !foregroundVoice) return new(false, "현재 방이 전경이 아님 · 정기점검에서 재확인");
         if (!AutomationOperation.Current!.Prove(host)) return new(false, "방 증거 없음");
+        if (SpeakerRequestGuard.TryResumeCurrentRoom() is { } resumed)
+            return resumed.Blocked == true
+                ? VoiceWindowAdapter.Protect("런타임 요청 차단 팝업 복구") with { RequestToggleDisabled = resumed.Changed }
+                : new(false, resumed.Diagnostic, VerificationPending: true);
         Result? pipProtection = null;
         if (VoiceWindowAdapter.Observe(false) is not null)
         {

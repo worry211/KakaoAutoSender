@@ -18,6 +18,15 @@ internal static class VoiceWindowAdapter
         && KakaoSurfaceLocator.VisibleTopLevels().Any(s => TitleMatches(s.Title, op.Room.Title)
             && KakaoSurfaceLocator.ProcessId(s.Hwnd) == KakaoSurfaceLocator.ProcessId(op.Host));
 
+    internal static bool IsOwnedVoiceForeground(RoomState room)
+    {
+        var voices = KakaoSurfaceLocator.VisibleTopLevels().Where(s => TitleMatches(s.Title, room.Title)).ToArray();
+        if (voices.Length != 1) return false;
+        var active = KakaoSurfaceLocator.ActiveOwnedSurface(voices[0].Hwnd);
+        return KakaoSurfaceLocator.IsForeground(active) && KakaoSurfaceLocator.OwnedBy(active, voices[0].Hwnd)
+            && KakaoSurfaceLocator.ProcessId(active) == KakaoSurfaceLocator.ProcessId(voices[0].Hwnd);
+    }
+
     internal static Observation? Observe(bool activate)
     {
         var op = AutomationOperation.Current!;

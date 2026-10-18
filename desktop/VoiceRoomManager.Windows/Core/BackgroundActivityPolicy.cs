@@ -25,6 +25,7 @@ internal static class BackgroundActivityPolicy
         var exact = type.ToString() == KakaoSurfaceLocator.KakaoWindowClass
             && (title.ToString().Trim() == room.Title.Trim() || VoiceWindowAdapter.TitleMatches(title.ToString(), room.Title))
             && kakao;
+        if (!exact && kakao) exact = VoiceWindowAdapter.IsOwnedVoiceForeground(room);
         var desktop = (type.ToString() is "Progman" or "WorkerW") && DesktopSession.IdleFor() >= TimeSpan.FromSeconds(30);
         // A failed handoff leaves our own landing page foreground. It is a pending
         // workflow surface only while room proof is missing, not a general browser
