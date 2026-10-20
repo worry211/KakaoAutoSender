@@ -98,6 +98,9 @@ final class MultiRoomStore {
 
 
     static final class BulkPatch {
+        boolean applyMedia;
+        boolean pauseUnsupportedPhotos;
+        RoomMediaStore.Media media = new RoomMediaStore.Media("", "", "");
         boolean applyMessage;
         String message = "";
         boolean applySchedule;
@@ -212,8 +215,16 @@ final class MultiRoomStore {
     }
 
 
-    static synchronized int applyBulkPatch(Context context, List<String> rooms, BulkPatch patch) {
+    static int applyBulkPatch(Context context, List<String> rooms, BulkPatch patch) {
+        synchronized (DeliveryGate.LOCK) { return applyBulkPatchLocked(context, rooms, patch); }
+    }
+
+    private static synchronized int applyBulkPatchLocked(Context context, List<String> rooms, BulkPatch patch) {
         if (patch == null || rooms == null || rooms.isEmpty()) return 0;
+        if (patch.applyMedia && (patch.media == null || (patch.media.hasImage()
+            && (!"content".equals(android.net.Uri.parse(patch.media.uri).getScheme())
+                || !patch.media.mime.matches("image/[a-z0-9][a-z0-9.+_-]*")))))
+            throw new IllegalArgumentException("Invalid bulk photo");
         ensureMigrated(context);
         LinkedHashSet<String> targets = new LinkedHashSet<>();
         for (String room : rooms) {
@@ -226,8 +237,10 @@ final class MultiRoomStore {
         boolean active = Prefs.p(context).getBoolean(Prefs.KEY_ACTIVE, false);
         long now = System.currentTimeMillis();
         int changed = 0;
+        ArrayList<String> photoTargets = new ArrayList<>();
         for (Profile profile : profiles) {
             if (!targets.contains(normalize(profile.room))) continue;
+            photoTargets.add(profile.room);
             if (patch.applyMessage) profile.message = safe(patch.message);
             if (patch.applySchedule) {
                 if (MODE_TIMES.equals(patch.scheduleMode)) {
@@ -241,12 +254,18 @@ final class MultiRoomStore {
             }
             if (patch.applyDailyLimit) profile.dailyLimit = Math.max(0, patch.dailyLimit);
             if (patch.applyEnabled) profile.enabled = patch.enabled;
+            if (patch.applyMedia && patch.pauseUnsupportedPhotos && patch.media.hasImage()
+                    && RoomSendReadiness.get(context, profile.room, profile.message, patch.media).blockedPhoto)
+                profile.enabled = false;
             sanitize(profile);
             normalizeDailyCount(profile);
-            profile.nextAt = active && isRunnable(context, profile) ? computeNextAt(profile, now) : 0L;
+            boolean payload = patch.applyMedia ? (!profile.message.trim().isEmpty() || patch.media.hasImage())
+                    : RoomMediaStore.hasPayload(context, profile);
+            profile.nextAt = active && profile.enabled && payload ? computeNextAt(profile, now) : 0L;
             changed++;
         }
-        if (changed > 0) writeRaw(context, profiles);
+        if (changed > 0) writeRaw(context, profiles,
+                patch.applyMedia ? RoomMediaStore.withChanges(context, photoTargets, patch.media) : null);
         return changed;
     }
 
@@ -533,6 +552,10 @@ final class MultiRoomStore {
     }
 
     private static void writeRaw(Context context, ArrayList<Profile> profiles) {
+        writeRaw(context, profiles, null);
+    }
+
+    private static void writeRaw(Context context, ArrayList<Profile> profiles, String mediaOverrides) {
         JSONArray arr = new JSONArray();
         try {
             for (Profile p0 : profiles) {
@@ -558,7 +581,9 @@ final class MultiRoomStore {
                 o.put("completedExecutionId", p.completedExecutionId);
                 arr.put(o);
             }
-        if (!Prefs.p(context).edit().putString(KEY_PROFILES, arr.toString()).commit()) {
+        SharedPreferences.Editor editor = Prefs.p(context).edit().putString(KEY_PROFILES, arr.toString());
+        if (mediaOverrides != null) editor.putString(RoomMediaStore.KEY_OVERRIDES, mediaOverrides);
+        if (!editor.commit()) {
             throw new IllegalStateException("Schedule state could not be persisted");
         }
         } catch (Throwable t) {

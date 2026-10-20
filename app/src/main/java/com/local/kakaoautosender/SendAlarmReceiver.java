@@ -60,8 +60,20 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 }
 
                 String visibleName = profile.title();
+                synchronized (DeliveryGate.LOCK) {
+                    MultiRoomStore.Profile latest = MultiRoomStore.get(app, profile.room);
+                    if (latest != null && RoomSendReadiness.get(app, latest).blockedPhoto) {
+                        MultiRoomStore.BulkPatch pause = new MultiRoomStore.BulkPatch();
+                        pause.applyEnabled = true; pause.enabled = false;
+                        MultiRoomStore.applyBulkPatch(app, java.util.Collections.singletonList(profile.room), pause);
+                        Prefs.setStatus(app, "사진 자동전송 미지원 · " + visibleName + " 일시정지 · 사진 설정은 유지됨");
+                        SendScheduler.scheduleNext(app);
+                        return;
+                    }
+                }
                 boolean attempted = false;
                 boolean sent = false;
+                boolean photoAccepted = false;
                 boolean skippedForLimit = false;
                 String failureReason = "확인된 답장 세션 없음";
 
@@ -104,8 +116,9 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                     }
 
                     if (sent) {
+                        photoAccepted = media.hasImage();
                         MultiRoomStore.markSuccess(app, profile.room, reservedNext,
-                                "자동전송 성공: " + visibleName + (media.hasImage() ? " · 사진 포함" : ""));
+                                (media.hasImage() ? "사진 요청 수락 · 실제 수신 미확인: " : "자동전송 성공: ") + visibleName);
                     } else {
                         String recovery = KakaoNotificationListener.hasStoredBinding(app, profile.room)
                                 ? "자동복구 정보 있음 · 같은 방 새 알림 대기"
@@ -144,7 +157,7 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 if (skippedForLimit) {
                     status.append("예약 실행 · 한도대기 · ").append(visibleName);
                 } else if (sent) {
-                    status.append("예약 실행 · 성공 · ").append(visibleName);
+                    status.append(photoAccepted ? "예약 실행 · 사진 요청 수락 · " : "예약 실행 · 성공 · ").append(visibleName);
                 } else {
                     status.append("예약 실행 · 실패 · ").append(visibleName);
                 }

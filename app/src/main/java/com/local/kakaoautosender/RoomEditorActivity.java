@@ -189,7 +189,8 @@ public class RoomEditorActivity extends Activity {
         Button remove = dangerSecondaryButton("사진 제거");
         remove.setOnClickListener(v -> {
             RoomMediaStore.Media old = RoomMediaStore.get(this, routeAlias);
-            RoomMediaStore.clear(this, routeAlias);
+            try { RoomMediaStore.clear(this, routeAlias); }
+            catch (RuntimeException error) { toast("사진 제거를 저장하지 못했습니다. 저장 공간을 확인하세요."); return; }
             releasePersistedReadPermission(old.uri);
             refreshMedia();
             toast("사진 첨부를 제거했습니다.");
@@ -205,7 +206,19 @@ public class RoomEditorActivity extends Activity {
         imageCard.addView(sharePhotoButton, top(10));
         Button keyboardSetup = secondaryButton("사진 키보드 설정 · 다른 전송 방식");
         keyboardSetup.setOnClickListener(v -> startActivity(new Intent(this, PhotoKeyboardSetupActivity.class)));
-        imageCard.addView(keyboardSetup, top(10));
+        LinearLayout advancedPhoto = new LinearLayout(this);
+        advancedPhoto.setOrientation(LinearLayout.VERTICAL);
+        advancedPhoto.setVisibility(View.GONE);
+        advancedPhoto.addView(text("현재 열린 방 하나에 사용하는 시험 기능입니다. 여러 방 자동전송을 지원하는 방식은 아닙니다.", 11, false, AMBER));
+        advancedPhoto.addView(keyboardSetup, top(8));
+        Button advancedToggle = secondaryButton("고급 사진 기능 · 시험 기능 보기");
+        advancedToggle.setOnClickListener(v -> {
+            boolean show = advancedPhoto.getVisibility() != View.VISIBLE;
+            advancedPhoto.setVisibility(show ? View.VISIBLE : View.GONE);
+            advancedToggle.setText(show ? "고급 사진 기능 접기" : "고급 사진 기능 · 시험 기능 보기");
+        });
+        imageCard.addView(advancedToggle, top(10));
+        imageCard.addView(advancedPhoto, top(8));
         TextView imageHelp = text("이미지 첨부를 지원하지 않는 환경에서는 텍스트만 임의로 보내지 않고 전송을 실패 처리해 오동작을 막습니다.", 11, false, Color.rgb(119, 132, 156));
         imageHelp.setLineSpacing(0, 1.14f);
         imageCard.addView(imageHelp, top(9));
@@ -392,7 +405,8 @@ public class RoomEditorActivity extends Activity {
             getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } catch (Throwable ignored) {}
         RoomMediaStore.Media old = RoomMediaStore.get(this, routeAlias);
-        RoomMediaStore.set(this, routeAlias, uri.toString(), mime, name);
+        try { RoomMediaStore.set(this, routeAlias, uri.toString(), mime, name); }
+        catch (RuntimeException error) { toast("사진 저장을 확인하지 못했습니다. 저장 공간을 확인하고 다시 선택하세요."); return; }
         if (!old.uri.equals(uri.toString())) releasePersistedReadPermission(old.uri);
         refreshMedia();
         toast("사진을 저장했습니다. 판매 전에는 1회 테스트 전송으로 확인해 주세요.");
@@ -416,13 +430,7 @@ public class RoomEditorActivity extends Activity {
     }
 
     private void releasePersistedReadPermission(String rawUri) {
-        if (rawUri == null || rawUri.trim().isEmpty()) return;
-        try {
-            Uri uri = Uri.parse(rawUri);
-            if ("content".equals(uri.getScheme())) {
-                getContentResolver().releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            }
-        } catch (Throwable ignored) {}
+        RoomMediaStore.releaseIfUnused(this, rawUri);
     }
 
     private String displayName(Uri uri) {
@@ -448,16 +456,7 @@ public class RoomEditorActivity extends Activity {
         if (imageStatus == null) return;
         RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
         sharePhotoButton.setEnabled(media.hasImage());
-        KakaoNotificationListener.ReplyTarget photoTarget = KakaoNotificationListener.findTarget(routeAlias);
-        String photoSupport;
-        if (!media.hasImage()) photoSupport = "사진을 선택하면 자동전송 입력 지원 여부를 확인합니다.";
-        else if (photoTarget == null || !photoTarget.verified
-            || !RoomRouting.sameTitle(routeAlias, photoTarget.label))
-            photoSupport = "사진 자동전송 확인 대기 · 이 방의 새 알림을 연결하세요.";
-        else if (PhotoReplyAction.select(photoTarget.photoActions, media.mime, false) != null)
-            photoSupport = "사진 답장 입력 감지 · 1회 테스트 후 실제 도착을 확인하세요.";
-        else photoSupport = "현재 알림에 사진 입력 없음 · 아래에서 카카오톡으로 직접 보낼 수 있습니다. 직접 보내기는 자동·반복 전송이 아닙니다.";
-        photoSupportStatus.setText(photoSupport);
+        refreshPhotoSupport();
         if (!media.hasImage()) {
             imagePreview.setImageDrawable(null);
             imagePreview.setVisibility(View.GONE);
@@ -491,6 +490,14 @@ public class RoomEditorActivity extends Activity {
             imageStatus.setText("● 사진 첨부 · " + name);
             imageStatus.setTextColor(Color.rgb(164, 182, 255));
         }
+    }
+
+    private void refreshPhotoSupport() {
+        if (photoSupportStatus == null) return;
+        RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
+        RoomSendReadiness state = RoomSendReadiness.get(this, routeAlias,
+            messageInput == null ? "" : messageInput.getText().toString(), media);
+        photoSupportStatus.setText(media.hasImage() ? state.label + "\n" + state.detail : "사진을 선택하면 이 방의 자동전송 지원 여부를 확인합니다.");
     }
 
     private void sharePhoto() {
@@ -674,7 +681,7 @@ public class RoomEditorActivity extends Activity {
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
         if (executionStatus != null && p != null) {
             if (p.lastSuccessAt > 0) {
-                executionStatus.setText("최근 성공  ·  " + new SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA).format(new Date(p.lastSuccessAt))
+                executionStatus.setText((RoomMediaStore.get(this, routeAlias).hasImage() ? "이전 전송 기록 · 사진 수신 미확인  ·  " : "최근 성공  ·  ") + new SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA).format(new Date(p.lastSuccessAt))
                         + (p.failureStreak > 0 ? "  ·  이후 실패 " + p.failureStreak + "회" : ""));
                 executionStatus.setTextColor(p.failureStreak > 0 ? AMBER : Color.rgb(130, 143, 166));
             } else if (p.failureStreak > 0) {
@@ -714,6 +721,7 @@ public class RoomEditorActivity extends Activity {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
                 updateMessageCount();
+                refreshPhotoSupport();
                 markDirty();
             }
             @Override public void afterTextChanged(Editable s) {}
