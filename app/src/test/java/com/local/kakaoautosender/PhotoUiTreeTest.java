@@ -101,6 +101,24 @@ public class PhotoUiTreeTest {
   }
 
   @Test
+  public void sendLabelChildResolvesToObservedControlButOtherControlsDoNot() {
+    AccessibilityNodeInfo send = node("send_photo", "Button");
+    send.setClickable(true);
+    send.setContentDescription("전송 (1)");
+    AccessibilityNodeInfo label = node("send_label", "TextView");
+    child(send, label);
+    assertEquals(send.getViewIdResourceName(), PhotoUiService.clickedSendId(label));
+    assertEquals(send.getViewIdResourceName(), PhotoUiService.clickedSendId(send));
+    AccessibilityNodeInfo other = node("cancel", "Button");
+    other.setClickable(true);
+    child(send, other);
+    assertNull(PhotoUiService.clickedSendId(other));
+    label.setPackageName("other.app");
+    assertNull(PhotoUiService.clickedSendId(label));
+    assertNull(PhotoUiService.clickedSendId(null));
+  }
+
+  @Test
   public void learnedLayoutIgnoresPrivateTextButChangesWhenControlStructureChanges() {
     AccessibilityNodeInfo root = root();
     String layout = PhotoUiService.layout(root);

@@ -172,11 +172,10 @@ public final class PhotoKeyboardSetupActivity extends Activity {
         getString(
             R.string.photo_keyboard_status,
             enabled ? "사진 키보드: 사용 설정됨" : "사진 키보드: 사용 설정 필요",
-            PhotoKeyboardDiagnostics.summary(this)
-                + "\n\n"
-                + PhotoUiService.status()
-                + "\n\n"
-                + PhotoLoopStore.summary(this)
+            PhotoStatusText.combine(
+                    PhotoKeyboardDiagnostics.summary(this),
+                    PhotoUiService.status(),
+                    PhotoLoopStore.summary(this))
                 + (SendScheduler.canUseExact(this)
                     ? "\n정확한 알람 사용 가능"
                     : "\n정확한 알람 권한 없음 · 요청 시각이 늦어질 수 있음")));

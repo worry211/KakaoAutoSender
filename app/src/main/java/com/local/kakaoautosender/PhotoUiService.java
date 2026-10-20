@@ -120,15 +120,17 @@ public final class PhotoUiService extends AccessibilityService {
     }
     if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) {
       AccessibilityNodeInfo source = event.getSource();
+      String controlId = clickedSendId(source);
       if (workflow.autoWaiting()
           && (source == null
-              || !workflow.expectedAutoClick(
-                  event.getWindowId(), source.getViewIdResourceName()))) {
+              || !workflow.expectedAutoClick(event.getWindowId(), source.getViewIdResourceName())
+                  && !workflow.expectedAutoClick(event.getWindowId(), controlId))) {
         fail("사진 전송 도중 다른 조작이 감지되어 예약 중지 · 중복 재시도 없음");
         return;
       }
       if (source != null
-          && workflow.manualClick(event.getWindowId(), source.getViewIdResourceName()))
+          && (workflow.manualClick(event.getWindowId(), source.getViewIdResourceName())
+              || workflow.manualClick(event.getWindowId(), controlId)))
         setStatus("전송 버튼 누름 감지 · 채팅방 복귀 확인 중 · 다시 보내지 마세요.");
     }
     if (!scanQueued) {
@@ -357,6 +359,18 @@ public final class PhotoUiService extends AccessibilityService {
         && (className.endsWith("Button")
             || id.toLowerCase(Locale.ROOT).contains("send")
             || id.toLowerCase(Locale.ROOT).contains("confirm"));
+  }
+
+  // Android may report the label/icon inside a clickable control as the event source.
+  // Only resolve its actual send-control ancestor; never infer a click from a window return.
+  static String clickedSendId(AccessibilityNodeInfo source) {
+    AccessibilityNodeInfo node = source;
+    for (int depth = 0; node != null && depth < 8; depth++, node = node.getParent()) {
+      if (!kakao(node)) return null;
+      if (sendButton(node) && !label(node).isEmpty()) return node.getViewIdResourceName();
+      if (node.isClickable()) return null; // a different clickable control is a hard boundary
+    }
+    return null;
   }
 
   static String layout(AccessibilityNodeInfo root) {

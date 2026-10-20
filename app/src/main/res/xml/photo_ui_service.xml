@@ -6,6 +6,6 @@
     android:accessibilityFlags="flagReportViewIds"
     android:packageNames="com.kakao.talk"
     android:canRetrieveWindowContent="true"
-    android:notificationTimeout="100"
+    android:notificationTimeout="0"
     android:settingsActivity="com.local.kakaoautosender.PhotoKeyboardSetupActivity"
     android:isAccessibilityTool="false" />
