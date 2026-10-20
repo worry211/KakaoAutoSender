@@ -90,6 +90,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         final String candidateSource;
         final ArrayList<String> stableIdentityKeys;
         final boolean verified;
+        final PendingIntent openIntent;
 
     ReplyTarget(
         String label,
@@ -116,6 +117,17 @@ public class KakaoNotificationListener extends NotificationListenerService {
                 String preview, String candidateRoom, int candidateConfidence,
                 String candidateSource, ArrayList<String> stableIdentityKeys, boolean verified,
                 PhotoReplyAction[] photoActions) {
+      this(label, pendingIntent, remoteInputs, capturedAt, notificationPostTime, token, sender,
+          preview, candidateRoom, candidateConfidence, candidateSource, stableIdentityKeys,
+          verified, photoActions, null);
+    }
+
+    ReplyTarget(String label, PendingIntent pendingIntent, RemoteInput[] remoteInputs,
+        long capturedAt, long notificationPostTime, String token, String sender, String preview,
+        String candidateRoom, int candidateConfidence, String candidateSource,
+        ArrayList<String> stableIdentityKeys, boolean verified, PhotoReplyAction[] photoActions,
+        PendingIntent openIntent) {
+            this.openIntent = openIntent;
             this.label = label == null ? "" : label;
             this.pendingIntent = pendingIntent;
             this.remoteInputs = remoteInputs == null ? new RemoteInput[0] : remoteInputs.clone();
@@ -148,7 +160,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
           candidateSource,
           stableIdentityKeys,
           true,
-          photoActions);
+          photoActions, openIntent);
         }
     }
 
@@ -286,7 +298,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
                 parsed.candidateSource,
                 parsed.stableIdentityKeys,
                 false,
-                PhotoReplyAction.capture(n, replyAction));
+                PhotoReplyAction.capture(n, replyAction), n.contentIntent);
 
         ArrayList<String> mappedAliases = Prefs.aliasesForIdentity(this, parsed.stableIdentityKeys);
         if (mappedAliases.size() > 1) {

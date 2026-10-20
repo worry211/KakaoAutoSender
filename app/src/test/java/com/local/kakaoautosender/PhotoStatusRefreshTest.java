@@ -52,6 +52,10 @@ public class PhotoStatusRefreshTest {
   }
 
   private AccessibilityNodeInfo root() {
+    return root(null, false);
+  }
+
+  private AccessibilityNodeInfo root(CharSequence draft, boolean password) {
     AccessibilityNodeInfo root = AccessibilityNodeInfo.obtain();
     root.setPackageName(KakaoNotificationListener.KAKAO_PACKAGE);
     root.setClassName("android.widget.FrameLayout");
@@ -70,6 +74,8 @@ public class PhotoStatusRefreshTest {
     editor.setEditable(true);
     editor.setEnabled(true);
     editor.setVisibleToUser(true);
+    editor.setText(draft);
+    editor.setPassword(password);
     Shadows.shadowOf(root).addChild(title);
     Shadows.shadowOf(root).addChild(editor);
     return root;
@@ -207,6 +213,27 @@ public class PhotoStatusRefreshTest {
       assertTrue(root.getMeasuredHeight() <= height * 2 / 5);
     } finally {
       keyboard.onDestroy();
+    }
+  }
+
+  @Test
+  public void tourRejectsDraftAndUnknownTextWithoutChangingIt() {
+    PhotoUiService helper = Robolectric.buildService(PhotoUiService.class).create().get();
+    helper.onServiceConnected();
+    try {
+      AccessibilityNodeInfo root = root("private draft", false);
+      AccessibilityNodeInfo editor = root.getChild(1);
+      foreground(helper, root);
+      assertFalse(PhotoUiService.tourEditorEmpty());
+      assertEquals("private draft", editor.getText().toString());
+      foreground(helper, root(null, false));
+      assertFalse(PhotoUiService.tourEditorEmpty());
+      foreground(helper, root("", false));
+      assertTrue(PhotoUiService.tourEditorEmpty());
+      foreground(helper, root("", true));
+      assertFalse(PhotoUiService.tourEditorEmpty());
+    } finally {
+      helper.onDestroy();
     }
   }
 

@@ -57,7 +57,7 @@ final class RoomSendReadiness {
       return result(
           Kind.PHOTO_BLOCKED,
           "사진 자동전송 미지원",
-          "사진은 저장됐지만 현재 연결로 여러 방에 자동전송할 수 없습니다. 직접 보내기를 이용하세요.",
+          "현재 알림 연결은 사진을 받지 않습니다. 메인 화면의 ‘사진 여러 방 전송’에서 방 최초 준비와 순회 전송을 사용할 수 있습니다. 화면 OFF 전송을 뜻하지 않습니다.",
           false,
           true);
     if (PhotoReplyAction.select(target.photoActions, media.mime, text) == null)

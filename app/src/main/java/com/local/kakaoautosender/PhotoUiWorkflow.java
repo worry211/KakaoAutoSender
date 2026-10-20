@@ -65,6 +65,19 @@ final class PhotoUiWorkflow {
     return anchor;
   }
 
+  Button template() {
+    return phase == Phase.READY ? learned : null;
+  }
+
+  void bindVerifiedRoute(Anchor current, Button template) {
+    if (current == null || template == null)
+      throw new IllegalArgumentException("Missing verified route");
+    reset();
+    anchor = current;
+    learned = template;
+    phase = Phase.READY;
+  }
+
   long revision() {
     return revision;
   }

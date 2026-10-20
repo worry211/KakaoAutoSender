@@ -240,6 +240,9 @@ public class MainActivityV4 extends Activity {
         Button commonSettings = tertiaryButton("여러 방 한 번에 설정");
         commonSettings.setOnClickListener(v -> chooseRoomsForCommonSettings());
         root.addView(commonSettings, top(9));
+        Button photoTour = tertiaryButton("사진 여러 방 전송");
+        photoTour.setOnClickListener(v -> startActivity(new Intent(this, PhotoTourActivity.class)));
+        root.addView(photoTour, top(7));
         renderRoomFilters();
 
         bulkBar = card(Color.rgb(23, 29, 42), Color.rgb(66, 84, 133), 16);
@@ -393,8 +396,8 @@ public class MainActivityV4 extends Activity {
             }
         }
 
-        if (PhotoKeyboardService.hasActiveLoop()) {
-            masterStatus.setText("사진 키보드 예약 실행 중");
+        if ((PhotoKeyboardService.hasActiveLoop() || PhotoTourController.active())) {
+            masterStatus.setText(PhotoTourController.active() ? "사진 여러 방 순회 실행·대기 중" : "사진 키보드 예약 실행 중");
             masterStatus.setTextColor(GREEN);
             stylePill(masterBadge, "PHOTO", Color.rgb(25, 49, 42), Color.rgb(122, 231, 176));
         } else if (active && blockedPhotos > 0) {
@@ -439,20 +442,20 @@ public class MainActivityV4 extends Activity {
             system.append("  ·  예약 정확도 ").append(exact ? "정확 시각" : "근사 시각");
         }
         system.append("  ·  자동전송 입력 확인 ").append(ready).append("/").append(usable);
-        if (PhotoKeyboardService.hasActiveLoop()) system.append("\n").append(PhotoLoopStore.summary(this));
+        if ((PhotoKeyboardService.hasActiveLoop() || PhotoTourController.active())) system.append("\n").append(PhotoTourController.active() ? PhotoTourController.status(this) : PhotoLoopStore.summary(this));
         String notice = LicenseManager.updateNotice(this);
         if (notice != null && !notice.trim().isEmpty()) system.append("\n").append(notice.trim());
         systemStatus.setText(system.toString());
         systemStatus.setTextColor(!access || !listener ? AMBER : Color.rgb(181, 191, 210));
 
         startButton.setEnabled(!active);
-        stopButton.setEnabled(active || PhotoKeyboardService.hasActiveLoop());
+        stopButton.setEnabled(active || (PhotoKeyboardService.hasActiveLoop() || PhotoTourController.active()));
         if (active) startButton.setText("자동전송 실행 중");
         else if (!access) startButton.setText("알림 접근 필요");
         else if (usable == 0) startButton.setText("방 설정을 완료하세요");
         else startButton.setText("자동전송 시작");
         startButton.setAlpha(startButton.isEnabled() ? 1f : 0.46f);
-        stopButton.setAlpha(active || PhotoKeyboardService.hasActiveLoop() ? 1f : 0.46f);
+        stopButton.setAlpha(active || (PhotoKeyboardService.hasActiveLoop() || PhotoTourController.active()) ? 1f : 0.46f);
 
         ArrayList<MultiRoomStore.Profile> displayProfiles = RoomDashboardPolicy.sorted(profiles, roomSort);
         LinkedHashSet<String> existingAliases = new LinkedHashSet<>();

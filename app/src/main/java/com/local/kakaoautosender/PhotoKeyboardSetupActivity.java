@@ -175,9 +175,11 @@ public final class PhotoKeyboardSetupActivity extends Activity {
             + "\n현재 연결: "
             + PhotoUiService.status()
             + "\n"
-            + (PhotoKeyboardService.hasActiveLoop()
-                ? PhotoLoopStore.summary(this)
-                : "현재 실행 중인 사진 예약 없음"));
+            + (PhotoTourController.active()
+                ? PhotoTourController.status(this)
+                : PhotoKeyboardService.hasActiveLoop()
+                    ? PhotoLoopStore.summary(this)
+                    : "현재 실행 중인 사진 예약 없음"));
     if (history != null)
       history.setText(
           PhotoStatusText.combine(

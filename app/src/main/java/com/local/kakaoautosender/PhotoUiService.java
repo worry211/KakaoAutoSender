@@ -31,6 +31,14 @@ public final class PhotoUiService extends AccessibilityService {
   private final Runnable scan = this::inspect;
   private String status = "사진 전송 버튼을 아직 학습하지 않았습니다.";
   private String availabilityMessage = "";
+  private final android.content.BroadcastReceiver tourScreen =
+      new android.content.BroadcastReceiver() {
+        @Override
+        public void onReceive(android.content.Context c, android.content.Intent i) {
+          PhotoTourController.screenChanged(c);
+        }
+      };
+  private boolean tourReceiverRegistered;
 
   private void setStatus(String value) {
     status = value;
@@ -41,6 +49,7 @@ public final class PhotoUiService extends AccessibilityService {
   @Override
   protected void onServiceConnected() {
     instance = new WeakReference<>(this);
+    PhotoTourController.recoverOrphan(this);
     android.accessibilityservice.AccessibilityServiceInfo info = getServiceInfo();
     if (info != null) {
       info.flags |=
@@ -49,6 +58,16 @@ public final class PhotoUiService extends AccessibilityService {
                   .FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
       info.notificationTimeout = 0;
       setServiceInfo(info);
+    }
+    if (!tourReceiverRegistered) {
+      android.content.IntentFilter f =
+          new android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF);
+      f.addAction(android.content.Intent.ACTION_SCREEN_ON);
+      f.addAction(android.content.Intent.ACTION_USER_PRESENT);
+      if (android.os.Build.VERSION.SDK_INT >= 33)
+        registerReceiver(tourScreen, f, RECEIVER_NOT_EXPORTED);
+      else registerReceiver(tourScreen, f);
+      tourReceiverRegistered = true;
     }
   }
 
@@ -148,6 +167,7 @@ public final class PhotoUiService extends AccessibilityService {
       if (className.startsWith(KakaoNotificationListener.KAKAO_PACKAGE + ".")) {
         if (activities.size() > 20) activities.clear();
         activities.put(event.getWindowId(), className);
+        PhotoTourController.windowEvent();
       }
     }
     if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) {
@@ -175,6 +195,8 @@ public final class PhotoUiService extends AccessibilityService {
     scanQueued = false;
     try {
       PhotoUiWorkflow.Phase phase = workflow.phase();
+      PhotoTourController.observeChat(currentAnchor());
+      phase = workflow.phase();
       if (phase == PhotoUiWorkflow.Phase.IDLE) {
         notifyAvailability(currentAnchor());
         return;
@@ -201,6 +223,7 @@ public final class PhotoUiService extends AccessibilityService {
           setStatus("자동화 준비 확인 완료 · 전송 버튼 누름과 채팅방 복귀 감지 · 실제 사진 도착은 카카오톡에서 확인");
           PhotoKeyboardDiagnostics.recordResult(this, status);
           if (!automatic) PhotoKeyboardService.uiLearned();
+          if (!automatic) PhotoTourController.learned(workflow.anchor(), workflow.template());
           if (automatic) {
             AccessibilityNodeInfo editor = findEditor(root, workflow.anchor().editorId);
             if (editor != null) {
@@ -306,6 +329,11 @@ public final class PhotoUiService extends AccessibilityService {
 
   @Override
   public void onDestroy() {
+    PhotoTourController.stop(this, "접근성 서비스 종료로 사진 순회를 중지했습니다.");
+    if (tourReceiverRegistered) {
+      unregisterReceiver(tourScreen);
+      tourReceiverRegistered = false;
+    }
     fail("접근성 서비스가 종료되어 사진 예약 중지");
     if (instance.get() == this) instance.clear();
     main.removeCallbacksAndMessages(null);
@@ -329,6 +357,52 @@ public final class PhotoUiService extends AccessibilityService {
 
   private AccessibilityNodeInfo currentChatRoot() {
     return rootForWindows(getWindows(), getRootInActiveWindow());
+  }
+
+  static PhotoUiWorkflow.Anchor tourAnchor() {
+    PhotoUiService s = instance.get();
+    return s == null ? null : s.currentAnchor();
+  }
+
+  static String bindTour(PhotoTourBindings.Binding b, PhotoUiWorkflow.Anchor current) {
+    PhotoUiService s = instance.get();
+    if (s == null || !b.matches(current) || !tourEditorEmpty()) return "현재 방 또는 빈 입력창을 확인할 수 없습니다.";
+    s.workflow.bindVerifiedRoute(current, b.button);
+    s.setStatus("저장한 방과 전송 버튼 준비를 확인했습니다.");
+    return "";
+  }
+
+  static boolean tourEditorEmpty() {
+    PhotoUiService s = instance.get();
+    if (s == null) return false;
+    try {
+      AccessibilityNodeInfo root = s.currentChatRoot();
+      PhotoUiWorkflow.Anchor a = root == null ? null : anchor(root);
+      AccessibilityNodeInfo editor = a == null ? null : findEditor(root, a.editorId);
+      // Only test emptiness; never retain, log, alter or transmit the draft.
+      return editor != null
+          && !editor.isPassword()
+          && (editor.isShowingHintText()
+              || editor.getText() != null && editor.getText().length() == 0);
+    } catch (RuntimeException e) {
+      return false;
+    }
+  }
+
+  static void focusTourEditor() {
+    PhotoUiService s = instance.get();
+    if (s == null) return;
+    try {
+      AccessibilityNodeInfo root = s.currentChatRoot();
+      PhotoUiWorkflow.Anchor a = root == null ? null : anchor(root);
+      AccessibilityNodeInfo editor = a == null ? null : findEditor(root, a.editorId);
+      if (editor != null) {
+        editor.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+        editor.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+      }
+    } catch (RuntimeException e) {
+      PhotoTourController.stop(s, "입력창을 열지 못해 사진 순회 중지");
+    }
   }
 
   static AccessibilityNodeInfo rootForWindows(

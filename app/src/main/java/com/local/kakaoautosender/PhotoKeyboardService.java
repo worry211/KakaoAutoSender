@@ -90,6 +90,7 @@ public final class PhotoKeyboardService extends InputMethodService {
   }
 
   static void cancelPending() {
+    PhotoTourController.stopActive("사용자가 전체 사진 전송을 중지했습니다.");
     PhotoKeyboardService service = instance.get();
     if (service == null) return;
     service.session.invalidate(false);
@@ -108,6 +109,10 @@ public final class PhotoKeyboardService extends InputMethodService {
       if (run != null
           && (plan == null ? !PhotoLoopStore.matchesRun(context, run) : !run.equals(plan.run)))
         return;
+      if (PhotoTourController.active()) {
+        PhotoTourController.stop(context, reason);
+        return;
+      }
       if (service != null) {
         service.loop.stop(context, reason);
         service.main.post(
@@ -124,7 +129,51 @@ public final class PhotoKeyboardService extends InputMethodService {
   static boolean allowFinalPhotoClick() {
     PhotoKeyboardService service = instance.get();
     PhotoLoopSession.Plan plan = service == null ? null : service.loop.current();
-    return plan != null && plan.uiPending && service.loop.uiGate(service, plan).isEmpty();
+    return plan != null
+        && plan.uiPending
+        && service.loop.uiGate(service, plan).isEmpty()
+        && (!PhotoTourController.active() || PhotoTourController.finalGate(plan.run));
+  }
+
+  static void showForTour() {
+    PhotoKeyboardService s = instance.get();
+    if (s != null && android.os.Build.VERSION.SDK_INT >= 28) s.requestShowSelf(0);
+  }
+
+  static boolean prepareTourPhoto(String room) {
+    PhotoKeyboardService s = instance.get();
+    if (s == null || !s.isInputViewShown() || s.getCurrentInputConnection() == null) return false;
+    s.prepare(room, RoomMediaStore.get(s, room));
+    return true;
+  }
+
+  static String startTourOnce(MultiRoomStore.Profile p, RoomMediaStore.Media media) {
+    PhotoKeyboardService s = instance.get();
+    if (s == null) return "사진 키보드가 연결되지 않았습니다. 사진 키보드를 기본 입력기로 선택하세요.";
+    try {
+      if (!PhotoUiService.tourEditorEmpty()) return "메시지 입력창에 작성 중인 문구가 있어 전송하지 않았습니다.";
+      String error =
+          s.loop.armTourNow(
+              s,
+              p,
+              media,
+              s.getCurrentInputEditorInfo(),
+              s.getCurrentInputConnection(),
+              PhotoUiService.ready(),
+              System.currentTimeMillis());
+      if (!error.isEmpty()) return error;
+      PhotoTourController.bindLoop(s.loop.current().run);
+      s.learnedSource = p.room;
+      s.learnedMedia = media;
+      s.session.invalidate(false);
+      s.clearPreview();
+      PhotoLoopAlarm.schedule(s, s.loop.current());
+      s.heartbeat(s.loop.current());
+      s.render();
+      return "";
+    } catch (RuntimeException e) {
+      return "사진 순회 입력 또는 예약을 시작하지 못했습니다.";
+    }
   }
 
   static void uiReturned() {
@@ -168,6 +217,7 @@ public final class PhotoKeyboardService extends InputMethodService {
           stopLoop(this, plan.run, "다음 사진 예약을 등록하지 못해 중지");
         }
       } else PhotoLoopAlarm.cancel(this);
+      if (plan.once) PhotoTourController.completed(plan.source.room, plan.run);
       render();
     } else if (!loop.active()) {
       PhotoLoopAlarm.cancel(this);
@@ -199,6 +249,11 @@ public final class PhotoKeyboardService extends InputMethodService {
     }
     if (System.currentTimeMillis() < when) {
       PhotoLoopAlarm.schedule(this, plan);
+      done.run();
+      return;
+    }
+    if (PhotoTourController.active() && !PhotoTourController.finalGate(run)) {
+      stopLoop(this, run, "순회 방 연결이 변경되어 사진을 보내지 않았습니다.");
       done.run();
       return;
     }
@@ -326,6 +381,7 @@ public final class PhotoKeyboardService extends InputMethodService {
     PhotoUiService.reconcileChat();
     status = "사진 출처의 방 이름은 받는 방이 아닙니다. 현재 카카오톡 방을 직접 확인하세요.";
     render();
+    main.postDelayed(PhotoTourController::inputReady, 200L);
   }
 
   @Override
@@ -417,6 +473,7 @@ public final class PhotoKeyboardService extends InputMethodService {
       status = ""; // A recovered/changed connection must not retain an obsolete action error.
     }
     text("카톡매크로 · 사진", 17);
+    if (PhotoTourController.active()) text(PhotoTourController.status(this), 12);
     uiStatus = text(availability.message, 12);
     actionStatus = text(status, 12);
     if (loop.active()) {
@@ -426,10 +483,15 @@ public final class PhotoKeyboardService extends InputMethodService {
       button("사진 예약 즉시 중지", () -> stopLoop(this, null, "사용자가 사진 예약을 중지했습니다."));
       return;
     }
+    if (PhotoTourController.ownsKeyboard()) {
+      button("사진 여러 방 전송 중지", () -> PhotoTourController.stop(this, "사용자가 사진 순회를 중지했습니다."));
+      return;
+    }
     if (PhotoUiService.waiting()) {
       button(
           "준비 취소 · 자동 재전송 없음",
           () -> {
+            PhotoTourController.stopActive("사용자가 방 최초 준비를 취소했습니다.");
             PhotoUiService.cancel();
             session.invalidate(isInputViewShown());
             clearPreview();
@@ -483,8 +545,18 @@ public final class PhotoKeyboardService extends InputMethodService {
                 startConfigured(room, media, recipientConfirmed, true, screenOffRequested, false));
         text("시험도 사진 한 장을 실제로 보냅니다. 절전·알람 권한에 따라 늦어질 수 있습니다.", 11);
       } else {
-        Button learn = button("자동 전송 준비 · 전송 버튼 학습 (1회)", () -> learnSelected(ticket));
-        learn.setEnabled(availability.canLearn);
+        if (PhotoTourController.canConfirmRoom()) {
+          button(
+              "현재 방 연결 완료 · 사진 보내지 않음",
+              () -> {
+                String error = PhotoTourController.confirmRoom(recipientConfirmed);
+                if (!error.isEmpty()) showActionStatus(error);
+              });
+          text("이미 준비한 전송 버튼 기준을 사용합니다. 이번 방은 확인만 하며 사진을 추가 전송하지 않습니다.", 11);
+        } else {
+          Button learn = button("자동 전송 준비 · 전송 버튼 학습 (1회)", () -> learnSelected(ticket));
+          learn.setEnabled(availability.canLearn);
+        }
         if (!availability.canLearn)
           button(
               "현재 방 연결 다시 확인",
@@ -521,6 +593,7 @@ public final class PhotoKeyboardService extends InputMethodService {
       button(
           "사진 선택 취소",
           () -> {
+            PhotoTourController.stopActive("사용자가 방 최초 준비를 취소했습니다.");
             PhotoUiService.cancel();
             session.invalidate(isInputViewShown());
             clearPreview();

@@ -110,6 +110,21 @@ public class PhotoLoopSessionTest {
   }
 
   @Test
+  public void tourOccurrenceIsImmediateOnceAndStillConsumesOnlyOneAttempt() {
+    long now = System.currentTimeMillis();
+    assertEquals("", loop.armTourNow(context, profile, media, editor, connection, true, now));
+    PhotoLoopSession.Plan plan = loop.current();
+    assertEquals(now, plan.next);
+    assertTrue(plan.once);
+    assertFalse(loop.reserve(context, plan, plan.run, now, now - 1));
+    deliver(plan);
+    assertEquals(1, connection.calls);
+    assertFalse(loop.reserve(context, plan, plan.run, now, now));
+    assertTrue(loop.completeUi(context, plan, editor, new Connection(), now + 1000));
+    assertFalse(loop.active());
+  }
+
+  @Test
   public void quickTestHonorsExplicitScreenOffExperimentWithoutChangingDefault() {
     long now = System.currentTimeMillis();
     assertEquals(

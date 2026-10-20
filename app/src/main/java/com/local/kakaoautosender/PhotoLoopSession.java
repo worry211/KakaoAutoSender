@@ -133,6 +133,46 @@ final class PhotoLoopSession {
       boolean directDeliveryConfirmed,
       long now,
       boolean quickTest) {
+    return armInternal(
+        c,
+        source,
+        media,
+        editor,
+        connection,
+        once,
+        screenOff,
+        recipientConfirmed,
+        directDeliveryConfirmed,
+        now,
+        quickTest,
+        false);
+  }
+
+  String armTourNow(
+      Context c,
+      MultiRoomStore.Profile source,
+      RoomMediaStore.Media media,
+      EditorInfo editor,
+      InputConnection connection,
+      boolean verified,
+      long now) {
+    return armInternal(
+        c, source, media, editor, connection, true, false, verified, verified, now, false, true);
+  }
+
+  private String armInternal(
+      Context c,
+      MultiRoomStore.Profile source,
+      RoomMediaStore.Media media,
+      EditorInfo editor,
+      InputConnection connection,
+      boolean once,
+      boolean screenOff,
+      boolean recipientConfirmed,
+      boolean directDeliveryConfirmed,
+      long now,
+      boolean quickTest,
+      boolean immediate) {
     synchronized (DeliveryGate.LOCK) {
       if (plan != null) return "사진 예약이 이미 실행 중입니다. 먼저 중지하세요.";
       if (!recipientConfirmed || !directDeliveryConfirmed) return "현재 방 확인과 사진 전송 버튼 학습을 먼저 완료하세요.";
@@ -150,6 +190,7 @@ final class PhotoLoopSession {
         return "오늘 사진 요청 한도에 도달했습니다.";
       Plan candidate = new Plan(source, media, connection, once, screenOff, now);
       if (quickTest) candidate.next = now + 10_000L;
+      if (immediate) candidate.next = now;
       PhotoLoopStore.arm(c, candidate.run, source.room, candidate.next);
       plan = candidate;
       return "";
