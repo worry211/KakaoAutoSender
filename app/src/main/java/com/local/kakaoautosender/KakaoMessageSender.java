@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 final class KakaoMessageSender {
     private static volatile String lastError = "";
@@ -55,28 +54,19 @@ final class KakaoMessageSender {
             return false;
         }
 
-        RemoteInput dataInput = null;
-        String acceptedMime = null;
-        for (RemoteInput input : target.remoteInputs) {
-            if (input == null) continue;
-            Set<String> types = input.getAllowedDataTypes();
-            if (types == null || types.isEmpty()) continue;
-            for (String allowed : types) {
-                if (matchesMime(allowed, media.mime)) {
-                    dataInput = input;
-                    acceptedMime = media.mime;
-                    break;
-                }
-            }
-            if (dataInput != null) break;
-        }
-
-        if (dataInput == null) {
-            lastError = "현재 카카오톡 알림 답장 방식에서는 이 방에 사진 자동전송을 지원하지 않습니다.";
+        PhotoReplyAction photoAction = PhotoReplyAction.select(
+            target.photoActions, media.mime, !message.trim().isEmpty());
+        if (photoAction == null) {
+            lastError = PhotoReplyAction.select(target.photoActions, media.mime, false) == null
+                ? "현재 카카오톡 알림 답장 방식에서는 이 방에 사진 자동전송을 지원하지 않습니다."
+                : "이 방은 사진과 문구를 함께 받는 답장 입력이 없습니다. 사진만 전송하거나 카카오톡에서 직접 보내세요.";
             return false;
         }
 
-        RemoteInput[] textInputs = freeFormInputs(target.remoteInputs);
+        RemoteInput dataInput = photoAction.imageInput(media.mime);
+        String acceptedMime = media.mime;
+
+        RemoteInput[] textInputs = freeFormInputs(photoAction.inputs);
         if (!message.trim().isEmpty() && textInputs.length == 0) {
             lastError = "현재 카카오톡 알림 답장 방식에서는 이 방에 텍스트 자동전송을 지원하지 않습니다.";
             return false;
@@ -121,7 +111,11 @@ final class KakaoMessageSender {
                     lastError = "전송 중단 · 라이선스 또는 자동전송 상태를 확인하세요.";
                     return false;
                 }
-                target.pendingIntent.send(context, 0, fillIn);
+                if (!photoAction.authenticationAvailable(context)) {
+                    lastError = "카카오톡이 잠금 해제를 요구하는 사진 답장입니다. 잠금을 해제한 뒤 다시 시도하세요.";
+                    return false;
+                }
+                photoAction.pendingIntent.send(context, 0, fillIn);
             }
             lastError = "";
             return true;

@@ -79,6 +79,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         final String label;
         final PendingIntent pendingIntent;
         final RemoteInput[] remoteInputs;
+        final PhotoReplyAction[] photoActions;
         final long capturedAt;
         final long notificationPostTime;
         final String token;
@@ -104,9 +105,21 @@ public class KakaoNotificationListener extends NotificationListenerService {
                     String candidateSource,
                     ArrayList<String> stableIdentityKeys,
                     boolean verified) {
+            this(label, pendingIntent, remoteInputs, capturedAt, notificationPostTime, token,
+                sender, preview, candidateRoom, candidateConfidence, candidateSource,
+                stableIdentityKeys, verified,
+                new PhotoReplyAction[] {new PhotoReplyAction(pendingIntent, remoteInputs)});
+        }
+
+    ReplyTarget(String label, PendingIntent pendingIntent, RemoteInput[] remoteInputs,
+                long capturedAt, long notificationPostTime, String token, String sender,
+                String preview, String candidateRoom, int candidateConfidence,
+                String candidateSource, ArrayList<String> stableIdentityKeys, boolean verified,
+                PhotoReplyAction[] photoActions) {
             this.label = label == null ? "" : label;
             this.pendingIntent = pendingIntent;
-            this.remoteInputs = remoteInputs == null ? new RemoteInput[0] : remoteInputs;
+            this.remoteInputs = remoteInputs == null ? new RemoteInput[0] : remoteInputs.clone();
+            this.photoActions = photoActions == null ? new PhotoReplyAction[0] : photoActions.clone();
             this.capturedAt = capturedAt;
             this.notificationPostTime = notificationPostTime;
             this.token = token == null ? "" : token;
@@ -134,7 +147,8 @@ public class KakaoNotificationListener extends NotificationListenerService {
           candidateConfidence,
           candidateSource,
           stableIdentityKeys,
-          true);
+          true,
+          photoActions);
         }
     }
 
@@ -261,7 +275,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         new ReplyTarget(
                 "",
                 replyAction.actionIntent,
-                replyAction.getRemoteInputs(),
+                PhotoReplyAction.allInputs(replyAction),
                 System.currentTimeMillis(),
                 sbn.getPostTime(),
                 token,
@@ -271,7 +285,8 @@ public class KakaoNotificationListener extends NotificationListenerService {
                 parsed.candidateConfidence,
                 parsed.candidateSource,
                 parsed.stableIdentityKeys,
-                false);
+                false,
+                PhotoReplyAction.capture(n, replyAction));
 
         ArrayList<String> mappedAliases = Prefs.aliasesForIdentity(this, parsed.stableIdentityKeys);
         if (mappedAliases.size() > 1) {
@@ -342,18 +357,29 @@ public class KakaoNotificationListener extends NotificationListenerService {
         }
     }
 
-    private Notification.Action findReplyAction(Notification n) {
+    static Notification.Action findReplyAction(Notification n) {
     Notification.Action best =
         findReplyActionInList(n.actions == null ? null : Arrays.asList(n.actions));
         if (best != null) return best;
         try {
-            return findReplyActionInList(new Notification.WearableExtender(n).getActions());
+            best = findReplyActionInList(new Notification.WearableExtender(n).getActions());
+            if (best != null) return best;
+            Notification.Action image = findImageReply(n.actions == null ? null : Arrays.asList(n.actions));
+            return image != null ? image : findImageReply(new Notification.WearableExtender(n).getActions());
         } catch (Throwable ignored) {
             return null;
         }
     }
 
-    private Notification.Action findReplyActionInList(List<Notification.Action> actions) {
+    private static Notification.Action findImageReply(List<Notification.Action> actions) {
+        if (actions != null) for (Notification.Action action : actions) {
+            if (PhotoReplyAction.explicitReply(action)
+                && new PhotoReplyAction(action.actionIntent, PhotoReplyAction.allInputs(action)).hasImageType()) return action;
+        }
+        return null;
+    }
+
+    private static Notification.Action findReplyActionInList(List<Notification.Action> actions) {
         if (actions == null) return null;
         Notification.Action fallback = null;
         for (Notification.Action action : actions) {
@@ -923,13 +949,18 @@ public class KakaoNotificationListener extends NotificationListenerService {
             return false;
         }
 
+        RemoteInput[] textInputs = KakaoMessageSender.freeFormInputs(target.remoteInputs);
+        if (textInputs.length == 0) {
+            lastSendError = "이 알림은 문자 답장 입력을 제공하지 않습니다.";
+            return false;
+        }
         try {
             Bundle results = new Bundle();
-            for (RemoteInput input : target.remoteInputs) {
+            for (RemoteInput input : textInputs) {
                 if (input != null) results.putCharSequence(input.getResultKey(), message);
             }
             Intent fillIn = new Intent();
-            RemoteInput.addResultsToIntent(target.remoteInputs, fillIn, results);
+            RemoteInput.addResultsToIntent(textInputs, fillIn, results);
             synchronized (DeliveryGate.LOCK) {
         if (!DeliveryGate.allowed(context) || !isCurrentTarget(requested, target)) {
           lastSendError = "전송 중단 · 새 알림 연결 또는 라이선스 상태를 확인하세요.";

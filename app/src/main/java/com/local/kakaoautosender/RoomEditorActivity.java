@@ -65,6 +65,8 @@ public class RoomEditorActivity extends Activity {
     private TextView executionStatus;
     private TextView nextPreview;
     private TextView imageStatus;
+    private TextView photoSupportStatus;
+    private Button sharePhotoButton;
     private TextView messageCount;
     private TextView dirtyStatus;
     private Button saveButton;
@@ -72,6 +74,7 @@ public class RoomEditorActivity extends Activity {
     private android.widget.ImageView imagePreview;
     private boolean loading;
     private boolean dirty;
+    private boolean resumed;
     private MultiRoomStore.Profile cachedProfile;
     private final Handler previewHandler = new Handler(Looper.getMainLooper());
     private final Runnable previewRunnable = this::refreshNextPreview;
@@ -95,10 +98,16 @@ public class RoomEditorActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        resumed = true;
         KakaoNotificationListener.requestRefresh();
         refreshConnection();
         refreshMedia();
         refreshNextPreview();
+    }
+
+    @Override protected void onPause() {
+        resumed = false;
+        super.onPause();
     }
 
     @Override public void onBackPressed() {
@@ -189,6 +198,11 @@ public class RoomEditorActivity extends Activity {
         removeLp.leftMargin = dp(8);
         imageButtons.addView(remove, removeLp);
         imageCard.addView(imageButtons, top(11));
+        photoSupportStatus = text("", 11, false, AMBER);
+        imageCard.addView(photoSupportStatus, top(10));
+        sharePhotoButton = secondaryButton("카카오톡에서 사진 직접 보내기");
+        sharePhotoButton.setOnClickListener(v -> sharePhoto());
+        imageCard.addView(sharePhotoButton, top(10));
         TextView imageHelp = text("이미지 첨부를 지원하지 않는 환경에서는 텍스트만 임의로 보내지 않고 전송을 실패 처리해 오동작을 막습니다.", 11, false, Color.rgb(119, 132, 156));
         imageHelp.setLineSpacing(0, 1.14f);
         imageCard.addView(imageHelp, top(9));
@@ -430,6 +444,17 @@ public class RoomEditorActivity extends Activity {
     private void refreshMedia() {
         if (imageStatus == null) return;
         RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
+        sharePhotoButton.setEnabled(media.hasImage());
+        KakaoNotificationListener.ReplyTarget photoTarget = KakaoNotificationListener.findTarget(routeAlias);
+        String photoSupport;
+        if (!media.hasImage()) photoSupport = "사진을 선택하면 자동전송 입력 지원 여부를 확인합니다.";
+        else if (photoTarget == null || !photoTarget.verified
+            || !RoomRouting.sameTitle(routeAlias, photoTarget.label))
+            photoSupport = "사진 자동전송 확인 대기 · 이 방의 새 알림을 연결하세요.";
+        else if (PhotoReplyAction.select(photoTarget.photoActions, media.mime, false) != null)
+            photoSupport = "사진 답장 입력 감지 · 1회 테스트 후 실제 도착을 확인하세요.";
+        else photoSupport = "현재 알림에 사진 입력 없음 · 아래에서 카카오톡으로 직접 보낼 수 있습니다. 직접 보내기는 자동·반복 전송이 아닙니다.";
+        photoSupportStatus.setText(photoSupport);
         if (!media.hasImage()) {
             imagePreview.setImageDrawable(null);
             imagePreview.setVisibility(View.GONE);
@@ -463,6 +488,45 @@ public class RoomEditorActivity extends Activity {
             imageStatus.setText("● 사진 첨부 · " + name);
             imageStatus.setTextColor(Color.rgb(164, 182, 255));
         }
+    }
+
+    private void sharePhoto() {
+        RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
+        if (!media.hasImage()) { toast("먼저 사진을 선택하세요."); return; }
+        new AlertDialog.Builder(this)
+            .setTitle("카카오톡에서 사진 직접 보내기")
+            .setMessage("카카오톡 화면에서 받는 방을 직접 선택하고 전송하세요. 방 이름과 참여자를 확인해 주세요.\n\n선택한 사진만 전달합니다. 작성한 문구는 함께 보내지 않습니다. 자동·반복 전송과 별개이며, 화면을 켜고 사용합니다.")
+            .setNegativeButton("취소", null)
+            .setPositiveButton("카카오톡 열기", (dialog, which) ->
+                LicenseManager.runAuthorized(this, this::preparePhotoShare)).show();
+    }
+
+    private void preparePhotoShare() {
+        RoomMediaStore.Media selected = RoomMediaStore.get(this, routeAlias);
+        sharePhotoButton.setEnabled(false);
+        new Thread(() -> {
+            Intent request = null;
+            try {
+                request = PhotoShareRequest.create(this, selected);
+            } catch (java.io.IOException | RuntimeException ignored) { }
+            final Intent prepared = request;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                sharePhotoButton.setEnabled(RoomMediaStore.get(this, routeAlias).hasImage());
+                if (!resumed) return;
+                if (prepared == null) { toast("사진을 읽을 수 없습니다. 사진을 다시 선택하세요."); return; }
+                if (!LicenseManager.isUsable(this)) { LicenseManager.route(this); return; }
+                if (!selected.uri.equals(RoomMediaStore.get(this, routeAlias).uri)) {
+                    toast("선택한 사진이 바뀌었습니다. 다시 눌러 주세요."); return;
+                }
+                try { startActivity(prepared); }
+                catch (android.content.ActivityNotFoundException error) {
+                    toast("사진을 공유할 카카오톡을 찾을 수 없습니다.");
+                } catch (RuntimeException error) {
+                    toast("카카오톡을 열지 못했습니다. 사진 권한과 카카오톡 설치를 확인하세요.");
+                }
+            });
+        }, "photo-share").start();
     }
 
     private void updateScheduleVisibility() {
@@ -541,9 +605,9 @@ public class RoomEditorActivity extends Activity {
                 .setPositiveButton("전송", (d, w) -> LicenseManager.runAuthorized(this, () -> {
                     boolean ok = KakaoMessageSender.send(this, routeAlias, draftMessage, media);
                     String error = KakaoMessageSender.lastError();
-                    Prefs.setStatus(this, ok ? "수동 전송 성공: " + p.title()
+                    Prefs.setStatus(this, ok ? (media.hasImage() ? "사진 전송 요청 완료: " : "수동 전송 성공: ") + p.title()
                             : "수동 전송 실패: " + p.title() + " · " + error);
-                    toast(ok ? "테스트 전송에 성공했습니다." : "전송 실패: " + error);
+                    toast(ok ? (media.hasImage() ? "카카오톡에 사진 전송을 요청했습니다. 실제 도착을 확인하세요." : "테스트 전송에 성공했습니다.") : "전송 실패: " + error);
                     refreshConnection();
                 }))
                 .setNegativeButton("취소", null)
