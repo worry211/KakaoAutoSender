@@ -7,12 +7,14 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -28,6 +30,7 @@ public final class PhotoUiService extends AccessibilityService {
   private long deadlineElapsed;
   private final Runnable scan = this::inspect;
   private String status = "사진 전송 버튼을 아직 학습하지 않았습니다.";
+  private String availabilityMessage = "";
 
   private void setStatus(String value) {
     status = value;
@@ -38,6 +41,15 @@ public final class PhotoUiService extends AccessibilityService {
   @Override
   protected void onServiceConnected() {
     instance = new WeakReference<>(this);
+    android.accessibilityservice.AccessibilityServiceInfo info = getServiceInfo();
+    if (info != null) {
+      info.flags |=
+          android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+              | android.accessibilityservice.AccessibilityServiceInfo
+                  .FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+      info.notificationTimeout = 0;
+      setServiceInfo(info);
+    }
   }
 
   static boolean connected() {
@@ -55,8 +67,16 @@ public final class PhotoUiService extends AccessibilityService {
   }
 
   static boolean ready() {
-    PhotoUiService s = instance.get();
-    return s != null && s.workflow.ready(s.currentAnchor());
+    return readiness().canSchedule;
+  }
+
+  static PhotoUiReadiness readiness() {
+    PhotoUiService service = instance.get();
+    return PhotoUiReadiness.evaluate(
+        service != null,
+        service == null ? PhotoUiWorkflow.Phase.IDLE : service.workflow.phase(),
+        service == null ? null : service.workflow.anchor(),
+        service == null ? null : service.currentAnchor());
   }
 
   static void reconcileChat() {
@@ -68,15 +88,18 @@ public final class PhotoUiService extends AccessibilityService {
   }
 
   static String status() {
-    PhotoUiService s = instance.get();
-    return s == null ? "접근성의 사진 전송 보조를 먼저 켜세요." : s.status;
+    return readiness().message;
   }
 
   static String learn() {
     PhotoUiService s = instance.get();
     if (s == null) return "접근성의 사진 전송 보조를 먼저 켜세요.";
     PhotoUiWorkflow.Anchor anchor = s.currentAnchor();
-    if (anchor == null) return "현재 채팅방 제목과 입력창을 확인할 수 없습니다. 이 화면은 자동화하지 않습니다.";
+    if (anchor == null) {
+      String reason = "현재 채팅방 제목과 입력창을 확인할 수 없어 준비를 시작하지 않았습니다.";
+      s.fail(reason);
+      return reason;
+    }
     s.workflow.learn(anchor);
     s.setStatus("자동화 준비 확인 중 · 사진을 이미 보냈다면 다시 보내지 마세요. 전송 동작 감지와 사진 도착은 별개입니다.");
     s.timeout(45_000L);
@@ -112,13 +135,14 @@ public final class PhotoUiService extends AccessibilityService {
 
   @Override
   public void onAccessibilityEvent(AccessibilityEvent event) {
-    if (event == null || workflow.phase() == PhotoUiWorkflow.Phase.IDLE) return;
+    if (event == null) return;
     if (workflow.waiting() && android.os.SystemClock.elapsedRealtime() >= deadlineElapsed) {
       fail("사진 전송 확인 시간이 지나 예약 중지");
       return;
     }
-    if (!KakaoNotificationListener.KAKAO_PACKAGE.contentEquals(
-        event.getPackageName() == null ? "" : event.getPackageName())) return;
+    if (event.getEventType() != AccessibilityEvent.TYPE_WINDOWS_CHANGED
+        && !KakaoNotificationListener.KAKAO_PACKAGE.contentEquals(
+            event.getPackageName() == null ? "" : event.getPackageName())) return;
     if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
       String className = String.valueOf(event.getClassName());
       if (className.startsWith(KakaoNotificationListener.KAKAO_PACKAGE + ".")) {
@@ -151,13 +175,19 @@ public final class PhotoUiService extends AccessibilityService {
     scanQueued = false;
     try {
       PhotoUiWorkflow.Phase phase = workflow.phase();
-      if (phase == PhotoUiWorkflow.Phase.IDLE) return;
+      if (phase == PhotoUiWorkflow.Phase.IDLE) {
+        notifyAvailability(currentAnchor());
+        return;
+      }
       if (workflow.waiting() && android.os.SystemClock.elapsedRealtime() >= deadlineElapsed) {
         fail("사진 전송 확인 시간이 지나 예약 중지");
         return;
       }
-      AccessibilityNodeInfo root = getRootInActiveWindow();
-      if (!kakao(root)) return;
+      AccessibilityNodeInfo root = currentChatRoot();
+      if (!kakao(root)) {
+        if (phase == PhotoUiWorkflow.Phase.READY) notifyAvailability(null);
+        return;
+      }
       PhotoUiWorkflow.Anchor current = anchor(root);
       if (workflow.returnedWithoutClick(current)) {
         fail("채팅방으로 돌아왔지만 전송 동작을 감지하지 못해 자동화 준비를 완료하지 못했습니다. 사진이 도착했다면 다시 보내지 마세요.");
@@ -184,6 +214,7 @@ public final class PhotoUiService extends AccessibilityService {
       }
       if (phase == PhotoUiWorkflow.Phase.READY) {
         if (current != null && !workflow.ready(current)) fail("채팅방이 바뀌어 사진 예약과 버튼 학습 중지");
+        else notifyAvailability(current);
         return;
       }
       if (workflow.anchor() == null || root.getWindowId() == workflow.anchor().window) return;
@@ -213,7 +244,7 @@ public final class PhotoUiService extends AccessibilityService {
             fail("중지 또는 설정 변경으로 사진 예약을 중지했습니다.");
             return;
           }
-          AccessibilityNodeInfo fresh = getRootInActiveWindow();
+          AccessibilityNodeInfo fresh = currentChatRoot();
           if (!kakao(fresh)
               || fresh.getWindowId() != root.getWindowId()
               || !layout(fresh).equals(button.layout)
@@ -245,6 +276,16 @@ public final class PhotoUiService extends AccessibilityService {
         duration);
   }
 
+  private void notifyAvailability(PhotoUiWorkflow.Anchor current) {
+    String message =
+        PhotoUiReadiness.evaluate(true, workflow.phase(), workflow.anchor(), current).message;
+    if (!message.equals(availabilityMessage)) {
+      availabilityMessage = message;
+      PhotoKeyboardService.uiStatusChanged();
+      PhotoKeyboardSetupActivity.uiStatusChanged();
+    }
+  }
+
   private void fail(String reason) {
     workflow.reset();
     releaseWake();
@@ -273,7 +314,7 @@ public final class PhotoUiService extends AccessibilityService {
 
   private PhotoUiWorkflow.Anchor currentAnchor() {
     try {
-      AccessibilityNodeInfo root = getRootInActiveWindow();
+      AccessibilityNodeInfo root = currentChatRoot();
       return kakao(root) ? anchor(root) : null;
     } catch (RuntimeException error) {
       return null;
@@ -286,9 +327,34 @@ public final class PhotoUiService extends AccessibilityService {
             root.getPackageName() == null ? "" : root.getPackageName());
   }
 
+  private AccessibilityNodeInfo currentChatRoot() {
+    return rootForWindows(getWindows(), getRootInActiveWindow());
+  }
+
+  static AccessibilityNodeInfo rootForWindows(
+      List<AccessibilityWindowInfo> windows, AccessibilityNodeInfo activeRoot) {
+    if (windows == null || windows.isEmpty()) return kakao(activeRoot) ? activeRoot : null;
+    AccessibilityWindowInfo focused = null, active = null;
+    for (AccessibilityWindowInfo window : windows) {
+      if (window == null || window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+      if (window.isFocused()) {
+        if (focused != null) return null;
+        focused = window;
+      }
+      if (window.isActive()) {
+        if (active != null) return null;
+        active = window;
+      }
+    }
+    if (focused != null && active != null && focused.getId() != active.getId()) return null;
+    AccessibilityWindowInfo foreground = focused != null ? focused : active;
+    AccessibilityNodeInfo root = foreground == null ? null : foreground.getRoot();
+    return kakao(root) ? root : null;
+  }
+
   private static AccessibilityNodeInfo findEditor(AccessibilityNodeInfo root, String id) {
     AccessibilityNodeInfo found = null;
-    for (AccessibilityNodeInfo node : nodes(root))
+    for (AccessibilityNodeInfo node : chromeNodes(root))
       if (node.isVisibleToUser() && node.isEditable() && id.equals(node.getViewIdResourceName())) {
         if (found != null) return null;
         found = node;
@@ -297,8 +363,9 @@ public final class PhotoUiService extends AccessibilityService {
   }
 
   static PhotoUiWorkflow.Anchor anchor(AccessibilityNodeInfo root) {
+    ArrayList<AccessibilityNodeInfo> chrome = chromeNodes(root);
     AccessibilityNodeInfo editor = null;
-    for (AccessibilityNodeInfo node : nodes(root))
+    for (AccessibilityNodeInfo node : chrome)
       if (node.isVisibleToUser()
           && node.isEnabled()
           && node.isEditable()
@@ -310,7 +377,7 @@ public final class PhotoUiService extends AccessibilityService {
     Rect bounds = new Rect();
     root.getBoundsInScreen(bounds);
     ArrayList<String> headers = new ArrayList<>();
-    for (AccessibilityNodeInfo node : nodes(root)) {
+    for (AccessibilityNodeInfo node : chrome) {
       String id = node.getViewIdResourceName();
       if (id == null || node.isEditable() || !node.isVisibleToUser()) continue;
       String name = id.toLowerCase(Locale.ROOT);
@@ -404,10 +471,24 @@ public final class PhotoUiService extends AccessibilityService {
   }
 
   private static ArrayList<AccessibilityNodeInfo> nodes(AccessibilityNodeInfo root) {
+    return nodes(root, false);
+  }
+
+  private static ArrayList<AccessibilityNodeInfo> chromeNodes(AccessibilityNodeInfo root) {
+    return nodes(root, true);
+  }
+
+  private static ArrayList<AccessibilityNodeInfo> nodes(
+      AccessibilityNodeInfo root, boolean skipLists) {
     ArrayList<AccessibilityNodeInfo> result = new ArrayList<>();
     result.add(root);
     for (int i = 0; i < result.size(); i++) {
       AccessibilityNodeInfo node = result.get(i);
+      String type = String.valueOf(node.getClassName());
+      if (skipLists
+          && (type.contains("RecyclerView")
+              || type.endsWith("ListView")
+              || type.endsWith("ScrollView"))) continue;
       if (node.getChildCount() > 600) throw new IllegalStateException("Ambiguous large UI tree");
       for (int j = 0; j < node.getChildCount(); j++) {
         AccessibilityNodeInfo child = node.getChild(j);

@@ -4,6 +4,9 @@ import static org.junit.Assert.*;
 
 import android.graphics.Rect;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
+import java.util.Arrays;
+import java.util.Collections;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
@@ -140,6 +143,72 @@ public class PhotoUiTreeTest {
     child(list, attachmentTitle);
     child(root, list);
     assertTrue(original.same(PhotoUiService.anchor(root)));
+  }
+
+  @Test
+  public void largeConversationListsDoNotHideToolbarAndEditorOrReadMessages() {
+    AccessibilityNodeInfo root = root();
+    PhotoUiWorkflow.Anchor original = PhotoUiService.anchor(root);
+    AccessibilityNodeInfo messages = node("messages", "androidx.recyclerview.widget.RecyclerView");
+    child(root, messages);
+    for (int i = 0; i < 700; i++) child(messages, node("message_" + i, "TextView"));
+    assertTrue(original.same(PhotoUiService.anchor(root)));
+    // Preview layout matching still rejects oversized trees rather than truncating them.
+    assertThrows(IllegalStateException.class, () -> PhotoUiService.layout(root));
+  }
+
+  private AccessibilityWindowInfo window(
+      int id, int type, AccessibilityNodeInfo root, boolean focused, boolean active) {
+    AccessibilityWindowInfo window = AccessibilityWindowInfo.obtain();
+    Shadows.shadowOf(window).setId(id);
+    Shadows.shadowOf(window).setType(type);
+    Shadows.shadowOf(window).setRoot(root);
+    Shadows.shadowOf(window).setFocused(focused);
+    Shadows.shadowOf(window).setActive(active);
+    return window;
+  }
+
+  @Test
+  public void focusedKakaoApplicationIsResolvedWhileOwnKeyboardIsActive() {
+    AccessibilityNodeInfo chat = root();
+    AccessibilityNodeInfo ime = node("keyboard", "FrameLayout");
+    ime.setPackageName("com.local.kakaoautosender");
+    AccessibilityWindowInfo app =
+        window(1, AccessibilityWindowInfo.TYPE_APPLICATION, chat, true, false);
+    AccessibilityWindowInfo keyboard =
+        window(2, AccessibilityWindowInfo.TYPE_INPUT_METHOD, ime, false, true);
+    AccessibilityNodeInfo resolved =
+        PhotoUiService.rootForWindows(Arrays.asList(keyboard, app), ime);
+    assertNotNull(resolved);
+    assertTrue(PhotoUiService.anchor(chat).same(PhotoUiService.anchor(resolved)));
+  }
+
+  @Test
+  public void backgroundKakaoIsNeverSelectedBehindAnotherForegroundApp() {
+    AccessibilityNodeInfo chat = root();
+    AccessibilityNodeInfo other = node("other", "FrameLayout");
+    other.setPackageName("other.app");
+    AccessibilityWindowInfo background =
+        window(1, AccessibilityWindowInfo.TYPE_APPLICATION, chat, false, false);
+    AccessibilityWindowInfo foreground =
+        window(2, AccessibilityWindowInfo.TYPE_APPLICATION, other, true, true);
+    assertNull(PhotoUiService.rootForWindows(Arrays.asList(background, foreground), chat));
+    // Conflicting split-screen focus and active application cannot authorize a send.
+    Shadows.shadowOf(background).setFocused(true);
+    Shadows.shadowOf(foreground).setFocused(false);
+    assertNull(PhotoUiService.rootForWindows(Arrays.asList(background, foreground), chat));
+  }
+
+  @Test
+  public void missingOrAmbiguousWindowsFailClosed() {
+    AccessibilityNodeInfo chat = root();
+    AccessibilityWindowInfo app =
+        window(1, AccessibilityWindowInfo.TYPE_APPLICATION, chat, true, true);
+    AccessibilityWindowInfo duplicate =
+        window(2, AccessibilityWindowInfo.TYPE_APPLICATION, chat, true, true);
+    assertNull(PhotoUiService.rootForWindows(Arrays.asList(app, duplicate), chat));
+    assertSame(chat, PhotoUiService.rootForWindows(Collections.emptyList(), chat));
+    assertNull(PhotoUiService.rootForWindows(Collections.emptyList(), null));
   }
 
   @Test

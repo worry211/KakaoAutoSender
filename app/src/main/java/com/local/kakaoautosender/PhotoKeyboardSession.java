@@ -14,7 +14,7 @@ import java.util.Locale;
 
 /** One explicit user gesture, bound to one visible editor generation. Never retries a commit. */
 final class PhotoKeyboardSession {
-  static final long CONFIRM_WINDOW_MS = 30_000L;
+  static final long CONFIRM_WINDOW_MS = 120_000L;
   private long generation;
   private long nextTicket;
   private boolean visible;

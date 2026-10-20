@@ -110,6 +110,20 @@ public class PhotoLoopSessionTest {
   }
 
   @Test
+  public void quickTestHonorsExplicitScreenOffExperimentWithoutChangingDefault() {
+    long now = System.currentTimeMillis();
+    assertEquals(
+        "", loop.armQuickTest(context, profile, media, editor, connection, true, true, now, true));
+    assertTrue(loop.current().screenOff);
+    assertTrue(loop.current().once);
+    assertEquals(now + 10000L, loop.current().next);
+    loop.stop(context, "test reset");
+    assertEquals(
+        "", loop.armQuickTest(context, profile, media, editor, connection, true, true, now));
+    assertFalse(loop.current().screenOff);
+  }
+
+  @Test
   public void quickTestUsesTenSecondsWithoutChangingSavedScheduleAndCannotRepeat() {
     long now = System.currentTimeMillis();
     assertEquals(

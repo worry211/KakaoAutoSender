@@ -17,6 +17,7 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -43,6 +44,10 @@ public final class PhotoKeyboardService extends InputMethodService {
   private LinearLayout panel;
   private TextView uiStatus;
   private TextView actionStatus;
+  private boolean recipientConfirmed;
+  private boolean advancedExpanded;
+  private boolean screenOffRequested;
+  private String displayedAvailability = "";
   private String status = "카카오톡 채팅 입력창에서 사진을 선택하세요.";
   private PhotoKeyboardSession.Ticket shown;
   private Bitmap preview;
@@ -132,7 +137,7 @@ public final class PhotoKeyboardService extends InputMethodService {
     if (service != null)
       service.main.post(
           () -> {
-            if (service.uiStatus != null) service.uiStatus.setText(PhotoUiService.status());
+            service.render();
           });
   }
 
@@ -287,9 +292,11 @@ public final class PhotoKeyboardService extends InputMethodService {
     panel.setPadding(dp(16), dp(12), dp(16), dp(12));
     panel.setBackgroundColor(Color.rgb(18, 23, 34));
     scroll.addView(panel);
-    scroll.setLayoutParams(new android.view.ViewGroup.LayoutParams(-1, dp(310)));
+    FrameLayout frame = new FrameLayout(this);
+    frame.setBackgroundColor(Color.rgb(18, 23, 34));
+    frame.addView(scroll, new FrameLayout.LayoutParams(-1, keyboardHeightPx()));
     render();
-    return scroll;
+    return frame;
   }
 
   @Override
@@ -302,9 +309,12 @@ public final class PhotoKeyboardService extends InputMethodService {
     super.onStartInput(editor, restarting);
     session.invalidate(false);
     clearPreview();
-    if (editor == null
-        || !KakaoNotificationListener.KAKAO_PACKAGE.equals(editor.packageName)
-        || !expectedUiTransition()) cancel("입력창이 바뀌었습니다. 보낼 사진을 선택하세요.");
+    if (editor == null || !KakaoNotificationListener.KAKAO_PACKAGE.equals(editor.packageName)) {
+      PhotoUiService.cancel();
+      cancel("카카오톡 입력 연결이 종료되었습니다. 현재 방에서 다시 준비하세요.");
+    } else if (!expectedUiTransition() && !keepLoopWhileHidden()) {
+      cancel("입력창이 연결되었습니다. 현재 방과 보낼 사진을 확인하세요.");
+    }
   }
 
   @Override
@@ -393,148 +403,155 @@ public final class PhotoKeyboardService extends InputMethodService {
     photos.purge();
     // ImageView may retain the previous bitmap until render removes it. Let GC own its lifetime.
     preview = null;
+    recipientConfirmed = false;
+    advancedExpanded = false;
+    screenOffRequested = false;
   }
 
   private void render() {
     if (panel == null) return;
     panel.removeAllViews();
-    uiStatus = null;
-    text("카톡매크로 · 사진 키보드", 17);
+    PhotoUiReadiness availability = PhotoUiService.readiness();
+    if (!availability.message.equals(displayedAvailability)) {
+      displayedAvailability = availability.message;
+      status = ""; // A recovered/changed connection must not retain an obsolete action error.
+    }
+    text("카톡매크로 · 사진", 17);
+    uiStatus = text(availability.message, 12);
     actionStatus = text(status, 12);
-    uiStatus = text(PhotoUiService.status(), 12);
     if (loop.active()) {
       text(PhotoLoopStore.summary(this), 12);
-      text("현재 채팅방은 유지하세요. 키보드만 접을 수 있으며, 다른 앱·방으로 이동하거나 입력 연결이 종료되면 중지합니다.", 12);
+      text("현재 방 유지 · 다른 앱/방 이동 또는 입력 연결 종료 시 중지", 11);
       button("키보드 접기 · 예약 유지", () -> requestHideSelf(0));
       button("사진 예약 즉시 중지", () -> stopLoop(this, null, "사용자가 사진 예약을 중지했습니다."));
       return;
     }
-    if (shown == null
-        && learnedSource != null
-        && learnedMedia != null
-        && PhotoUiService.ready()
-        && PhotoKeyboardSession.sameMedia(RoomMediaStore.get(this, learnedSource), learnedMedia)) {
-      renderReadyPhoto();
+    if (PhotoUiService.waiting()) {
       button(
-          "다른 사진 선택",
+          "준비 취소 · 자동 재전송 없음",
           () -> {
-            learnedSource = null;
-            learnedMedia = null;
+            PhotoUiService.cancel();
+            session.invalidate(isInputViewShown());
+            clearPreview();
+            status = "준비를 취소했습니다. 이미 전달한 사진의 도착 여부는 카카오톡에서 확인하세요.";
             render();
           });
       return;
     }
-    if (shown != null && session.current(shown) && preview != null) {
-      PhotoKeyboardSession.Ticket ticket = shown;
-      ImageView image = new ImageView(this);
-      image.setAdjustViewBounds(true);
-      image.setImageBitmap(preview);
-      panel.addView(image, new LinearLayout.LayoutParams(-1, dp(120)));
-      text(
-          "선택한 사진: "
-              + ticket.media.name
-              + "\n즉시 전송될 수 있습니다. 입력 중인 문구는 먼저 정리하세요. 앱에 저장한 문구는 전달하지 않습니다.",
-          12);
+    PhotoKeyboardSession.Ticket ticket = shown != null && session.current(shown) ? shown : null;
+    String room = ticket != null ? ticket.room : learnedSource;
+    RoomMediaStore.Media media = ticket != null ? ticket.media : learnedMedia;
+    boolean remembered =
+        availability.canSchedule
+            && room != null
+            && media != null
+            && MultiRoomStore.get(this, room) != null
+            && PhotoKeyboardSession.sameMedia(RoomMediaStore.get(this, room), media);
+    if (ticket != null && preview != null || remembered) {
+      if (ticket != null && preview != null) {
+        ImageView image = new ImageView(this);
+        image.setAdjustViewBounds(true);
+        image.setImageBitmap(preview);
+        panel.addView(image, new LinearLayout.LayoutParams(-1, dp(80)));
+      }
+      text("선택한 사진: " + media.name, 12);
+      text("수신자는 현재 열린 카카오톡 방입니다. 저장 문구는 함께 전달하지 않습니다.", 11);
       CheckBox confirm = new CheckBox(this);
       confirm.setText("현재 카카오톡 방과 사진을 확인했습니다");
       confirm.setTextColor(Color.WHITE);
+      confirm.setChecked(recipientConfirmed);
       panel.addView(confirm);
-      Button send =
+      if (availability.canSchedule) {
+        MultiRoomStore.Profile source = MultiRoomStore.get(this, room);
+        if (source != null)
+          text(
+              "일정: "
+                  + MultiRoomStore.scheduleSummary(source)
+                  + " · 하루 한도 "
+                  + (source.dailyLimit == 0 ? "무제한" : source.dailyLimit + "회"),
+              12);
+        button(
+            "10초 후 자동전송 1회 시험",
+            () -> startConfigured(room, media, recipientConfirmed, true, screenOffRequested, true));
+        button(
+            "저장한 일정으로 반복 시작",
+            () ->
+                startConfigured(room, media, recipientConfirmed, false, screenOffRequested, false));
+        button(
+            "다음 일정에 1회 예약",
+            () ->
+                startConfigured(room, media, recipientConfirmed, true, screenOffRequested, false));
+        text("시험도 사진 한 장을 실제로 보냅니다. 절전·알람 권한에 따라 늦어질 수 있습니다.", 11);
+      } else {
+        Button learn = button("자동 전송 준비 · 전송 버튼 학습 (1회)", () -> learnSelected(ticket));
+        learn.setEnabled(availability.canLearn);
+        if (!availability.canLearn)
           button(
-              "현재 방에 사진 전달 · 1회",
+              "현재 방 연결 다시 확인",
               () -> {
-                // The first tap consumes the ticket even if Kakao returns false or throws.
-                String result =
-                    session.commit(
-                        this,
-                        ticket,
-                        getCurrentInputEditorInfo(),
-                        getCurrentInputConnection(),
-                        confirm.isChecked());
-                clearPreview();
-                status = result;
-                PhotoKeyboardDiagnostics.recordResult(this, result);
+                status = "현재 연결을 다시 확인했습니다.";
                 render();
               });
-      send.setEnabled(false);
+        if (ticket != null) renderManualSend(ticket);
+      }
       confirm.setOnCheckedChangeListener(
-          (view, checked) -> send.setEnabled(checked && session.current(ticket)));
-      text("예약 전 방 설정에서 간격·매일 시각·하루 한도를 저장하세요. 같은 방의 기존 자동전송은 꺼야 합니다.", 12);
+          (view, checked) -> {
+            recipientConfirmed = checked;
+            // Keep the same controls/scroll position. A rejected action never clears this checkbox.
+          });
       button(
-          "자동 전송 준비 · 전송 버튼 학습 (1회)",
+          advancedExpanded ? "고급 설정 접기" : "고급 설정",
           () -> {
-            if (!session.current(ticket)) {
-              clearPreview();
-              status = "사진 선택이 만료되었습니다. 사진을 다시 선택하세요.";
-              render();
-              return;
-            }
-            if (!confirm.isChecked()) {
-              showActionStatus("아래의 현재 방 확인을 체크한 뒤 학습을 시작하세요.");
-              return;
-            }
-            String rejection = PhotoUiService.learn();
-            if (!rejection.isEmpty()) {
-              showActionStatus(rejection);
-              return;
-            }
-            String result =
-                session.commit(
-                    this, ticket, getCurrentInputEditorInfo(), getCurrentInputConnection(), true);
-            boolean accepted = result.startsWith("사진 전달 요청");
-            if (!accepted) PhotoUiService.cancel();
-            if (accepted) {
-              learnedSource = ticket.room;
-              learnedMedia = ticket.media;
-            }
-            clearPreview();
-            status =
-                accepted
-                    ? "카카오톡에 사진을 전달했습니다. 사진 미리보기가 열려 있다면 카카오톡에서 전송을 마치세요. 이미 보냈다면 다시 누르지 마세요."
-                    : result;
-            PhotoKeyboardDiagnostics.recordResult(this, status);
+            advancedExpanded = !advancedExpanded;
             render();
           });
-      CheckBox screenOffOption = new CheckBox(this);
-      screenOffOption.setText("화면 꺼짐에서도 시도 · 실험 기능");
-      screenOffOption.setTextColor(Color.WHITE);
-      panel.addView(screenOffOption);
-      text("Android가 연결 또는 화면 확인을 막으면 중지합니다. 잠금 해제·강제 화면 켜기를 하지 않으며 화면 꺼짐 성공은 미검증입니다.", 11);
-      MultiRoomStore.Profile configured = MultiRoomStore.get(this, ticket.room);
-      if (configured != null)
-        text(
-            "저장한 일정: "
-                + MultiRoomStore.scheduleSummary(configured)
-                + " · 하루 요청 한도 "
-                + (configured.dailyLimit == 0 ? "무제한" : configured.dailyLimit + "회"),
-            12);
-      button(
-          "다음 일정에 1회 예약",
-          () -> startLoop(ticket, confirm.isChecked(), true, screenOffOption.isChecked()));
-      button(
-          "저장한 일정으로 반복 시작",
-          () -> startLoop(ticket, confirm.isChecked(), false, screenOffOption.isChecked()));
+      if (advancedExpanded) {
+        CheckBox off = new CheckBox(this);
+        off.setText("화면 꺼짐에서 시도 · 지원 미확인 실험");
+        off.setTextColor(Color.WHITE);
+        off.setChecked(screenOffRequested);
+        off.setOnCheckedChangeListener((view, checked) -> screenOffRequested = checked);
+        panel.addView(off);
+        text("현재 연결이 유지될 때만 시도합니다. 실제 화면 OFF 전송은 미검증이며 잠금을 풀거나 화면을 켜지 않습니다.", 11);
+        if (availability.canSchedule && ticket != null) {
+          button("현재 방 전송 버튼 다시 학습", () -> learnSelected(ticket));
+          renderManualSend(ticket);
+        }
+      }
       button(
           "사진 선택 취소",
           () -> {
-            session.invalidate(true);
+            PhotoUiService.cancel();
+            session.invalidate(isInputViewShown());
             clearPreview();
-            status = "취소했습니다. 아무 사진도 전달하지 않았습니다.";
+            learnedSource = null;
+            learnedMedia = null;
+            status = "선택을 취소했습니다. 이 취소로 사진을 추가 전송하지 않습니다.";
+            render();
+          });
+      button(
+          "다른 사진 선택",
+          () -> {
+            session.invalidate(isInputViewShown());
+            clearPreview();
+            learnedSource = null;
+            learnedMedia = null;
+            status = "보낼 사진을 선택하세요.";
             render();
           });
     } else {
       boolean found = false;
       if (LicenseManager.isUsable(this) && AppIntegrity.isAuthentic(this)) {
         for (MultiRoomStore.Profile profile : MultiRoomStore.list(this)) {
-          RoomMediaStore.Media media = RoomMediaStore.get(this, profile.room);
-          if (!media.hasImage()) continue;
+          RoomMediaStore.Media saved = RoomMediaStore.get(this, profile.room);
+          if (!saved.hasImage()) continue;
           found = true;
           String rejection =
-              PhotoKeyboardSession.rejection(getCurrentInputEditorInfo(), media.mime);
+              PhotoKeyboardSession.rejection(getCurrentInputEditorInfo(), saved.mime);
           Button row =
               button(
-                  "사진 출처: " + profile.title() + "\n" + media.name,
-                  () -> prepare(profile.room, media));
+                  "사진 출처: " + profile.title() + "\n" + saved.name,
+                  () -> prepare(profile.room, saved));
           row.setEnabled(!preparing && rejection.isEmpty());
           if (!rejection.isEmpty()) text(rejection, 11);
         }
@@ -544,39 +561,65 @@ public final class PhotoKeyboardService extends InputMethodService {
     button(
         "기존 키보드로 변경",
         () -> {
-          cancel("키보드를 변경합니다. 사진 선택을 취소했습니다.");
+          PhotoUiService.cancel();
+          cancel("키보드를 변경합니다. 사진 선택과 예약을 중지했습니다.");
           InputMethodManager manager = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
           if (manager != null) manager.showInputMethodPicker();
         });
   }
 
-  private void startLoop(
-      PhotoKeyboardSession.Ticket ticket, boolean confirmed, boolean once, boolean screenOff) {
+  private void renderManualSend(PhotoKeyboardSession.Ticket ticket) {
+    button(
+        "현재 방에 사진 전달 · 1회",
+        () -> {
+          if (!recipientConfirmed) {
+            showActionStatus("현재 카카오톡 방과 사진을 먼저 확인하세요.");
+            return;
+          }
+          String result =
+              session.commit(
+                  this, ticket, getCurrentInputEditorInfo(), getCurrentInputConnection(), true);
+          clearPreview();
+          status = result;
+          PhotoKeyboardDiagnostics.recordResult(this, result);
+          render();
+        });
+  }
+
+  private void learnSelected(PhotoKeyboardSession.Ticket ticket) {
     if (!session.current(ticket)) {
-      status = "사진 선택이 만료되었습니다. 다시 선택하세요.";
+      showActionStatus("사진 선택이 만료되었습니다. 사진을 다시 선택하세요.");
+      clearPreview();
       render();
       return;
     }
-    startConfigured(ticket.room, ticket.media, confirmed, once, screenOff, false);
+    if (!recipientConfirmed) {
+      showActionStatus("현재 카카오톡 방과 사진을 먼저 확인하세요.");
+      return;
+    }
+    String rejection = PhotoUiService.learn();
+    if (!rejection.isEmpty()) {
+      showActionStatus(rejection);
+      return;
+    }
+    String result =
+        session.commit(
+            this, ticket, getCurrentInputEditorInfo(), getCurrentInputConnection(), true);
+    boolean accepted = result.startsWith("사진 전달 요청");
+    if (!accepted) PhotoUiService.cancel();
+    if (accepted) {
+      learnedSource = ticket.room;
+      learnedMedia = ticket.media;
+    }
+    clearPreview();
+    status = accepted ? "사진 전달 요청됨 · 카카오톡에서 전송 또는 취소하세요. 이미 보냈다면 다시 보내지 마세요." : result;
+    PhotoKeyboardDiagnostics.recordResult(this, status);
+    render();
   }
 
-  private void renderReadyPhoto() {
-    text("준비된 사진: " + learnedMedia.name + "\n사진을 다시 고를 필요가 없습니다. 현재 열린 방에 전송합니다.", 13);
-    MultiRoomStore.Profile source = MultiRoomStore.get(this, learnedSource);
-    if (source != null) text("저장 일정: " + MultiRoomStore.scheduleSummary(source), 12);
-    CheckBox confirm = new CheckBox(this);
-    confirm.setText("현재 받는 방과 이 사진의 전송을 확인했습니다");
-    confirm.setTextColor(Color.WHITE);
-    panel.addView(confirm);
-    String room = learnedSource;
-    RoomMediaStore.Media media = learnedMedia;
-    button(
-        "10초 후 자동전송 1회 시험",
-        () -> startConfigured(room, media, confirm.isChecked(), true, false, true));
-    button(
-        "저장한 일정으로 반복 시작",
-        () -> startConfigured(room, media, confirm.isChecked(), false, false, false));
-    text("시험도 실제 사진을 한 장 보냅니다. 손으로 전송 버튼을 누르지 않고 결과를 확인하세요. 절전·알람 권한에 따라 늦어질 수 있습니다.", 11);
+  private int keyboardHeightPx() {
+    android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+    return Math.max(1, Math.min(dp(310), metrics.heightPixels * 2 / 5));
   }
 
   private void startConfigured(
@@ -586,28 +629,36 @@ public final class PhotoKeyboardService extends InputMethodService {
       boolean once,
       boolean screenOff,
       boolean quickTest) {
-    String failure =
-        quickTest
-            ? loop.armQuickTest(
-                this,
-                MultiRoomStore.get(this, room),
-                media,
-                getCurrentInputEditorInfo(),
-                getCurrentInputConnection(),
-                confirmed,
-                PhotoUiService.ready(),
-                System.currentTimeMillis())
-            : loop.arm(
-                this,
-                MultiRoomStore.get(this, room),
-                media,
-                getCurrentInputEditorInfo(),
-                getCurrentInputConnection(),
-                once,
-                screenOff,
-                confirmed,
-                PhotoUiService.ready(),
-                System.currentTimeMillis());
+    String failure;
+    try {
+      failure =
+          quickTest
+              ? loop.armQuickTest(
+                  this,
+                  MultiRoomStore.get(this, room),
+                  media,
+                  getCurrentInputEditorInfo(),
+                  getCurrentInputConnection(),
+                  confirmed,
+                  PhotoUiService.ready(),
+                  System.currentTimeMillis(),
+                  screenOff)
+              : loop.arm(
+                  this,
+                  MultiRoomStore.get(this, room),
+                  media,
+                  getCurrentInputEditorInfo(),
+                  getCurrentInputConnection(),
+                  once,
+                  screenOff,
+                  confirmed,
+                  PhotoUiService.ready(),
+                  System.currentTimeMillis());
+    } catch (RuntimeException storageFailure) {
+      stopLoop(this, null, "사진 예약을 저장하지 못해 시작하지 않았습니다.");
+      showActionStatus("사진 예약을 저장하지 못했습니다. 저장 공간과 앱 상태를 확인하세요.");
+      return;
+    }
     if (!failure.isEmpty()) {
       showActionStatus(failure);
       return;
@@ -666,7 +717,7 @@ public final class PhotoKeyboardService extends InputMethodService {
           if (active != ticket) return;
           session.invalidate(true);
           clearPreview();
-          status = "30초가 지나 선택을 취소했습니다. 사진을 다시 선택하세요.";
+          status = "2분 동안 사용하지 않아 사진 선택을 해제했습니다. 다시 선택할 수 있습니다.";
           render();
         },
         PhotoKeyboardSession.CONFIRM_WINDOW_MS);

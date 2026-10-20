@@ -52,6 +52,7 @@ final class PhotoKeyboardDiagnostics {
     return (types.isEmpty() ? "최근 입력창: 사진 키보드 입력 미지원" : "최근 입력창이 알린 사진 형식: " + types)
         + "\n일반·오픈채팅마다 다를 수 있습니다. 지원 형식 감지는 수신 확인이 아닙니다."
         + "\n"
+        + "최근 처리 기록 (현재 연결 상태와 별개): "
         + prefs.getString("result", "아직 사진 전달 요청 없음");
   }
 }

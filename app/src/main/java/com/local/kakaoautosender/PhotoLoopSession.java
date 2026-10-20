@@ -85,6 +85,28 @@ final class PhotoLoopSession {
       boolean recipientConfirmed,
       boolean directDeliveryConfirmed,
       long now) {
+    return armQuickTest(
+        c,
+        source,
+        media,
+        editor,
+        connection,
+        recipientConfirmed,
+        directDeliveryConfirmed,
+        now,
+        false);
+  }
+
+  String armQuickTest(
+      Context c,
+      MultiRoomStore.Profile source,
+      RoomMediaStore.Media media,
+      EditorInfo editor,
+      InputConnection connection,
+      boolean recipientConfirmed,
+      boolean directDeliveryConfirmed,
+      long now,
+      boolean screenOff) {
     return armInternal(
         c,
         source,
@@ -92,7 +114,7 @@ final class PhotoLoopSession {
         editor,
         connection,
         true,
-        false,
+        screenOff,
         recipientConfirmed,
         directDeliveryConfirmed,
         now,

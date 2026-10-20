@@ -81,7 +81,8 @@ final class PhotoLoopStore {
     if (prefs.getBoolean("running", false) && !PhotoKeyboardService.hasActiveLoop())
       return "입력 연결 또는 앱 실행이 끝났습니다. 채팅방에서 예약을 다시 시작하세요. 자동 복구하지 않습니다.";
     String room = prefs.getString("source", "");
-    return status
+    return (prefs.getBoolean("running", false) ? "현재 예약: " : "최근 예약 기록: ")
+        + status
         + (next > 0
             ? "\n다음 요청: "
                 + new SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA).format(new Date(next))
