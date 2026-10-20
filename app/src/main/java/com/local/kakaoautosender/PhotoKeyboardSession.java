@@ -50,6 +50,23 @@ final class PhotoKeyboardSession {
     }
   }
 
+  Ticket selectInCurrentEditor(
+      String room,
+      RoomMediaStore.Media media,
+      EditorInfo editor,
+      InputConnection connection,
+      boolean viewShown) {
+    synchronized (DeliveryGate.LOCK) {
+      if (!viewShown
+          || connection == null
+          || media == null
+          || !rejection(editor, media.mime).isEmpty()) return null;
+      // A fresh user selection may follow a finished/reopened editor. Never revive its old ticket.
+      invalidate(true);
+      return select(room, media);
+    }
+  }
+
   boolean current(Ticket ticket) {
     synchronized (DeliveryGate.LOCK) {
       return visible

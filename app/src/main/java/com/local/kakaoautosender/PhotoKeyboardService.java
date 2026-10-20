@@ -42,6 +42,7 @@ public final class PhotoKeyboardService extends InputMethodService {
   private PhotoKeyboardSession.Ticket active;
   private LinearLayout panel;
   private TextView uiStatus;
+  private TextView actionStatus;
   private String status = "카카오톡 채팅 입력창에서 사진을 선택하세요.";
   private PhotoKeyboardSession.Ticket shown;
   private Bitmap preview;
@@ -312,6 +313,7 @@ public final class PhotoKeyboardService extends InputMethodService {
     clearPreview();
     session.invalidate(true);
     PhotoKeyboardDiagnostics.recordEditor(this, editor);
+    PhotoUiService.reconcileChat();
     status = "사진 출처의 방 이름은 받는 방이 아닙니다. 현재 카카오톡 방을 직접 확인하세요.";
     render();
   }
@@ -398,7 +400,7 @@ public final class PhotoKeyboardService extends InputMethodService {
     panel.removeAllViews();
     uiStatus = null;
     text("카톡매크로 · 사진 키보드", 17);
-    text(status, 12);
+    actionStatus = text(status, 12);
     uiStatus = text(PhotoUiService.status(), 12);
     if (loop.active()) {
       text(PhotoLoopStore.summary(this), 12);
@@ -461,15 +463,19 @@ public final class PhotoKeyboardService extends InputMethodService {
       button(
           "자동 전송 준비 · 전송 버튼 학습 (1회)",
           () -> {
-            if (!confirm.isChecked() || !session.current(ticket)) {
-              status = "현재 방 확인을 체크하고 다시 누르세요.";
+            if (!session.current(ticket)) {
+              clearPreview();
+              status = "사진 선택이 만료되었습니다. 사진을 다시 선택하세요.";
               render();
+              return;
+            }
+            if (!confirm.isChecked()) {
+              showActionStatus("아래의 현재 방 확인을 체크한 뒤 학습을 시작하세요.");
               return;
             }
             String rejection = PhotoUiService.learn();
             if (!rejection.isEmpty()) {
-              status = rejection;
-              render();
+              showActionStatus(rejection);
               return;
             }
             String result =
@@ -603,8 +609,7 @@ public final class PhotoKeyboardService extends InputMethodService {
                 PhotoUiService.ready(),
                 System.currentTimeMillis());
     if (!failure.isEmpty()) {
-      status = failure;
-      render();
+      showActionStatus(failure);
       return;
     }
     session.invalidate(true);
@@ -638,8 +643,19 @@ public final class PhotoKeyboardService extends InputMethodService {
       cancel("화면 잠금과 라이선스를 확인한 뒤 입력창을 다시 여세요.");
       return;
     }
-    PhotoKeyboardSession.Ticket ticket = session.select(room, media);
-    if (ticket == null) return;
+    PhotoKeyboardSession.Ticket ticket =
+        session.selectInCurrentEditor(
+            room,
+            media,
+            getCurrentInputEditorInfo(),
+            getCurrentInputConnection(),
+            isInputViewShown());
+    if (ticket == null) {
+      String rejection = PhotoKeyboardSession.rejection(getCurrentInputEditorInfo(), media.mime);
+      showActionStatus(
+          rejection.isEmpty() ? "카카오톡 입력 연결이 없습니다. 현재 방의 메시지 입력창을 눌러 사진 키보드를 다시 여세요." : rejection);
+      return;
+    }
     clearPreview();
     active = ticket;
     preparing = true;
@@ -712,6 +728,12 @@ public final class PhotoKeyboardService extends InputMethodService {
       status = "사진 저장소의 응답을 기다리고 있습니다. 잠시 후 다시 선택하세요.";
       render();
     }
+  }
+
+  private void showActionStatus(String value) {
+    status = value;
+    if (actionStatus != null) actionStatus.setText(value);
+    android.widget.Toast.makeText(this, value, android.widget.Toast.LENGTH_LONG).show();
   }
 
   private TextView text(String value, int size) {

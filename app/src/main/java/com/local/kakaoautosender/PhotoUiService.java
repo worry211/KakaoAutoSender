@@ -59,6 +59,14 @@ public final class PhotoUiService extends AccessibilityService {
     return s != null && s.workflow.ready(s.currentAnchor());
   }
 
+  static void reconcileChat() {
+    PhotoUiService service = instance.get();
+    if (service == null || service.workflow.phase() != PhotoUiWorkflow.Phase.READY) return;
+    PhotoUiWorkflow.Anchor current = service.currentAnchor();
+    if (current != null && !service.workflow.anchor().same(current))
+      service.fail("카카오톡 입력창이 새로 연결되었습니다. 현재 방에서 사진 전송 준비를 다시 시작할 수 있습니다.");
+  }
+
   static String status() {
     PhotoUiService s = instance.get();
     return s == null ? "접근성의 사진 전송 보조를 먼저 켜세요." : s.status;

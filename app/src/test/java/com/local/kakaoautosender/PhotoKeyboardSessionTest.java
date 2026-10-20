@@ -93,6 +93,33 @@ public class PhotoKeyboardSessionTest {
     connection = new RecordingConnection();
   }
 
+  @Test
+  public void newVisibleEditorSelectionRecoversAfterKakaoClosesWithoutRevivingOldTicket() {
+    session.invalidate(true);
+    PhotoKeyboardSession.Ticket old = session.select("test-room", media);
+    session.invalidate(false);
+    assertNull(session.select("test-room", media));
+    PhotoKeyboardSession.Ticket fresh =
+        session.selectInCurrentEditor("test-room", media, editor, connection, true);
+    assertNotNull(fresh);
+    assertTrue(session.current(fresh));
+    assertFalse(session.current(old));
+    assertFalse(session.commit(context, old, editor, connection, true).startsWith("사진 전달 요청"));
+    assertEquals(0, connection.calls);
+    assertTrue(session.commit(context, fresh, editor, connection, true).startsWith("사진 전달 요청"));
+    assertEquals(1, connection.calls);
+  }
+
+  @Test
+  public void hiddenDisconnectedOrForeignEditorCannotRestartSelection() {
+    session.invalidate(false);
+    assertNull(session.selectInCurrentEditor("test-room", media, editor, connection, false));
+    assertNull(session.selectInCurrentEditor("test-room", media, editor, null, true));
+    editor.packageName = "other.app";
+    assertNull(session.selectInCurrentEditor("test-room", media, editor, connection, true));
+    assertEquals(0, connection.calls);
+  }
+
   private PhotoKeyboardSession.Ticket select() {
     return session.select("test-room", media);
   }
