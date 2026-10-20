@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="photo_keyboard_label">카톡매크로 사진 키보드</string>
+    <string name="photo_keyboard_status">%1$s\n\n%2$s</string>
+</resources>

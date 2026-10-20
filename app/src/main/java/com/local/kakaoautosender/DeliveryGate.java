@@ -24,6 +24,7 @@ final class DeliveryGate {
 
   static void stop(Context c) {
     synchronized (LOCK) {
+      PhotoKeyboardService.cancelPending();
       Prefs.p(c).edit().putBoolean(Prefs.KEY_ACTIVE, false).commit();
       SendScheduler.cancel(c);
     }

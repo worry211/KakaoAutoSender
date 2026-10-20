@@ -41,6 +41,21 @@
             android:name=".BulkRoomEditActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".PhotoKeyboardSetupActivity"
+            android:exported="true" />
+
+        <service
+            android:name=".PhotoKeyboardService"
+            android:label="@string/photo_keyboard_label"
+            android:permission="android.permission.BIND_INPUT_METHOD"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data android:name="android.view.im" android:resource="@xml/photo_keyboard" />
+        </service>
+
         <service
             android:name=".KakaoNotificationListener"
             android:label="카톡매크로 알림 접근"

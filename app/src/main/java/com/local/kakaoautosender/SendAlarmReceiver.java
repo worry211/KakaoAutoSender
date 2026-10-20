@@ -85,7 +85,10 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                     }
 
                     RoomMediaStore.Media media = RoomMediaStore.get(app, profile.room);
-                    for (int i = 0; i < 3 && !sent; i++) {
+                    // A photo handoff can be accepted before an ambiguous error. Never blindly
+                    // repeat that side effect within the same reserved execution.
+                    int maxAttempts = media.hasImage() ? 1 : 3;
+                    for (int i = 0; i < maxAttempts && !sent; i++) {
                         if (!Prefs.p(app).getBoolean(Prefs.KEY_ACTIVE, false)) break;
                         sent = KakaoMessageSender.send(app, profile.room, profile.message, media);
                         if (!sent) {
@@ -93,7 +96,7 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                             if (failureReason == null || failureReason.trim().isEmpty()) {
                                 failureReason = "확인된 답장 세션 없음";
                             }
-                            if (i < 2) {
+                            if (i + 1 < maxAttempts) {
                                 KakaoNotificationListener.requestRefresh();
                                 sleep(ReliabilityTiming.retryGapMillis());
                             }

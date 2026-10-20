@@ -203,6 +203,9 @@ public class RoomEditorActivity extends Activity {
         sharePhotoButton = secondaryButton("카카오톡에서 사진 직접 보내기");
         sharePhotoButton.setOnClickListener(v -> sharePhoto());
         imageCard.addView(sharePhotoButton, top(10));
+        Button keyboardSetup = secondaryButton("사진 키보드 설정 · 다른 전송 방식");
+        keyboardSetup.setOnClickListener(v -> startActivity(new Intent(this, PhotoKeyboardSetupActivity.class)));
+        imageCard.addView(keyboardSetup, top(10));
         TextView imageHelp = text("이미지 첨부를 지원하지 않는 환경에서는 텍스트만 임의로 보내지 않고 전송을 실패 처리해 오동작을 막습니다.", 11, false, Color.rgb(119, 132, 156));
         imageHelp.setLineSpacing(0, 1.14f);
         imageCard.addView(imageHelp, top(9));
