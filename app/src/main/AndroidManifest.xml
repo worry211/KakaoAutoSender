@@ -3,6 +3,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".KakaoMacroApplication"
@@ -66,9 +68,17 @@
             </intent-filter>
         </service>
 
+        <service android:name=".PhotoUiService" android:label="@string/photo_ui_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/photo_ui_service" />
+        </service>
+
         <receiver
             android:name=".SendAlarmReceiver"
             android:exported="false" />
+
+        <receiver android:name=".PhotoLoopReceiver" android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"

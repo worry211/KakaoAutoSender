@@ -387,7 +387,11 @@ public class MainActivityV4 extends Activity {
             }
         }
 
-        if (active && usable < enabled) {
+        if (PhotoKeyboardService.hasActiveLoop()) {
+            masterStatus.setText("사진 키보드 예약 실행 중");
+            masterStatus.setTextColor(GREEN);
+            stylePill(masterBadge, "PHOTO", Color.rgb(25, 49, 42), Color.rgb(122, 231, 176));
+        } else if (active && usable < enabled) {
             masterStatus.setText("자동전송 실행 중 · 일부 방 설정 필요");
             masterStatus.setTextColor(AMBER);
             stylePill(masterBadge, "CHECK", Color.rgb(55, 45, 27), AMBER);
@@ -425,19 +429,20 @@ public class MainActivityV4 extends Activity {
             system.append("  ·  예약 정확도 ").append(exact ? "정확 시각" : "근사 시각");
         }
         system.append("  ·  전송 가능 방 ").append(ready).append("/").append(usable);
+        if (PhotoKeyboardService.hasActiveLoop()) system.append("\n").append(PhotoLoopStore.summary(this));
         String notice = LicenseManager.updateNotice(this);
         if (notice != null && !notice.trim().isEmpty()) system.append("\n").append(notice.trim());
         systemStatus.setText(system.toString());
         systemStatus.setTextColor(!access || !listener ? AMBER : Color.rgb(181, 191, 210));
 
         startButton.setEnabled(!active);
-        stopButton.setEnabled(active);
+        stopButton.setEnabled(active || PhotoKeyboardService.hasActiveLoop());
         if (active) startButton.setText("자동전송 실행 중");
         else if (!access) startButton.setText("알림 접근 필요");
         else if (usable == 0) startButton.setText("방 설정을 완료하세요");
         else startButton.setText("자동전송 시작");
         startButton.setAlpha(startButton.isEnabled() ? 1f : 0.46f);
-        stopButton.setAlpha(active ? 1f : 0.46f);
+        stopButton.setAlpha(active || PhotoKeyboardService.hasActiveLoop() ? 1f : 0.46f);
 
         ArrayList<MultiRoomStore.Profile> displayProfiles = RoomDashboardPolicy.sorted(profiles, roomSort);
         LinkedHashSet<String> existingAliases = new LinkedHashSet<>();

@@ -24,6 +24,7 @@ final class DeliveryGate {
 
   static void stop(Context c) {
     synchronized (LOCK) {
+      PhotoKeyboardService.stopLoop(c, null, "전체 중지로 사진 예약을 취소했습니다.");
       PhotoKeyboardService.cancelPending();
       Prefs.p(c).edit().putBoolean(Prefs.KEY_ACTIVE, false).commit();
       SendScheduler.cancel(c);

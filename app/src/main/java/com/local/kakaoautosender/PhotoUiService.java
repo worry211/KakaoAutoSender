@@ -1,0 +1,387 @@
+package com.local.kakaoautosender;
+
+import android.accessibilityservice.AccessibilityService;
+import android.graphics.Rect;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.PowerManager;
+import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
+import java.lang.ref.WeakReference;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Locale;
+
+/**
+ * Locally learned, narrow photo-confirmation automation. No coordinate taps or chat-text capture.
+ */
+public final class PhotoUiService extends AccessibilityService {
+  private static WeakReference<PhotoUiService> instance = new WeakReference<>(null);
+  private final PhotoUiWorkflow workflow = new PhotoUiWorkflow();
+  private final Handler main = new Handler(Looper.getMainLooper());
+  private final HashMap<Integer, String> activities = new HashMap<>();
+  private PowerManager.WakeLock wake;
+  private boolean scanQueued;
+  private long deadlineElapsed;
+  private final Runnable scan = this::inspect;
+  private String status = "사진 전송 버튼을 아직 학습하지 않았습니다.";
+
+  @Override
+  protected void onServiceConnected() {
+    instance = new WeakReference<>(this);
+  }
+
+  static boolean connected() {
+    return instance.get() != null;
+  }
+
+  static boolean waiting() {
+    PhotoUiService s = instance.get();
+    return s != null && s.workflow.waiting();
+  }
+
+  static boolean autoWaiting() {
+    PhotoUiService s = instance.get();
+    return s != null && s.workflow.autoWaiting();
+  }
+
+  static boolean ready() {
+    PhotoUiService s = instance.get();
+    return s != null && s.workflow.ready(s.currentAnchor());
+  }
+
+  static String status() {
+    PhotoUiService s = instance.get();
+    return s == null ? "접근성의 사진 전송 보조를 먼저 켜세요." : s.status;
+  }
+
+  static String learn() {
+    PhotoUiService s = instance.get();
+    if (s == null) return "접근성의 사진 전송 보조를 먼저 켜세요.";
+    PhotoUiWorkflow.Anchor anchor = s.currentAnchor();
+    if (anchor == null) return "현재 채팅방 제목과 입력창을 확인할 수 없습니다. 이 화면은 자동화하지 않습니다.";
+    s.workflow.learn(anchor);
+    s.status = "카카오톡 사진 화면에서 전송 버튼을 직접 한 번 누르세요.";
+    s.timeout(45_000L);
+    return "";
+  }
+
+  static boolean begin() {
+    PhotoUiService s = instance.get();
+    if (s == null || !s.workflow.begin(s.currentAnchor())) return false;
+    PowerManager power = (PowerManager) s.getSystemService(POWER_SERVICE);
+    if (power != null) {
+      s.wake = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KakaoMacro:PhotoUi");
+      s.wake.acquire(18_000L);
+    }
+    s.timeout(15_000L);
+    return true;
+  }
+
+  static void cancel() {
+    PhotoUiService s = instance.get();
+    if (s == null) return;
+    s.workflow.reset();
+    s.releaseWake();
+    s.main.removeCallbacks(s.scan);
+    s.scanQueued = false;
+    s.status = "사진 전송 버튼 학습이 해제되었습니다. 현재 방에서 다시 학습하세요.";
+  }
+
+  static void releaseAfterReturn() {
+    PhotoUiService service = instance.get();
+    if (service != null) service.releaseWake();
+  }
+
+  @Override
+  public void onAccessibilityEvent(AccessibilityEvent event) {
+    if (event == null || workflow.phase() == PhotoUiWorkflow.Phase.IDLE) return;
+    if (workflow.waiting() && android.os.SystemClock.elapsedRealtime() >= deadlineElapsed) {
+      fail("사진 전송 확인 시간이 지나 예약 중지");
+      return;
+    }
+    if (!KakaoNotificationListener.KAKAO_PACKAGE.contentEquals(
+        event.getPackageName() == null ? "" : event.getPackageName())) return;
+    if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+      String className = String.valueOf(event.getClassName());
+      if (className.startsWith(KakaoNotificationListener.KAKAO_PACKAGE + ".")) {
+        if (activities.size() > 20) activities.clear();
+        activities.put(event.getWindowId(), className);
+      }
+    }
+    if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+      AccessibilityNodeInfo source = event.getSource();
+      if (workflow.autoWaiting()
+          && (source == null
+              || !workflow.expectedAutoClick(
+                  event.getWindowId(), source.getViewIdResourceName()))) {
+        fail("사진 전송 도중 다른 조작이 감지되어 예약 중지 · 중복 재시도 없음");
+        return;
+      }
+      if (source != null
+          && workflow.manualClick(event.getWindowId(), source.getViewIdResourceName()))
+        status = "수동 전송 버튼 확인 · 원래 채팅방 복귀를 확인하고 있습니다.";
+    }
+    if (!scanQueued) {
+      scanQueued = true;
+      main.postDelayed(scan, 100L);
+    }
+  }
+
+  private void inspect() {
+    scanQueued = false;
+    try {
+      PhotoUiWorkflow.Phase phase = workflow.phase();
+      if (phase == PhotoUiWorkflow.Phase.IDLE) return;
+      if (workflow.waiting() && android.os.SystemClock.elapsedRealtime() >= deadlineElapsed) {
+        fail("사진 전송 확인 시간이 지나 예약 중지");
+        return;
+      }
+      AccessibilityNodeInfo root = getRootInActiveWindow();
+      if (!kakao(root)) return;
+      PhotoUiWorkflow.Anchor current = anchor(root);
+      if (phase == PhotoUiWorkflow.Phase.LEARN_RETURN
+          || phase == PhotoUiWorkflow.Phase.AUTO_RETURN) {
+        boolean automatic = workflow.returned(current);
+        if (workflow.phase() == PhotoUiWorkflow.Phase.READY) {
+          if (!automatic) releaseWake();
+          status = "현재 채팅방의 사진 전송 버튼 학습 완료";
+          if (automatic) {
+            AccessibilityNodeInfo editor = findEditor(root, workflow.anchor().editorId);
+            if (editor != null) {
+              editor.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+              editor.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+            }
+            PhotoKeyboardService.uiReturned();
+          }
+          return;
+        }
+      }
+      if (phase == PhotoUiWorkflow.Phase.READY) {
+        if (current != null && !workflow.ready(current)) fail("채팅방이 바뀌어 사진 예약과 버튼 학습 중지");
+        return;
+      }
+      if (workflow.anchor() == null || root.getWindowId() == workflow.anchor().window) return;
+      ArrayList<AccessibilityNodeInfo> candidates = new ArrayList<>();
+      for (AccessibilityNodeInfo node : nodes(root))
+        if (sendButton(node) && !label(node).isEmpty()) candidates.add(node);
+      if (candidates.size() != 1) return;
+      AccessibilityNodeInfo send = candidates.get(0);
+      String activity = activities.get(root.getWindowId());
+      if (activity == null) return;
+      PhotoUiWorkflow.Button button =
+          new PhotoUiWorkflow.Button(
+              root.getWindowId(),
+              activity,
+              layout(root),
+              send.getViewIdResourceName(),
+              String.valueOf(send.getClassName()),
+              label(send));
+      if (phase == PhotoUiWorkflow.Phase.LEARNING) workflow.observe(button);
+      else if (phase == PhotoUiWorkflow.Phase.AUTO_PREVIEW)
+        synchronized (DeliveryGate.LOCK) {
+          if (android.os.SystemClock.elapsedRealtime() >= deadlineElapsed) {
+            fail("사진 전송 확인 시간이 지나 예약 중지");
+            return;
+          }
+          if (!PhotoKeyboardService.allowFinalPhotoClick()) {
+            fail("중지 또는 설정 변경으로 사진 예약을 중지했습니다.");
+            return;
+          }
+          AccessibilityNodeInfo fresh = getRootInActiveWindow();
+          if (!kakao(fresh)
+              || fresh.getWindowId() != root.getWindowId()
+              || !layout(fresh).equals(button.layout)
+              || !send.refresh()
+              || !sendButton(send)
+              || !label(send).equals(button.label)
+              || android.os.SystemClock.elapsedRealtime() >= deadlineElapsed) {
+            fail("사진 전송 직전 화면이 바뀌어 예약 중지");
+            return;
+          }
+          if (!workflow.claim(button)) return;
+          status = "학습한 사진 전송 버튼 실행 · 원래 채팅방 확인 중";
+          if (!send.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            fail("사진 전송 버튼 실행이 거절되어 예약 중지");
+        }
+    } catch (RuntimeException error) {
+      fail("카카오톡 화면 정보를 확인할 수 없어 사진 예약 중지");
+    }
+  }
+
+  private void timeout(long duration) {
+    deadlineElapsed = android.os.SystemClock.elapsedRealtime() + duration;
+    long revision = workflow.revision();
+    main.postDelayed(
+        () -> {
+          if (workflow.revision() == revision && workflow.waiting())
+            fail("사진 전송 화면 또는 채팅방 복귀 확인 시간 초과 · 재시도 없음");
+        },
+        duration);
+  }
+
+  private void fail(String reason) {
+    workflow.reset();
+    releaseWake();
+    status = reason;
+    PhotoKeyboardService.stopLoop(this, null, reason);
+  }
+
+  private void releaseWake() {
+    if (wake != null && wake.isHeld()) wake.release();
+    wake = null;
+  }
+
+  @Override
+  public void onInterrupt() {
+    fail("접근성 연결이 중단되어 사진 예약 중지");
+  }
+
+  @Override
+  public void onDestroy() {
+    fail("접근성 서비스가 종료되어 사진 예약 중지");
+    if (instance.get() == this) instance.clear();
+    main.removeCallbacksAndMessages(null);
+    super.onDestroy();
+  }
+
+  private PhotoUiWorkflow.Anchor currentAnchor() {
+    try {
+      AccessibilityNodeInfo root = getRootInActiveWindow();
+      return kakao(root) ? anchor(root) : null;
+    } catch (RuntimeException error) {
+      return null;
+    }
+  }
+
+  private static boolean kakao(AccessibilityNodeInfo root) {
+    return root != null
+        && KakaoNotificationListener.KAKAO_PACKAGE.contentEquals(
+            root.getPackageName() == null ? "" : root.getPackageName());
+  }
+
+  private static AccessibilityNodeInfo findEditor(AccessibilityNodeInfo root, String id) {
+    AccessibilityNodeInfo found = null;
+    for (AccessibilityNodeInfo node : nodes(root))
+      if (node.isVisibleToUser() && node.isEditable() && id.equals(node.getViewIdResourceName())) {
+        if (found != null) return null;
+        found = node;
+      }
+    return found;
+  }
+
+  static PhotoUiWorkflow.Anchor anchor(AccessibilityNodeInfo root) {
+    AccessibilityNodeInfo editor = null;
+    for (AccessibilityNodeInfo node : nodes(root))
+      if (node.isVisibleToUser()
+          && node.isEnabled()
+          && node.isEditable()
+          && node.getViewIdResourceName() != null) {
+        if (editor != null) return null;
+        editor = node;
+      }
+    if (editor == null) return null;
+    Rect bounds = new Rect();
+    root.getBoundsInScreen(bounds);
+    ArrayList<String> headers = new ArrayList<>();
+    for (AccessibilityNodeInfo node : nodes(root)) {
+      String id = node.getViewIdResourceName();
+      if (id == null || node.isEditable() || !node.isVisibleToUser()) continue;
+      String name = id.toLowerCase(Locale.ROOT);
+      if (!(name.endsWith(":id/title")
+              || name.endsWith(":id/chat_title")
+              || name.endsWith(":id/room_title")
+              || name.endsWith(":id/room_name")
+              || name.endsWith(":id/chatroom_title")
+              || name.endsWith(":id/toolbar_title"))
+          || insideConversationList(node)) continue;
+      Rect location = new Rect();
+      node.getBoundsInScreen(location);
+      if (location.centerY() > bounds.top + bounds.height() / 3) continue;
+      CharSequence text =
+          node.getText(); // only title/toolbar nodes; never composer or message content
+      if (text == null || text.length() == 0) text = node.getContentDescription();
+      if (text != null && text.length() > 0 && text.length() <= 256) headers.add(id + "=" + text);
+    }
+    if (headers.isEmpty()) return null;
+    Collections.sort(headers);
+    return new PhotoUiWorkflow.Anchor(
+        root.getWindowId(), editor.getViewIdResourceName(), digest(String.join("|", headers)));
+  }
+
+  static String label(AccessibilityNodeInfo node) {
+    String text = node.getText() == null ? "" : node.getText().toString().trim();
+    String description =
+        node.getContentDescription() == null ? "" : node.getContentDescription().toString().trim();
+    for (String value : new String[] {text, description}) {
+      String normalized = value.toLowerCase(Locale.ROOT).replaceAll("[\\s()0-9]", "");
+      if (normalized.equals("전송") || normalized.equals("보내기") || normalized.equals("send"))
+        return value.toLowerCase(Locale.ROOT).replaceAll("\\s", "");
+    }
+    return "";
+  }
+
+  private static boolean insideConversationList(AccessibilityNodeInfo node) {
+    AccessibilityNodeInfo parent = node.getParent();
+    for (int depth = 0; parent != null && depth < 12; depth++, parent = parent.getParent()) {
+      String type = String.valueOf(parent.getClassName());
+      if (type.contains("RecyclerView") || type.endsWith("ListView") || type.endsWith("ScrollView"))
+        return true;
+    }
+    return parent != null;
+  }
+
+  static boolean sendButton(AccessibilityNodeInfo node) {
+    String id = node.getViewIdResourceName();
+    String className = String.valueOf(node.getClassName());
+    return id != null
+        && !node.isEditable()
+        && node.isVisibleToUser()
+        && node.isEnabled()
+        && node.isClickable()
+        && (className.endsWith("Button")
+            || id.toLowerCase(Locale.ROOT).contains("send")
+            || id.toLowerCase(Locale.ROOT).contains("confirm"));
+  }
+
+  static String layout(AccessibilityNodeInfo root) {
+    ArrayList<String> ids = new ArrayList<>();
+    for (AccessibilityNodeInfo node : nodes(root))
+      if (node.getViewIdResourceName() != null)
+        ids.add(node.getViewIdResourceName() + ":" + node.getClassName());
+    Collections.sort(ids);
+    return digest(String.join("|", ids));
+  }
+
+  private static String digest(String value) {
+    try {
+      byte[] bytes =
+          MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+      StringBuilder out = new StringBuilder();
+      for (byte b : bytes) out.append(String.format(Locale.ROOT, "%02x", b & 255));
+      return out.toString();
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException(impossible);
+    }
+  }
+
+  private static ArrayList<AccessibilityNodeInfo> nodes(AccessibilityNodeInfo root) {
+    ArrayList<AccessibilityNodeInfo> result = new ArrayList<>();
+    result.add(root);
+    for (int i = 0; i < result.size(); i++) {
+      AccessibilityNodeInfo node = result.get(i);
+      if (node.getChildCount() > 600) throw new IllegalStateException("Ambiguous large UI tree");
+      for (int j = 0; j < node.getChildCount(); j++) {
+        AccessibilityNodeInfo child = node.getChild(j);
+        if (child != null) {
+          if (result.size() >= 600) throw new IllegalStateException("Ambiguous large UI tree");
+          result.add(child);
+        }
+      }
+    }
+    return result;
+  }
+}
