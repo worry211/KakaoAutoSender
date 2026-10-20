@@ -41,6 +41,7 @@ public final class PhotoKeyboardService extends InputMethodService {
   private Future<?> pendingLoad;
   private PhotoKeyboardSession.Ticket active;
   private LinearLayout panel;
+  private TextView uiStatus;
   private String status = "카카오톡 채팅 입력창에서 사진을 선택하세요.";
   private PhotoKeyboardSession.Ticket shown;
   private Bitmap preview;
@@ -121,6 +122,15 @@ public final class PhotoKeyboardService extends InputMethodService {
   static void uiReturned() {
     PhotoKeyboardService service = instance.get();
     if (service != null) service.rebindReturnedChat(service.loop.current(), 0);
+  }
+
+  static void uiStatusChanged() {
+    PhotoKeyboardService service = instance.get();
+    if (service != null)
+      service.main.post(
+          () -> {
+            if (service.uiStatus != null) service.uiStatus.setText(PhotoUiService.status());
+          });
   }
 
   private void rebindReturnedChat(PhotoLoopSession.Plan plan, int attempt) {
@@ -365,8 +375,10 @@ public final class PhotoKeyboardService extends InputMethodService {
   private void render() {
     if (panel == null) return;
     panel.removeAllViews();
+    uiStatus = null;
     text("카톡매크로 · 사진 키보드", 17);
     text(status, 12);
+    uiStatus = text(PhotoUiService.status(), 12);
     if (loop.active()) {
       text(PhotoLoopStore.summary(this), 12);
       button("사진 예약 즉시 중지", () -> stopLoop(this, null, "사용자가 사진 예약을 중지했습니다."));
@@ -425,12 +437,16 @@ public final class PhotoKeyboardService extends InputMethodService {
             String result =
                 session.commit(
                     this, ticket, getCurrentInputEditorInfo(), getCurrentInputConnection(), true);
-            if (!result.startsWith("사진 전달 요청")) PhotoUiService.cancel();
+            boolean accepted = result.startsWith("사진 전달 요청");
+            if (!accepted) PhotoUiService.cancel();
             clearPreview();
-            status = result + "\n카카오톡에서 마지막 전송 버튼을 직접 눌러 학습을 마치세요.";
+            status =
+                accepted
+                    ? "카카오톡에 사진을 전달했습니다. 사진 미리보기가 열려 있다면 카카오톡에서 전송을 마치세요. 이미 보냈다면 다시 누르지 마세요."
+                    : result;
+            PhotoKeyboardDiagnostics.recordResult(this, status);
             render();
           });
-      text(PhotoUiService.status(), 12);
       CheckBox screenOffOption = new CheckBox(this);
       screenOffOption.setText("화면 꺼짐에서도 시도 · 실험 기능");
       screenOffOption.setTextColor(Color.WHITE);
@@ -617,13 +633,14 @@ public final class PhotoKeyboardService extends InputMethodService {
     }
   }
 
-  private void text(String value, int size) {
+  private TextView text(String value, int size) {
     TextView view = new TextView(this);
     view.setText(value);
     view.setTextSize(size);
     view.setTextColor(Color.rgb(228, 234, 245));
     view.setPadding(0, dp(5), 0, dp(5));
     panel.addView(view);
+    return view;
   }
 
   private Button button(String label, Runnable action) {

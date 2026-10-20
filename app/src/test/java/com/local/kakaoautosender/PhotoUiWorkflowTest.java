@@ -95,6 +95,34 @@ public class PhotoUiWorkflowTest {
   }
 
   @Test
+  public void previewReturnWithoutObservedClickCannotCompleteLearningOrTriggerRetry() {
+    PhotoUiWorkflow workflow = new PhotoUiWorkflow();
+    workflow.learn(room);
+    assertFalse(workflow.returnedWithoutClick(room));
+    workflow.observe(manual);
+    assertFalse(
+        workflow.returnedWithoutClick(new PhotoUiWorkflow.Anchor(99, "editor", "header-hash")));
+    assertTrue(workflow.returnedWithoutClick(room));
+    assertFalse(workflow.ready(room));
+    assertFalse(workflow.begin(room));
+    assertFalse(workflow.claim(manual));
+    workflow.reset();
+    assertFalse(workflow.returnedWithoutClick(room));
+  }
+
+  @Test
+  public void observedSendAndReturnDoesNotReportMissingClick() {
+    PhotoUiWorkflow workflow = new PhotoUiWorkflow();
+    workflow.learn(room);
+    workflow.observe(manual);
+    assertTrue(workflow.manualClick(11, "send"));
+    assertFalse(workflow.returnedWithoutClick(room));
+    workflow.returned(room);
+    assertTrue(workflow.ready(room));
+    assertFalse(workflow.returnedWithoutClick(room));
+  }
+
+  @Test
   public void resetInvalidatesLearningAutomaticClicksAndOldTimeoutRevisions() {
     PhotoUiWorkflow workflow = ready();
     workflow.begin(room);

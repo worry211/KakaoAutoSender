@@ -107,6 +107,11 @@ final class PhotoUiWorkflow {
     return true;
   }
 
+  // Returning from a preview is not proof of a send: it may also mean cancellation.
+  boolean returnedWithoutClick(Anchor current) {
+    return phase == Phase.LEARNING && candidate != null && anchor.same(current);
+  }
+
   boolean begin(Anchor current) {
     if (!ready(current) || learned == null) return false;
     phase = Phase.AUTO_PREVIEW;

@@ -29,6 +29,12 @@ public final class PhotoUiService extends AccessibilityService {
   private final Runnable scan = this::inspect;
   private String status = "사진 전송 버튼을 아직 학습하지 않았습니다.";
 
+  private void setStatus(String value) {
+    status = value;
+    PhotoKeyboardService.uiStatusChanged();
+    PhotoKeyboardSetupActivity.uiStatusChanged();
+  }
+
   @Override
   protected void onServiceConnected() {
     instance = new WeakReference<>(this);
@@ -64,7 +70,7 @@ public final class PhotoUiService extends AccessibilityService {
     PhotoUiWorkflow.Anchor anchor = s.currentAnchor();
     if (anchor == null) return "현재 채팅방 제목과 입력창을 확인할 수 없습니다. 이 화면은 자동화하지 않습니다.";
     s.workflow.learn(anchor);
-    s.status = "카카오톡 사진 화면에서 전송 버튼을 직접 한 번 누르세요.";
+    s.setStatus("자동화 준비 확인 중 · 사진을 이미 보냈다면 다시 보내지 마세요. 전송 동작 감지와 사진 도착은 별개입니다.");
     s.timeout(45_000L);
     return "";
   }
@@ -88,7 +94,7 @@ public final class PhotoUiService extends AccessibilityService {
     s.releaseWake();
     s.main.removeCallbacks(s.scan);
     s.scanQueued = false;
-    s.status = "사진 전송 버튼 학습이 해제되었습니다. 현재 방에서 다시 학습하세요.";
+    s.setStatus("사진 자동화 준비가 해제되었습니다. 이미 보낸 사진을 다시 보낼 필요는 없습니다.");
   }
 
   static void releaseAfterReturn() {
@@ -123,7 +129,7 @@ public final class PhotoUiService extends AccessibilityService {
       }
       if (source != null
           && workflow.manualClick(event.getWindowId(), source.getViewIdResourceName()))
-        status = "수동 전송 버튼 확인 · 원래 채팅방 복귀를 확인하고 있습니다.";
+        setStatus("전송 버튼 누름 감지 · 채팅방 복귀 확인 중 · 다시 보내지 마세요.");
     }
     if (!scanQueued) {
       scanQueued = true;
@@ -143,12 +149,17 @@ public final class PhotoUiService extends AccessibilityService {
       AccessibilityNodeInfo root = getRootInActiveWindow();
       if (!kakao(root)) return;
       PhotoUiWorkflow.Anchor current = anchor(root);
+      if (workflow.returnedWithoutClick(current)) {
+        fail("채팅방으로 돌아왔지만 전송 동작을 감지하지 못해 자동화 준비를 완료하지 못했습니다. 사진이 도착했다면 다시 보내지 마세요.");
+        return;
+      }
       if (phase == PhotoUiWorkflow.Phase.LEARN_RETURN
           || phase == PhotoUiWorkflow.Phase.AUTO_RETURN) {
         boolean automatic = workflow.returned(current);
         if (workflow.phase() == PhotoUiWorkflow.Phase.READY) {
           if (!automatic) releaseWake();
-          status = "현재 채팅방의 사진 전송 버튼 학습 완료";
+          setStatus("자동화 준비 확인 완료 · 전송 버튼 누름과 채팅방 복귀 감지 · 실제 사진 도착은 카카오톡에서 확인");
+          PhotoKeyboardDiagnostics.recordResult(this, status);
           if (automatic) {
             AccessibilityNodeInfo editor = findEditor(root, workflow.anchor().editorId);
             if (editor != null) {
@@ -203,7 +214,7 @@ public final class PhotoUiService extends AccessibilityService {
             return;
           }
           if (!workflow.claim(button)) return;
-          status = "학습한 사진 전송 버튼 실행 · 원래 채팅방 확인 중";
+          setStatus("학습한 사진 전송 버튼 실행 · 원래 채팅방 확인 중");
           if (!send.performAction(AccessibilityNodeInfo.ACTION_CLICK))
             fail("사진 전송 버튼 실행이 거절되어 예약 중지");
         }
@@ -218,7 +229,7 @@ public final class PhotoUiService extends AccessibilityService {
     main.postDelayed(
         () -> {
           if (workflow.revision() == revision && workflow.waiting())
-            fail("사진 전송 화면 또는 채팅방 복귀 확인 시간 초과 · 재시도 없음");
+            fail("전송 동작 또는 채팅방 복귀를 감지하지 못해 자동화 준비를 중지했습니다. 사진이 도착했다면 다시 보내지 마세요. 자동 재시도는 하지 않습니다.");
         },
         duration);
   }
@@ -226,8 +237,9 @@ public final class PhotoUiService extends AccessibilityService {
   private void fail(String reason) {
     workflow.reset();
     releaseWake();
-    status = reason;
     PhotoKeyboardService.stopLoop(this, null, reason);
+    setStatus(reason);
+    PhotoKeyboardDiagnostics.recordResult(this, reason);
   }
 
   private void releaseWake() {

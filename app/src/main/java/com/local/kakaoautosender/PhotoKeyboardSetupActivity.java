@@ -15,7 +15,14 @@ import android.widget.TextView;
 
 /** Setup/diagnostics only: enabling/selecting an IME is always an Android user action. */
 public final class PhotoKeyboardSetupActivity extends Activity {
+  private static java.lang.ref.WeakReference<PhotoKeyboardSetupActivity> visible =
+      new java.lang.ref.WeakReference<>(null);
   private TextView status;
+
+  static void uiStatusChanged() {
+    PhotoKeyboardSetupActivity activity = visible.get();
+    if (activity != null) activity.runOnUiThread(activity::refresh);
+  }
 
   @Override
   protected void onCreate(Bundle saved) {
@@ -135,7 +142,14 @@ public final class PhotoKeyboardSetupActivity extends Activity {
       LicenseManager.route(this);
       return;
     }
+    visible = new java.lang.ref.WeakReference<>(this);
     refresh();
+  }
+
+  @Override
+  protected void onPause() {
+    if (visible.get() == this) visible.clear();
+    super.onPause();
   }
 
   private void openSettings() {
