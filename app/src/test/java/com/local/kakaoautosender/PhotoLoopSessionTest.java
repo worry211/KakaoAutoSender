@@ -110,6 +110,43 @@ public class PhotoLoopSessionTest {
   }
 
   @Test
+  public void quickTestUsesTenSecondsWithoutChangingSavedScheduleAndCannotRepeat() {
+    long now = System.currentTimeMillis();
+    assertEquals(
+        "", loop.armQuickTest(context, profile, media, editor, connection, true, true, now));
+    PhotoLoopSession.Plan test = loop.current();
+    assertEquals(now + 10_000L, test.next);
+    assertTrue(test.once);
+    assertFalse(test.screenOff);
+    assertEquals(1, MultiRoomStore.get(context, profile.room).intervalMinutes);
+    assertFalse(loop.reserve(context, test, test.run, test.next, now));
+    deliver(test);
+    assertTrue(loop.completeUi(context, test, editor, new Connection(), now + 11_000L));
+    assertFalse(loop.active());
+    assertEquals(1, connection.calls);
+    assertEquals(1, PhotoLoopStore.attemptsToday(context, profile.room));
+  }
+
+  @Test
+  public void quickTestRequiresRecipientAndButtonLearningAndRespectsDailyLimit() {
+    long now = System.currentTimeMillis();
+    assertFalse(
+        loop.armQuickTest(context, profile, media, editor, connection, false, true, now).isEmpty());
+    assertFalse(
+        loop.armQuickTest(context, profile, media, editor, connection, true, false, now).isEmpty());
+    assertFalse(loop.active());
+    profile.dailyLimit = 1;
+    MultiRoomStore.upsert(context, profile);
+    assertEquals(
+        "", loop.armQuickTest(context, profile, media, editor, connection, true, true, now));
+    deliver(loop.current());
+    loop.stop(context, "test stop");
+    assertFalse(
+        loop.armQuickTest(context, profile, media, editor, connection, true, true, now).isEmpty());
+    assertEquals(1, connection.calls);
+  }
+
+  @Test
   public void reservationIsFutureBoundAndDuplicateAlarmCannotReplayOccurrence() {
     PhotoLoopSession.Plan plan = arm(false, false);
     long due = plan.next;

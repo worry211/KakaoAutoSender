@@ -162,6 +162,7 @@ public final class PhotoUiService extends AccessibilityService {
           if (!automatic) releaseWake();
           setStatus("자동화 준비 확인 완료 · 전송 버튼 누름과 채팅방 복귀 감지 · 실제 사진 도착은 카카오톡에서 확인");
           PhotoKeyboardDiagnostics.recordResult(this, status);
+          if (!automatic) PhotoKeyboardService.uiLearned();
           if (automatic) {
             AccessibilityNodeInfo editor = findEditor(root, workflow.anchor().editorId);
             if (editor != null) {

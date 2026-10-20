@@ -47,6 +47,8 @@ public final class PhotoKeyboardService extends InputMethodService {
   private Bitmap preview;
   private boolean receiverRegistered;
   private boolean preparing;
+  private String learnedSource;
+  private RoomMediaStore.Media learnedMedia;
   private final BroadcastReceiver screenOff =
       new BroadcastReceiver() {
         @Override
@@ -130,6 +132,15 @@ public final class PhotoKeyboardService extends InputMethodService {
       service.main.post(
           () -> {
             if (service.uiStatus != null) service.uiStatus.setText(PhotoUiService.status());
+          });
+  }
+
+  static void uiLearned() {
+    PhotoKeyboardService service = instance.get();
+    if (service != null)
+      service.main.post(
+          () -> {
+            if (!service.loop.active()) service.render();
           });
   }
 
@@ -309,7 +320,8 @@ public final class PhotoKeyboardService extends InputMethodService {
   public void onFinishInputView(boolean finishingInput) {
     session.invalidate(false);
     clearPreview();
-    if (!expectedUiTransition() && !mayKeepScreenOff()) cancel("키보드가 닫혀 사진 예약을 중지했습니다.");
+    if (!expectedUiTransition() && !mayKeepScreenOff() && !keepLoopWhileHidden())
+      cancel("입력 연결이 유지되지 않아 사진 예약을 중지했습니다.");
     super.onFinishInputView(finishingInput);
   }
 
@@ -325,7 +337,8 @@ public final class PhotoKeyboardService extends InputMethodService {
   public void onWindowHidden() {
     session.invalidate(false);
     clearPreview();
-    if (!expectedUiTransition() && !mayKeepScreenOff()) cancel("키보드가 닫혀 사진 예약을 중지했습니다.");
+    if (!expectedUiTransition() && !mayKeepScreenOff() && !keepLoopWhileHidden())
+      cancel("입력 연결이 유지되지 않아 사진 예약을 중지했습니다.");
     super.onWindowHidden();
   }
 
@@ -356,6 +369,14 @@ public final class PhotoKeyboardService extends InputMethodService {
     return plan != null && plan.screenOff && power != null && !power.isInteractive();
   }
 
+  private boolean keepLoopWhileHidden() {
+    PhotoLoopSession.Plan current = loop.current();
+    return current != null
+        && PhotoUiService.ready()
+        && loop.preflight(this, current, getCurrentInputEditorInfo(), getCurrentInputConnection())
+            .isEmpty();
+  }
+
   private boolean expectedUiTransition() {
     PhotoLoopSession.Plan plan = loop.current();
     return PhotoUiService.waiting() || (plan != null && plan.uiPending && PhotoUiService.ready());
@@ -381,7 +402,24 @@ public final class PhotoKeyboardService extends InputMethodService {
     uiStatus = text(PhotoUiService.status(), 12);
     if (loop.active()) {
       text(PhotoLoopStore.summary(this), 12);
+      text("현재 채팅방은 유지하세요. 키보드만 접을 수 있으며, 다른 앱·방으로 이동하거나 입력 연결이 종료되면 중지합니다.", 12);
+      button("키보드 접기 · 예약 유지", () -> requestHideSelf(0));
       button("사진 예약 즉시 중지", () -> stopLoop(this, null, "사용자가 사진 예약을 중지했습니다."));
+      return;
+    }
+    if (shown == null
+        && learnedSource != null
+        && learnedMedia != null
+        && PhotoUiService.ready()
+        && PhotoKeyboardSession.sameMedia(RoomMediaStore.get(this, learnedSource), learnedMedia)) {
+      renderReadyPhoto();
+      button(
+          "다른 사진 선택",
+          () -> {
+            learnedSource = null;
+            learnedMedia = null;
+            render();
+          });
       return;
     }
     if (shown != null && session.current(shown) && preview != null) {
@@ -439,6 +477,10 @@ public final class PhotoKeyboardService extends InputMethodService {
                     this, ticket, getCurrentInputEditorInfo(), getCurrentInputConnection(), true);
             boolean accepted = result.startsWith("사진 전달 요청");
             if (!accepted) PhotoUiService.cancel();
+            if (accepted) {
+              learnedSource = ticket.room;
+              learnedMedia = ticket.media;
+            }
             clearPreview();
             status =
                 accepted
@@ -509,18 +551,57 @@ public final class PhotoKeyboardService extends InputMethodService {
       render();
       return;
     }
+    startConfigured(ticket.room, ticket.media, confirmed, once, screenOff, false);
+  }
+
+  private void renderReadyPhoto() {
+    text("준비된 사진: " + learnedMedia.name + "\n사진을 다시 고를 필요가 없습니다. 현재 열린 방에 전송합니다.", 13);
+    MultiRoomStore.Profile source = MultiRoomStore.get(this, learnedSource);
+    if (source != null) text("저장 일정: " + MultiRoomStore.scheduleSummary(source), 12);
+    CheckBox confirm = new CheckBox(this);
+    confirm.setText("현재 받는 방과 이 사진의 전송을 확인했습니다");
+    confirm.setTextColor(Color.WHITE);
+    panel.addView(confirm);
+    String room = learnedSource;
+    RoomMediaStore.Media media = learnedMedia;
+    button(
+        "10초 후 자동전송 1회 시험",
+        () -> startConfigured(room, media, confirm.isChecked(), true, false, true));
+    button(
+        "저장한 일정으로 반복 시작",
+        () -> startConfigured(room, media, confirm.isChecked(), false, false, false));
+    text("시험도 실제 사진을 한 장 보냅니다. 손으로 전송 버튼을 누르지 않고 결과를 확인하세요. 절전·알람 권한에 따라 늦어질 수 있습니다.", 11);
+  }
+
+  private void startConfigured(
+      String room,
+      RoomMediaStore.Media media,
+      boolean confirmed,
+      boolean once,
+      boolean screenOff,
+      boolean quickTest) {
     String failure =
-        loop.arm(
-            this,
-            MultiRoomStore.get(this, ticket.room),
-            ticket.media,
-            getCurrentInputEditorInfo(),
-            getCurrentInputConnection(),
-            once,
-            screenOff,
-            confirmed,
-            PhotoUiService.ready(),
-            System.currentTimeMillis());
+        quickTest
+            ? loop.armQuickTest(
+                this,
+                MultiRoomStore.get(this, room),
+                media,
+                getCurrentInputEditorInfo(),
+                getCurrentInputConnection(),
+                confirmed,
+                PhotoUiService.ready(),
+                System.currentTimeMillis())
+            : loop.arm(
+                this,
+                MultiRoomStore.get(this, room),
+                media,
+                getCurrentInputEditorInfo(),
+                getCurrentInputConnection(),
+                once,
+                screenOff,
+                confirmed,
+                PhotoUiService.ready(),
+                System.currentTimeMillis());
     if (!failure.isEmpty()) {
       status = failure;
       render();
