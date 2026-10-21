@@ -49,12 +49,19 @@ def session(mode):
             p.stdin.close()
         elif mode == "timeout":
             pass  # keep stdin open: native watchdog must terminate and restore independently
+        elif mode == "controller-kill":
+            ids = next(line.split() for line in transcript if line.startswith("KMPANEL PIDS "))
+            adb("shell", "kill", "-9", ids[2])
         p.wait(timeout=12)
-        assert p.returncode == 0, transcript
+        assert p.returncode == 0 or mode == "controller-kill", transcript
         assert "KMPANEL RESTORE_FAILED" not in transcript, transcript
+        deadline = time.monotonic() + 10
+        while f"RESTORED {token}" not in adb("logcat", "-d", "-s", "KakaoMacroPanelGuard:I"):
+            assert time.monotonic() < deadline, "Detached guardian did not acknowledge restoration"
+            time.sleep(0.5)
         assert "mWakefulness=Awake" in adb("shell", "dumpsys", "power")
         return {"mode": mode, "offCommandAcknowledged": True, "osStayedAwake": True,
-                "helperExitedAfterRestore": True, "physicalPanelVerified": False}
+                "guardianRestoreAcknowledged": True, "physicalPanelVerified": False}
     finally:
         if p.poll() is None:
             p.kill(); p.wait(timeout=5)
@@ -64,7 +71,7 @@ def session(mode):
 adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
 adb("shell", "wm", "dismiss-keyguard")
 adb("push", sys.argv[1], "/data/local/tmp/kakaomacro-panel-test.apk")
-results = [session(mode) for mode in ["stop", "disconnect", "timeout"]]
+results = [session(mode) for mode in ["stop", "disconnect", "timeout", "controller-kill"]]
 with open("panel-device-results.json", "w") as output:
     json.dump({"api": adb("shell", "getprop", "ro.build.version.sdk").strip(),
                "results": results, "kakaoPhotoReceiptVerified": False}, output, indent=2)

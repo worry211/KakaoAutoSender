@@ -27,6 +27,8 @@ public final class PanelShell {
   private static java.io.OutputStream guardOutput;
   private static BufferedReader guardInput;
   private static String guardToken;
+  private static Process guardProcess;
+  private static int guardPid;
 
   private static void guardWrite(String command) throws Exception {
     if (guardOutput == null) return;
@@ -41,6 +43,7 @@ public final class PanelShell {
     ProcessBuilder builder =
         new ProcessBuilder(
             "/system/bin/setsid",
+            "-w",
             "/system/bin/app_process",
             "/",
             "com.local.kakaoautosender.PanelShell",
@@ -48,12 +51,14 @@ public final class PanelShell {
             "guard");
     builder.redirectError(new java.io.File("/dev/null"));
     Process guard = builder.start();
+    guardProcess = guard; // Keep Android's Process/pipe owner alive for the entire lease.
     guardToken = token;
     guardOutput = guard.getOutputStream();
     guardInput = new BufferedReader(new InputStreamReader(guard.getInputStream()));
     String ready = guardInput.readLine();
-    if (!("KMGUARD READY " + token).equals(ready))
+    if (ready == null || !ready.startsWith("KMGUARD READY " + token + " "))
       throw new IllegalStateException("NO_RESTORE_GUARD: " + ready);
+    guardPid = Integer.parseInt(ready.substring(ready.lastIndexOf(' ') + 1));
   }
 
   private static Object service(String name, String stub) throws Exception {
@@ -204,6 +209,7 @@ public final class PanelShell {
               "KakaoMacroPanelLease");
       watchdog.setDaemon(true);
       watchdog.start();
+      System.out.println("KMPANEL PIDS " + android.os.Process.myPid() + " " + guardPid);
       System.out.println("KMPANEL READY " + token);
       System.out.flush();
       BufferedReader input = new BufferedReader(new InputStreamReader(System.in));
@@ -223,8 +229,13 @@ public final class PanelShell {
       }
     } catch (Throwable failure) {
       Throwable cause = failure.getCause() == null ? failure : failure.getCause();
-      System.out.println("KMPANEL ERROR " + token + " " + cause.getClass().getSimpleName()
-          + " " + String.valueOf(cause.getMessage()).replace('\n', ' '));
+      System.out.println(
+          "KMPANEL ERROR "
+              + token
+              + " "
+              + cause.getClass().getSimpleName()
+              + " "
+              + String.valueOf(cause.getMessage()).replace('\n', ' '));
       System.out.flush();
     } finally {
       restore();
@@ -247,6 +258,8 @@ public final class PanelShell {
           if (armed.get()) {
             touched = true;
             restore();
+            if (!touched) android.util.Log.i("KakaoMacroPanelGuard", "RESTORED " + token);
+            else android.util.Log.e("KakaoMacroPanelGuard", "RESTORE_FAILED " + token);
           }
         };
     Runtime.getRuntime().addShutdownHook(new Thread(recovery));
@@ -267,7 +280,7 @@ public final class PanelShell {
               "KakaoMacroPanelRecovery");
       watchdog.setDaemon(true);
       watchdog.start();
-      System.out.println("KMGUARD READY " + token);
+      System.out.println("KMGUARD READY " + token + " " + android.os.Process.myPid());
       System.out.flush();
       BufferedReader input = new BufferedReader(new InputStreamReader(System.in));
       String line;
@@ -282,7 +295,8 @@ public final class PanelShell {
         }
       }
     } catch (Throwable failure) {
-      System.out.println("KMGUARD ERROR " + failure.getClass().getSimpleName()); System.out.flush();
+      System.out.println("KMGUARD ERROR " + failure.getClass().getSimpleName());
+      System.out.flush();
     } finally {
       recovery.run();
       System.exit(0);
