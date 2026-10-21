@@ -31,13 +31,20 @@ public final class PanelShell {
   private static int guardPid;
   private static final AtomicBoolean guardClosing = new AtomicBoolean(false);
 
-  private static void closeGuard() {
-    if (guardOutput == null || !guardClosing.compareAndSet(false, true)) return;
+  private static void finishPanel() {
+    if (!guardClosing.compareAndSet(false, true)) return;
     try {
-      guardWrite("STOP");
-      // Keep the pipe owner alive until the detached child has applied restoration.
-      if (guardProcess != null) guardProcess.waitFor(2500L, java.util.concurrent.TimeUnit.MILLISECONDS);
-    } catch (Throwable ignored) { }
+      if (guardOutput != null) {
+        guardWrite("STOP");
+        // Android 15 returns false for an already-applied power request. Let the
+        // guardian restore exactly once, then fall back only if its ACK is missing.
+        if (guardProcess != null
+            && guardProcess.waitFor(2500L, java.util.concurrent.TimeUnit.MILLISECONDS)
+            && ("KMGUARD RESTORED " + guardToken).equals(guardInput.readLine())) touched = false;
+      }
+    } catch (Throwable ignored) {
+    }
+    restore();
   }
 
   private static void guardWrite(String command) throws Exception {
@@ -196,7 +203,7 @@ public final class PanelShell {
     }
     AtomicLong deadline = new AtomicLong(SystemClock.elapsedRealtime() + 8000L);
     AtomicBoolean off = new AtomicBoolean(false);
-    Runtime.getRuntime().addShutdownHook(new Thread(PanelShell::restore));
+    Runtime.getRuntime().addShutdownHook(new Thread(PanelShell::finishPanel));
     try {
       if (Looper.myLooper() == null) Looper.prepare();
       initialize();
@@ -213,8 +220,7 @@ public final class PanelShell {
                   }
                 } catch (Throwable ignored) {
                 }
-                restore();
-                closeGuard();
+                finishPanel();
                 System.exit(0);
               },
               "KakaoMacroPanelLease");
@@ -249,8 +255,7 @@ public final class PanelShell {
               + String.valueOf(cause.getMessage()).replace('\n', ' '));
       System.out.flush();
     } finally {
-      restore();
-      closeGuard();
+      finishPanel();
       System.exit(0);
     }
   }
@@ -263,11 +268,14 @@ public final class PanelShell {
     AtomicBoolean armed = new AtomicBoolean(false);
     Runnable recovery =
         () -> {
-          if (armed.get()) {
+          if (armed.compareAndSet(true, false)) {
             touched = true;
             restore();
-            if (!touched) android.util.Log.i("KakaoMacroPanelGuard", "RESTORED " + token);
-            else android.util.Log.e("KakaoMacroPanelGuard", "RESTORE_FAILED " + token);
+            if (!touched) {
+              android.util.Log.i("KakaoMacroPanelGuard", "RESTORED " + token);
+              System.out.println("KMGUARD RESTORED " + token);
+              System.out.flush();
+            } else android.util.Log.e("KakaoMacroPanelGuard", "RESTORE_FAILED " + token);
           }
         };
     Runtime.getRuntime().addShutdownHook(new Thread(recovery));
