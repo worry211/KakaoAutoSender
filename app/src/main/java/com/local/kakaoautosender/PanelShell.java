@@ -31,7 +31,7 @@ public final class PanelShell {
   private static int guardPid;
   private static final AtomicBoolean guardClosing = new AtomicBoolean(false);
 
-  private static void finishPanel() {
+  private static synchronized void finishPanel() {
     if (!guardClosing.compareAndSet(false, true)) return;
     try {
       if (guardOutput != null) {
@@ -268,14 +268,16 @@ public final class PanelShell {
     AtomicBoolean armed = new AtomicBoolean(false);
     Runnable recovery =
         () -> {
-          if (armed.compareAndSet(true, false)) {
-            touched = true;
-            restore();
-            if (!touched) {
-              android.util.Log.i("KakaoMacroPanelGuard", "RESTORED " + token);
-              System.out.println("KMGUARD RESTORED " + token);
-              System.out.flush();
-            } else android.util.Log.e("KakaoMacroPanelGuard", "RESTORE_FAILED " + token);
+          synchronized (armed) {
+            if (armed.compareAndSet(true, false)) {
+              touched = true;
+              restore();
+              if (!touched) {
+                android.util.Log.i("KakaoMacroPanelGuard", "RESTORED " + token);
+                System.out.println("KMGUARD RESTORED " + token);
+                System.out.flush();
+              } else android.util.Log.e("KakaoMacroPanelGuard", "RESTORE_FAILED " + token);
+            }
           }
         };
     Runtime.getRuntime().addShutdownHook(new Thread(recovery));
