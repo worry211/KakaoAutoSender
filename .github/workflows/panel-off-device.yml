@@ -47,3 +47,5 @@ jobs:
             app/build/reports/androidTests
             third_party/spake2/build/reports/androidTests
             panel-device-results.json
+            panel-*-transcript.txt
+            panel-*-logcat.txt

@@ -13,6 +13,7 @@ def adb(*args):
 
 
 def session(mode):
+    print(f"Panel helper scenario: {mode}", flush=True)
     token = str(uuid.uuid4())
     p = subprocess.Popen(["adb", "shell", "CLASSPATH=/data/local/tmp/kakaomacro-panel-test.apk",
                           "app_process", "/", "com.local.kakaoautosender.PanelShell", token],
@@ -63,6 +64,10 @@ def session(mode):
         return {"mode": mode, "offCommandAcknowledged": True, "osStayedAwake": True,
                 "guardianRestoreAcknowledged": True, "physicalPanelVerified": False}
     finally:
+        with open(f"panel-{mode}-transcript.txt", "w") as output:
+            output.write("\n".join(transcript))
+        with open(f"panel-{mode}-logcat.txt", "w") as output:
+            output.write(adb("logcat", "-d"))
         if p.poll() is None:
             p.kill(); p.wait(timeout=5)
             # The helper watchdog remains responsible for restoring after transport loss.

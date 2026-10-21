@@ -29,6 +29,16 @@ public final class PanelShell {
   private static String guardToken;
   private static Process guardProcess;
   private static int guardPid;
+  private static final AtomicBoolean guardClosing = new AtomicBoolean(false);
+
+  private static void closeGuard() {
+    if (guardOutput == null || !guardClosing.compareAndSet(false, true)) return;
+    try {
+      guardWrite("STOP");
+      // Keep the pipe owner alive until the detached child has applied restoration.
+      if (guardProcess != null) guardProcess.waitFor(2500L, java.util.concurrent.TimeUnit.MILLISECONDS);
+    } catch (Throwable ignored) { }
+  }
 
   private static void guardWrite(String command) throws Exception {
     if (guardOutput == null) return;
@@ -204,6 +214,7 @@ public final class PanelShell {
                 } catch (Throwable ignored) {
                 }
                 restore();
+                closeGuard();
                 System.exit(0);
               },
               "KakaoMacroPanelLease");
@@ -239,10 +250,7 @@ public final class PanelShell {
       System.out.flush();
     } finally {
       restore();
-      try {
-        guardWrite("STOP");
-      } catch (Throwable ignored) {
-      }
+      closeGuard();
       System.exit(0);
     }
   }
