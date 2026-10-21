@@ -19,6 +19,7 @@
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
         <activity android:name=".PhotoTourActivity" android:exported="false" />
+        <activity android:name=".PanelOffActivity" android:exported="false" />
         <receiver android:name=".PhotoTourReceiver" android:exported="false" />
 
         <activity

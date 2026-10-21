@@ -18,6 +18,7 @@ public final class PhotoTourActivity extends Activity {
   private LinearLayout rooms;
   private TextView state;
   private boolean resumed;
+  private boolean usePanelOff;
   private final Runnable refresh =
       new Runnable() {
         @Override
@@ -54,8 +55,18 @@ public final class PhotoTourActivity extends Activity {
         13);
     text(
         body,
-        "화면 꺼짐/잠금: 전송 대기, 화면을 켜고 잠금을 풀면 계속. 실제 화면 OFF 사진 전송은 구현되지 않았습니다. 사진만 보내며 저장 문구는 첨부하지 않습니다.",
+        "기본 모드는 화면 꺼짐/잠금 중 대기합니다. 아래 패널 OFF 모드는 무선 디버깅 연결 후 화면 패널만 끄고 순회하는 시험 기능입니다. 전원 버튼으로 잠그면"
+            + " 중지합니다. 사진만 보내며 저장 문구는 첨부하지 않습니다.",
         13);
+    button(
+        body,
+        "화면 끄기 최초 설정 · PC·USB 불필요",
+        () -> startActivity(new Intent(this, PanelOffActivity.class)));
+    CheckBox off = new CheckBox(this);
+    off.setTextColor(Color.WHITE);
+    off.setText("시작할 때 화면 패널을 끄고 순회 · 최초 설정 필요");
+    off.setOnCheckedChangeListener((v, checked) -> usePanelOff = checked);
+    body.addView(off);
     rooms = new LinearLayout(this);
     rooms.setOrientation(LinearLayout.VERTICAL);
     body.addView(rooms);
@@ -96,13 +107,14 @@ public final class PhotoTourActivity extends Activity {
       return;
     }
     ArrayList<String> requested = new ArrayList<>(selected);
+    boolean requestedOff = usePanelOff;
     LicenseManager.runAuthorized(
         this,
         () -> {
           if (!resumed || isFinishing()) return;
           String error =
               start
-                  ? PhotoTourController.start(this, requested, once)
+                  ? PhotoTourController.start(this, requested, once, requestedOff)
                   : PhotoTourController.prepare(this, requested);
           if (!error.isEmpty()) toast(error);
           state.setText(PhotoTourController.status(this));

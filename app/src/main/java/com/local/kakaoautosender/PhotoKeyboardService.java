@@ -113,6 +113,7 @@ public final class PhotoKeyboardService extends InputMethodService {
         PhotoTourController.stop(context, reason);
         return;
       }
+      if (run == null) PanelOffManager.end("사용자가 사진 작업을 중지했습니다. 패널 복구 요청됨");
       if (service != null) {
         service.loop.stop(context, reason);
         service.main.post(

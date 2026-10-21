@@ -8,7 +8,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Serialized, opt-in foreground photo traversal. Screen OFF pauses navigation, never wakes it. */
+/** Serialized photo traversal with an optional, explicitly paired physical-panel-off lease. */
 final class PhotoTourController {
   enum Phase {
     IDLE,
@@ -36,11 +36,20 @@ final class PhotoTourController {
   private static long openedAt, epoch;
   private static boolean windowObserved;
   private static boolean checkingLicense;
+  private static boolean panelOff;
 
   private PhotoTourController() {}
 
   static boolean active() {
     return phase != Phase.IDLE;
+  }
+
+  static boolean matchesRun(String run) {
+    return queue != null && active() && queue.run.equals(run);
+  }
+
+  private static boolean panelReady() {
+    return !panelOff || (queue != null && PanelOffManager.healthy(queue.run));
   }
 
   static boolean ownsKeyboard() {
@@ -122,6 +131,7 @@ final class PhotoTourController {
   static String prepare(Context context, List<String> rooms) {
     if (android.os.Build.VERSION.SDK_INT < 28) return "여러 방 사진 순회는 Android 9 이상에서 사용할 수 있습니다.";
     if (active() || PhotoKeyboardService.hasActiveLoop()) return "진행 중인 사진 작업을 먼저 중지하세요.";
+    if (PanelOffManager.engaged()) return "화면 끄기 시험 또는 이전 작업을 먼저 중지하세요.";
     if (!PhotoUiService.connected()
         || !PhotoKeyboardSession.unlocked(context)
         || !DeliveryGate.allowed(context)) return "접근성·라이선스와 화면 잠금 해제를 확인하세요.";
@@ -156,12 +166,18 @@ final class PhotoTourController {
   }
 
   static String start(Context context, List<String> rooms, boolean once) {
+    return start(context, rooms, once, false);
+  }
+
+  static String start(Context context, List<String> rooms, boolean once, boolean usePanelOff) {
     if (android.os.Build.VERSION.SDK_INT < 28) return "여러 방 사진 순회는 Android 9 이상에서 사용할 수 있습니다.";
     if (active() || PhotoKeyboardService.hasActiveLoop()) return "진행 중인 사진 작업을 먼저 중지하세요.";
     if (!PhotoUiService.connected()
         || !PhotoKeyboardSession.unlocked(context)
         || !DeliveryGate.allowed(context)) return "접근성·라이선스와 화면 잠금 해제를 확인하세요.";
     if (!keyboardSelected(context)) return "사진 키보드를 현재 키보드로 선택하세요.";
+    if (usePanelOff && !PanelOffManager.connected()) return "화면 끄기 설정에서 무선 연결을 먼저 완료하세요.";
+    if (PanelOffManager.engaged()) return "화면 끄기 시험 또는 이전 작업을 먼저 중지하세요.";
     app = context.getApplicationContext();
     PhotoTourQueue candidate = new PhotoTourQueue(once);
     long now = System.currentTimeMillis();
@@ -185,7 +201,19 @@ final class PhotoTourController {
     lastAlias = "";
     lastAnchor = null;
     phase = Phase.WAIT_DUE;
-    status("사진 순회 시작 · " + candidate.jobs.size() + "개 방 · 화면이 꺼지면 대기합니다.");
+    panelOff = usePanelOff;
+    if (panelOff) {
+      String error = PanelOffManager.begin(app, queue.run);
+      if (!error.isEmpty()) {
+        finish(error);
+        return error;
+      }
+    }
+    status(
+        "사진 순회 시작 · "
+            + candidate.jobs.size()
+            + "개 방 · "
+            + (panelOff ? "패널 OFF 연결 준비 중 · 잠그면 중지" : "화면이 꺼지면 대기합니다."));
     schedule();
     return "";
   }
@@ -193,6 +221,7 @@ final class PhotoTourController {
   private static String open(String room) {
     if (!DeliveryGate.allowed(app) || !PhotoKeyboardSession.unlocked(app))
       return "화면 잠금 또는 라이선스로 방 열기를 중지했습니다.";
+    if (!panelReady()) return "패널 OFF 제어 연결이 확인되지 않아 방을 열지 않았습니다.";
     KakaoNotificationListener.ReplyTarget target = KakaoNotificationListener.findTarget(room);
     String error = routeError(app, room, target);
     if (!error.isEmpty()) return title(room) + ": " + error;
@@ -253,7 +282,7 @@ final class PhotoTourController {
     if (phase != Phase.REGISTER_OPEN && phase != Phase.ROUTE_OPEN) return;
     boolean known = alias.equals(lastAlias) && lastAnchor != null && lastAnchor.same(before);
     if (!freshNavigation(before, current, windowObserved, known)) return;
-    if (!PhotoKeyboardSession.unlocked(app) || !DeliveryGate.allowed(app)) {
+    if (!PhotoKeyboardSession.unlocked(app) || !DeliveryGate.allowed(app) || !panelReady()) {
       stop(app, "화면 또는 라이선스로 사진 순회 중지");
       return;
     }
@@ -279,6 +308,10 @@ final class PhotoTourController {
 
   static void inputReady() {
     if (app == null) return;
+    if (!panelReady()) {
+      stop(app, "패널 OFF 제어 응답 중단 · 사진 입력 중지");
+      return;
+    }
     if (phase == Phase.REGISTER_INPUT
         && registrationAnchor != null
         && registrationAnchor.same(PhotoUiService.tourAnchor())) {
@@ -343,7 +376,8 @@ final class PhotoTourController {
         || queue == null
         || job == null
         || !loopRun.equals(run)
-        || route == null) return false;
+        || route == null
+        || !panelReady()) return false;
     PhotoTourBindings.Binding b = PhotoTourBindings.get(app, alias);
     return PhotoTourBindings.identityMatches(app, b, route);
   }
@@ -372,6 +406,10 @@ final class PhotoTourController {
       return;
     }
     if (!queue.run.equals(run) || phase != Phase.WAIT_DUE) return;
+    if (panelOff && !panelReady()) {
+      stop(app, "패널 OFF 연결이 확인되지 않아 사진 순회를 중지했습니다.");
+      return;
+    }
     if (!PhotoKeyboardSession.unlocked(app)) {
       phase = Phase.SCREEN_WAIT;
       status("화면 꺼짐/잠금으로 대기 중 · 화면을 켜고 잠금을 풀면 계속합니다.");
@@ -442,6 +480,10 @@ final class PhotoTourController {
   static void screenChanged(Context context) {
     if (!active()) return;
     if (!PhotoKeyboardSession.unlocked(context)) {
+      if (panelOff) {
+        stop(context, "전원 버튼 또는 보안 잠금으로 패널 OFF 사진 순회를 중지했습니다.");
+        return;
+      }
       if (phase == Phase.SENDING) {
         stop(context, "전송 도중 화면/잠금이 바뀌어 중지 · 도착 여부 확인 후 다시 시작하세요.");
         return;
@@ -491,6 +533,8 @@ final class PhotoTourController {
     loopRun = "";
     registrationRun = "";
     checkingLicense = false;
+    if (panelOff) PanelOffManager.end("사진 순회 종료 · 패널 복구 요청됨");
+    panelOff = false;
     phase = Phase.IDLE;
     if (app != null) {
       PhotoTourAlarm.cancel(app);

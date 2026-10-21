@@ -1,0 +1,22 @@
+plugins { id 'com.android.library' }
+android {
+    namespace 'io.github.muntashirakon.crypto.spake2'
+    compileSdk 35
+    ndkVersion '27.2.12479018'
+    defaultConfig {
+        minSdk 26
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        externalNativeBuild { cmake { arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON' } }
+    }
+    externalNativeBuild { cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.22.1' } }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+dependencies {
+    implementation 'androidx.annotation:annotation:1.9.1'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+}
