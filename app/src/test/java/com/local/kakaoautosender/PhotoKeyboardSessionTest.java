@@ -128,6 +128,92 @@ public class PhotoKeyboardSessionTest {
     return session.commit(context, ticket, editor, connection, true);
   }
 
+  private View find(View view, String text) {
+    if (view instanceof android.widget.TextView
+        && text.contentEquals(((android.widget.TextView) view).getText())) return view;
+    if (view instanceof android.view.ViewGroup) {
+      android.view.ViewGroup group = (android.view.ViewGroup) view;
+      for (int i = 0; i < group.getChildCount(); i++) {
+        View result = find(group.getChildAt(i), text);
+        if (result != null) return result;
+      }
+    }
+    return null;
+  }
+
+  @Test
+  public void manualTransferKeepsPhotoAcrossEditorAndServiceRestartButNeverReplaysTicket()
+      throws Exception {
+    ServiceController<PhotoKeyboardService> controller =
+        Robolectric.buildService(PhotoKeyboardService.class).create();
+    PhotoKeyboardService service = controller.get();
+    try {
+      org.robolectric.util.ReflectionHelpers.setField(
+          service, "mStartedInputConnection", connection);
+      org.robolectric.util.ReflectionHelpers.setField(service, "mInputEditorInfo", editor);
+      Field field = PhotoKeyboardService.class.getDeclaredField("session");
+      field.setAccessible(true);
+      PhotoKeyboardSession live = (PhotoKeyboardSession) field.get(service);
+      live.invalidate(true);
+      PhotoKeyboardSession.Ticket ticket = live.select("test-room", media);
+      org.robolectric.util.ReflectionHelpers.setField(service, "shown", ticket);
+      org.robolectric.util.ReflectionHelpers.setField(
+          service,
+          "preview",
+          android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888));
+      View view = service.onCreateInputView();
+      ((android.widget.CheckBox) find(view, "현재 카카오톡 방과 사진을 확인했습니다")).setChecked(true);
+      find(view, "현재 방에 사진 전달 · 1회").performClick();
+      assertEquals(1, connection.calls);
+      assertNotNull(PhotoKeyboardSelection.load(context));
+      assertNotNull(find(view, "선택한 사진: test.png"));
+      assertFalse(live.current(ticket));
+      service.onFinishInput();
+      service.onStartInputView(editor, false);
+      Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+      assertFalse(((android.widget.CheckBox) find(view, "현재 카카오톡 방과 사진을 확인했습니다")).isChecked());
+      assertEquals(1, connection.calls);
+    } finally {
+      controller.destroy();
+    }
+    controller = Robolectric.buildService(PhotoKeyboardService.class).create();
+    try {
+      View view = controller.get().onCreateInputView();
+      assertNotNull(find(view, "선택한 사진: test.png"));
+      assertFalse(((android.widget.CheckBox) find(view, "현재 카카오톡 방과 사진을 확인했습니다")).isChecked());
+      assertFalse(PhotoKeyboardService.hasActiveLoop());
+      assertEquals(1, connection.calls);
+      find(view, "사진 선택 취소").performClick();
+      assertNull(PhotoKeyboardSelection.load(context));
+      assertTrue(RoomMediaStore.get(context, "test-room").hasImage());
+    } finally {
+      controller.destroy();
+    }
+  }
+
+  @Test
+  public void rememberedSelectionDoesNotSurviveSourceReplacementOrRemoval() {
+    PhotoKeyboardSelection.save(context, "test-room", media);
+    assertNotNull(PhotoKeyboardSelection.load(context));
+    RoomMediaStore.set(
+        context, "test-room", "content://photos/changed", "image/png", "changed.png");
+    assertNull(PhotoKeyboardSelection.load(context));
+    RoomMediaStore.set(context, "test-room", media.uri, media.mime, media.name);
+    assertNull(PhotoKeyboardSelection.load(context));
+    PhotoKeyboardSelection.save(context, "test-room", media);
+    RoomMediaStore.clear(context, "test-room");
+    assertNull(PhotoKeyboardSelection.load(context));
+  }
+
+  @Test
+  public void missingOrMismatchedSourceCannotBecomeRememberedSelection() {
+    PhotoKeyboardSelection.save(context, "missing", media);
+    assertNull(PhotoKeyboardSelection.load(context));
+    PhotoKeyboardSelection.save(
+        context, "test-room", new RoomMediaStore.Media(media.uri, "image/jpeg", media.name));
+    assertNull(PhotoKeyboardSelection.load(context));
+  }
+
   @Test
   public void deliversOneContentRequestWithTemporaryReadFlagAndNoSuccessCount() {
     PhotoKeyboardSession.Ticket ticket = select();

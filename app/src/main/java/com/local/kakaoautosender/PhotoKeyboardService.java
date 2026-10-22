@@ -94,7 +94,7 @@ public final class PhotoKeyboardService extends InputMethodService {
     PhotoKeyboardService service = instance.get();
     if (service == null) return;
     service.session.invalidate(false);
-    service.main.post(() -> service.cancel("중지되었습니다. 입력창을 다시 열어 사진을 선택하세요."));
+    service.main.post(() -> service.cancel("중지되었습니다. 사진 선택은 유지됩니다. 현재 방을 다시 확인하세요."));
   }
 
   static boolean hasActiveLoop() {
@@ -382,6 +382,7 @@ public final class PhotoKeyboardService extends InputMethodService {
     PhotoUiService.reconcileChat();
     status = "사진 출처의 방 이름은 받는 방이 아닙니다. 현재 카카오톡 방을 직접 확인하세요.";
     render();
+    main.post(this::restoreSelectedPhoto);
     main.postDelayed(PhotoTourController::inputReady, 200L);
   }
 
@@ -465,6 +466,26 @@ public final class PhotoKeyboardService extends InputMethodService {
     screenOffRequested = false;
   }
 
+  private void rememberSelection(PhotoKeyboardSession.Ticket ticket) {
+    learnedSource = ticket.room;
+    learnedMedia = ticket.media;
+    PhotoKeyboardSelection.save(this, ticket.room, ticket.media);
+  }
+
+  private void restoreSelectedPhoto() {
+    if (active != null
+        || loop.active()
+        || PhotoTourController.active()
+        || PhotoUiService.waiting()
+        || !isInputViewShown()
+        || !DeliveryGate.allowed(this)
+        || !PhotoKeyboardSession.unlocked(this)) return;
+    PhotoKeyboardSelection.Selected selected = PhotoKeyboardSelection.load(this);
+    if (selected != null
+        && PhotoKeyboardSession.rejection(getCurrentInputEditorInfo(), selected.media.mime)
+            .isEmpty()) prepare(selected.room, selected.media);
+  }
+
   private void render() {
     if (panel == null) return;
     panel.removeAllViews();
@@ -502,11 +523,17 @@ public final class PhotoKeyboardService extends InputMethodService {
       return;
     }
     PhotoKeyboardSession.Ticket ticket = shown != null && session.current(shown) ? shown : null;
+    if (ticket == null && !PhotoTourController.active()) {
+      PhotoKeyboardSelection.Selected selected = PhotoKeyboardSelection.load(this);
+      if (selected != null) {
+        learnedSource = selected.room;
+        learnedMedia = selected.media;
+      }
+    }
     String room = ticket != null ? ticket.room : learnedSource;
     RoomMediaStore.Media media = ticket != null ? ticket.media : learnedMedia;
     boolean remembered =
-        availability.canSchedule
-            && room != null
+        room != null
             && media != null
             && MultiRoomStore.get(this, room) != null
             && PhotoKeyboardSession.sameMedia(RoomMediaStore.get(this, room), media);
@@ -519,6 +546,10 @@ public final class PhotoKeyboardService extends InputMethodService {
       }
       text("선택한 사진: " + media.name, 12);
       text("수신자는 현재 열린 카카오톡 방입니다. 저장 문구는 함께 전달하지 않습니다.", 11);
+      if (ticket == null) {
+        text("사진 선택은 저장되어 있습니다. 전송 확인은 새 입력창에서 다시 받습니다.", 11);
+        button("저장한 사진 다시 준비", () -> prepare(room, media));
+      }
       CheckBox confirm = new CheckBox(this);
       confirm.setText("현재 카카오톡 방과 사진을 확인했습니다");
       confirm.setTextColor(Color.WHITE);
@@ -556,7 +587,7 @@ public final class PhotoKeyboardService extends InputMethodService {
           text("이미 준비한 전송 버튼 기준을 사용합니다. 이번 방은 확인만 하며 사진을 추가 전송하지 않습니다.", 11);
         } else {
           Button learn = button("자동 전송 준비 · 전송 버튼 학습 (1회)", () -> learnSelected(ticket));
-          learn.setEnabled(availability.canLearn);
+          learn.setEnabled(availability.canLearn && ticket != null);
         }
         if (!availability.canLearn)
           button(
@@ -600,6 +631,7 @@ public final class PhotoKeyboardService extends InputMethodService {
             clearPreview();
             learnedSource = null;
             learnedMedia = null;
+            PhotoKeyboardSelection.clear(this);
             status = "선택을 취소했습니다. 이 취소로 사진을 추가 전송하지 않습니다.";
             render();
           });
@@ -610,6 +642,7 @@ public final class PhotoKeyboardService extends InputMethodService {
             clearPreview();
             learnedSource = null;
             learnedMedia = null;
+            PhotoKeyboardSelection.clear(this);
             status = "보낼 사진을 선택하세요.";
             render();
           });
@@ -650,6 +683,7 @@ public final class PhotoKeyboardService extends InputMethodService {
             showActionStatus("현재 카카오톡 방과 사진을 먼저 확인하세요.");
             return;
           }
+          rememberSelection(ticket);
           String result =
               session.commit(
                   this, ticket, getCurrentInputEditorInfo(), getCurrentInputConnection(), true);
@@ -662,7 +696,7 @@ public final class PhotoKeyboardService extends InputMethodService {
 
   private void learnSelected(PhotoKeyboardSession.Ticket ticket) {
     if (!session.current(ticket)) {
-      showActionStatus("사진 선택이 만료되었습니다. 사진을 다시 선택하세요.");
+      showActionStatus("전송 확인이 만료되었습니다. 저장한 사진을 다시 준비하세요.");
       clearPreview();
       render();
       return;
@@ -682,8 +716,7 @@ public final class PhotoKeyboardService extends InputMethodService {
     boolean accepted = result.startsWith("사진 전달 요청");
     if (!accepted) PhotoUiService.cancel();
     if (accepted) {
-      learnedSource = ticket.room;
-      learnedMedia = ticket.media;
+      rememberSelection(ticket);
     }
     clearPreview();
     status = accepted ? "사진 전달 요청됨 · 카카오톡에서 전송 또는 취소하세요. 이미 보냈다면 다시 보내지 마세요." : result;
@@ -791,7 +824,7 @@ public final class PhotoKeyboardService extends InputMethodService {
           if (active != ticket) return;
           session.invalidate(true);
           clearPreview();
-          status = "2분 동안 사용하지 않아 사진 선택을 해제했습니다. 다시 선택할 수 있습니다.";
+          status = "전송 확인 시간이 만료되었습니다. 사진 선택은 유지되며, 현재 방 확인 후 다시 준비할 수 있습니다.";
           render();
         },
         PhotoKeyboardSession.CONFIRM_WINDOW_MS);
@@ -811,12 +844,14 @@ public final class PhotoKeyboardService extends InputMethodService {
                       getContentResolver().openInputStream(Uri.parse(media.uri))) {
                     BitmapFactory.decodeStream(input, null, options);
                   }
-                  if (options.outWidth <= 0 || options.outHeight <= 0)
+                  if (options.outWidth <= 0 || options.outHeight <= 0) {
                     throw new IOException("사진을 미리 볼 수 없습니다.");
+                  }
                   options.inJustDecodeBounds = false;
                   options.inSampleSize = 1;
-                  while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > 640)
+                  while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > 640) {
                     options.inSampleSize *= 2;
+                  }
                   try (InputStream input =
                       getContentResolver().openInputStream(Uri.parse(media.uri))) {
                     bitmap = BitmapFactory.decodeStream(input, null, options);
@@ -843,6 +878,7 @@ public final class PhotoKeyboardService extends InputMethodService {
                       }
                       shown = ticket;
                       preview = ready;
+                      rememberSelection(ticket);
                       status = "받는 방은 자동 선택하지 않습니다. 현재 카카오톡 채팅방을 확인하세요.";
                       render();
                     });
