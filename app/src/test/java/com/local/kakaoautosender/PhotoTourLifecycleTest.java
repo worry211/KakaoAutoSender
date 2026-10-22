@@ -24,11 +24,24 @@ public class PhotoTourLifecycleTest {
   @org.robolectric.annotation.Implements(android.inputmethodservice.InputMethodService.class)
   public static class InputProbe extends org.robolectric.shadows.ShadowService {
     static int polls;
+    static boolean visible;
+    static android.view.inputmethod.EditorInfo editor;
+    static android.view.inputmethod.InputConnection connection;
 
     @org.robolectric.annotation.Implementation
     protected boolean isInputViewShown() {
       polls++;
-      return false;
+      return visible;
+    }
+
+    @org.robolectric.annotation.Implementation
+    protected android.view.inputmethod.EditorInfo getCurrentInputEditorInfo() {
+      return editor;
+    }
+
+    @org.robolectric.annotation.Implementation
+    protected android.view.inputmethod.InputConnection getCurrentInputConnection() {
+      return connection;
     }
   }
 
@@ -47,6 +60,9 @@ public class PhotoTourLifecycleTest {
   @Before
   public void setup() throws Exception {
     c = RuntimeEnvironment.getApplication();
+    InputProbe.visible = false;
+    InputProbe.editor = null;
+    InputProbe.connection = null;
     PhotoTourController.stop(c, "reset");
     Prefs.p(c).edit().clear().commit();
     Settings.Global.putInt(c.getContentResolver(), Settings.Global.BOOT_COUNT, 4);
@@ -181,6 +197,26 @@ public class PhotoTourLifecycleTest {
     assertTrue(PhotoTourController.active());
     assertFalse(q.stopped);
     assertNull(q.inFlight);
+  }
+
+  @Test
+  @Config(shadows = InputProbe.class)
+  public void rejectedPhotoInputCannotBeReportedAsPrepared() {
+    var keyboard = Robolectric.buildService(PhotoKeyboardService.class).create();
+    try {
+      InputProbe.visible = true;
+      InputProbe.editor = new android.view.inputmethod.EditorInfo();
+      InputProbe.editor.packageName = KakaoNotificationListener.KAKAO_PACKAGE;
+      InputProbe.editor.contentMimeTypes = new String[] {"text/plain"};
+      InputProbe.connection =
+          new android.view.inputmethod.BaseInputConnection(new android.view.View(c), true);
+      MultiRoomStore.upsert(c, new MultiRoomStore.Profile("a"));
+      RoomMediaStore.set(c, "a", "content://photos/a", "image/png", "a.png");
+      assertTrue(PhotoKeyboardService.tourInputAvailable());
+      assertFalse(PhotoKeyboardService.prepareTourPhoto("a"));
+    } finally {
+      keyboard.destroy();
+    }
   }
 
   @Test

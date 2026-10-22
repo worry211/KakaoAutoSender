@@ -12,6 +12,7 @@ Candidate: 2.3.20-photo-rc4 (51). This is a test candidate, not a verified comme
 - Allow first preparation when the requested chat is already open; manual room confirmation is still required. For scheduled transmission, an unchanged current chat is accepted only with an already matching saved binding and identity.
 - Poll for the input connection after navigation even when Android does not emit another IME view-start callback. Polls belong to a navigation generation, cease on cancellation or phase change, and remain bounded by the existing opening deadline. Wait for a visible Kakao input connection before arming a tour send.
 - Expose photo scheduling directly in each room editor. Carry that room into the photo menu with saved media, text and schedule preserved. An unsupported notification-photo test directs the user to photo preparation instead of repeatedly attempting the unsupported reply path. Display text reply and photo opening capabilities separately.
+- Do not report rejected photo input as successfully prepared. Failed image decoding also stops active room preparation, so an old remembered image cannot stand in for a newly rejected source.
 
 ## Validation
 

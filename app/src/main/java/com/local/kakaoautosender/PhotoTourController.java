@@ -354,8 +354,10 @@ final class PhotoTourController {
     if (phase == Phase.REGISTER_INPUT
         && registrationAnchor != null
         && registrationAnchor.same(PhotoUiService.tourAnchor())) {
-      if (PhotoKeyboardService.tourInputAvailable() && PhotoKeyboardService.prepareTourPhoto(alias))
-        phase = Phase.REGISTER_READY;
+      if (PhotoKeyboardService.tourInputAvailable()) {
+        if (PhotoKeyboardService.prepareTourPhoto(alias)) phase = Phase.REGISTER_READY;
+        else stop(app, "현재 카카오톡 입력창에서 저장 사진을 준비하지 못했습니다. 사진 입력 지원과 저장 사진을 확인하세요.");
+      }
     } else if (phase == Phase.ROUTE_INPUT) {
       PhotoTourBindings.Binding b = PhotoTourBindings.get(app, alias);
       if (b == null

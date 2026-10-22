@@ -144,8 +144,9 @@ public final class PhotoKeyboardService extends InputMethodService {
   static boolean prepareTourPhoto(String room) {
     PhotoKeyboardService s = instance.get();
     if (s == null || !s.isInputViewShown() || s.getCurrentInputConnection() == null) return false;
+    PhotoKeyboardSession.Ticket previous = s.active;
     s.prepare(room, RoomMediaStore.get(s, room));
-    return true;
+    return s.active != previous && s.active != null && s.session.current(s.active);
   }
 
   static boolean tourInputAvailable() {
@@ -914,6 +915,7 @@ public final class PhotoKeyboardService extends InputMethodService {
                         session.invalidate(true);
                         clearPreview();
                         status = failure;
+                        PhotoTourController.stopActive("저장 사진을 읽지 못해 방 준비를 중지했습니다. 사진을 다시 선택하고 접근 권한을 확인하세요.");
                         render();
                         return;
                       }
