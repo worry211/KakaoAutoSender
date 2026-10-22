@@ -14,3 +14,6 @@ dependencyResolutionManagement {
 }
 rootProject.name = 'KakaoAutoSender'
 include ':app'
+include ':wireless-adb', ':spake2'
+project(':wireless-adb').projectDir = file('third_party/wireless-adb')
+project(':spake2').projectDir = file('third_party/spake2')

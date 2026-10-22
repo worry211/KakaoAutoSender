@@ -65,6 +65,8 @@ public class RoomEditorActivity extends Activity {
     private TextView executionStatus;
     private TextView nextPreview;
     private TextView imageStatus;
+    private TextView photoSupportStatus;
+    private Button sharePhotoButton;
     private TextView messageCount;
     private TextView dirtyStatus;
     private Button saveButton;
@@ -72,6 +74,7 @@ public class RoomEditorActivity extends Activity {
     private android.widget.ImageView imagePreview;
     private boolean loading;
     private boolean dirty;
+    private boolean resumed;
     private MultiRoomStore.Profile cachedProfile;
     private final Handler previewHandler = new Handler(Looper.getMainLooper());
     private final Runnable previewRunnable = this::refreshNextPreview;
@@ -95,10 +98,16 @@ public class RoomEditorActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        resumed = true;
         KakaoNotificationListener.requestRefresh();
         refreshConnection();
         refreshMedia();
         refreshNextPreview();
+    }
+
+    @Override protected void onPause() {
+        resumed = false;
+        super.onPause();
     }
 
     @Override public void onBackPressed() {
@@ -180,7 +189,8 @@ public class RoomEditorActivity extends Activity {
         Button remove = dangerSecondaryButton("사진 제거");
         remove.setOnClickListener(v -> {
             RoomMediaStore.Media old = RoomMediaStore.get(this, routeAlias);
-            RoomMediaStore.clear(this, routeAlias);
+            try { RoomMediaStore.clear(this, routeAlias); }
+            catch (RuntimeException error) { toast("사진 제거를 저장하지 못했습니다. 저장 공간을 확인하세요."); return; }
             releasePersistedReadPermission(old.uri);
             refreshMedia();
             toast("사진 첨부를 제거했습니다.");
@@ -189,6 +199,29 @@ public class RoomEditorActivity extends Activity {
         removeLp.leftMargin = dp(8);
         imageButtons.addView(remove, removeLp);
         imageCard.addView(imageButtons, top(11));
+        photoSupportStatus = text("", 11, false, AMBER);
+        imageCard.addView(photoSupportStatus, top(10));
+        sharePhotoButton = secondaryButton("카카오톡에서 사진 직접 보내기");
+        sharePhotoButton.setOnClickListener(v -> sharePhoto());
+        imageCard.addView(sharePhotoButton, top(10));
+        Button photoTour = primaryButton("사진 예약·반복 / 여러 방 전송");
+        photoTour.setOnClickListener(v -> openPhotoTour());
+        imageCard.addView(photoTour, top(10));
+        Button keyboardSetup = secondaryButton("사진 키보드 설정 · 다른 전송 방식");
+        keyboardSetup.setOnClickListener(v -> startActivity(new Intent(this, PhotoKeyboardSetupActivity.class)));
+        LinearLayout advancedPhoto = new LinearLayout(this);
+        advancedPhoto.setOrientation(LinearLayout.VERTICAL);
+        advancedPhoto.setVisibility(View.GONE);
+        advancedPhoto.addView(text("키보드·접근성 권한을 확인합니다. 한 방 또는 여러 방 사진 예약은 위 ‘사진 예약·반복 / 여러 방 전송’에서 시작하세요.", 11, false, AMBER));
+        advancedPhoto.addView(keyboardSetup, top(8));
+        Button advancedToggle = secondaryButton("고급 사진 기능 · 시험 기능 보기");
+        advancedToggle.setOnClickListener(v -> {
+            boolean show = advancedPhoto.getVisibility() != View.VISIBLE;
+            advancedPhoto.setVisibility(show ? View.VISIBLE : View.GONE);
+            advancedToggle.setText(show ? "고급 사진 기능 접기" : "고급 사진 기능 · 시험 기능 보기");
+        });
+        imageCard.addView(advancedToggle, top(10));
+        imageCard.addView(advancedPhoto, top(8));
         TextView imageHelp = text("이미지 첨부를 지원하지 않는 환경에서는 텍스트만 임의로 보내지 않고 전송을 실패 처리해 오동작을 막습니다.", 11, false, Color.rgb(119, 132, 156));
         imageHelp.setLineSpacing(0, 1.14f);
         imageCard.addView(imageHelp, top(9));
@@ -375,7 +408,8 @@ public class RoomEditorActivity extends Activity {
             getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } catch (Throwable ignored) {}
         RoomMediaStore.Media old = RoomMediaStore.get(this, routeAlias);
-        RoomMediaStore.set(this, routeAlias, uri.toString(), mime, name);
+        try { RoomMediaStore.set(this, routeAlias, uri.toString(), mime, name); }
+        catch (RuntimeException error) { toast("사진 저장을 확인하지 못했습니다. 저장 공간을 확인하고 다시 선택하세요."); return; }
         if (!old.uri.equals(uri.toString())) releasePersistedReadPermission(old.uri);
         refreshMedia();
         toast("사진을 저장했습니다. 판매 전에는 1회 테스트 전송으로 확인해 주세요.");
@@ -399,13 +433,7 @@ public class RoomEditorActivity extends Activity {
     }
 
     private void releasePersistedReadPermission(String rawUri) {
-        if (rawUri == null || rawUri.trim().isEmpty()) return;
-        try {
-            Uri uri = Uri.parse(rawUri);
-            if ("content".equals(uri.getScheme())) {
-                getContentResolver().releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            }
-        } catch (Throwable ignored) {}
+        RoomMediaStore.releaseIfUnused(this, rawUri);
     }
 
     private String displayName(Uri uri) {
@@ -430,6 +458,8 @@ public class RoomEditorActivity extends Activity {
     private void refreshMedia() {
         if (imageStatus == null) return;
         RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
+        sharePhotoButton.setEnabled(media.hasImage());
+        refreshPhotoSupport();
         if (!media.hasImage()) {
             imagePreview.setImageDrawable(null);
             imagePreview.setVisibility(View.GONE);
@@ -463,6 +493,53 @@ public class RoomEditorActivity extends Activity {
             imageStatus.setText("● 사진 첨부 · " + name);
             imageStatus.setTextColor(Color.rgb(164, 182, 255));
         }
+    }
+
+    private void refreshPhotoSupport() {
+        if (photoSupportStatus == null) return;
+        RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
+        RoomSendReadiness state = RoomSendReadiness.get(this, routeAlias,
+            messageInput == null ? "" : messageInput.getText().toString(), media);
+        photoSupportStatus.setText(media.hasImage() ? state.label + "\n" + state.detail : "사진을 선택하면 이 방의 자동전송 지원 여부를 확인합니다.");
+    }
+
+    private void sharePhoto() {
+        RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
+        if (!media.hasImage()) { toast("먼저 사진을 선택하세요."); return; }
+        new AlertDialog.Builder(this)
+            .setTitle("카카오톡에서 사진 직접 보내기")
+            .setMessage("카카오톡 화면에서 받는 방을 직접 선택하고 전송하세요. 방 이름과 참여자를 확인해 주세요.\n\n선택한 사진만 전달합니다. 작성한 문구는 함께 보내지 않습니다. 자동·반복 전송과 별개이며, 화면을 켜고 사용합니다.")
+            .setNegativeButton("취소", null)
+            .setPositiveButton("카카오톡 열기", (dialog, which) ->
+                LicenseManager.runAuthorized(this, this::preparePhotoShare)).show();
+    }
+
+    private void preparePhotoShare() {
+        RoomMediaStore.Media selected = RoomMediaStore.get(this, routeAlias);
+        sharePhotoButton.setEnabled(false);
+        new Thread(() -> {
+            Intent request = null;
+            try {
+                request = PhotoShareRequest.create(this, selected);
+            } catch (java.io.IOException | RuntimeException ignored) { }
+            final Intent prepared = request;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                sharePhotoButton.setEnabled(RoomMediaStore.get(this, routeAlias).hasImage());
+                if (!resumed) return;
+                if (prepared == null) { toast("사진을 읽을 수 없습니다. 사진을 다시 선택하세요."); return; }
+                if (!LicenseManager.isUsable(this)) { LicenseManager.route(this); return; }
+                if (!selected.uri.equals(RoomMediaStore.get(this, routeAlias).uri)) {
+                    toast("선택한 사진이 바뀌었습니다. 다시 눌러 주세요."); return;
+                }
+                try { startActivity(prepared); }
+                catch (android.content.ActivityNotFoundException error) {
+                    toast("사진을 공유할 카카오톡을 찾을 수 없습니다.");
+                } catch (RuntimeException error) {
+                    toast("카카오톡을 열지 못했습니다. 사진 권한과 카카오톡 설치를 확인하세요.");
+                }
+            });
+        }, "photo-share").start();
     }
 
     private void updateScheduleVisibility() {
@@ -523,6 +600,18 @@ public class RoomEditorActivity extends Activity {
         if (p == null) return;
         String draftMessage = messageInput.getText().toString();
         RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
+        if (media.hasImage() && PhotoReplyAction.select(
+                KakaoNotificationListener.findTarget(routeAlias) == null ? new PhotoReplyAction[0]
+                        : KakaoNotificationListener.findTarget(routeAlias).photoActions,
+                media.mime, !draftMessage.trim().isEmpty()) == null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("사진 전송 메뉴에서 시험하세요")
+                    .setMessage("이 방의 알림 답장은 사진을 받지 않습니다. 저장한 사진·시간으로 사진 전송 메뉴를 열고, 방 최초 준비 후 1회 시험을 시작하세요. 사진 전송에는 저장 문구를 붙이지 않습니다.")
+                    .setPositiveButton("사진 전송 열기", (d, w) -> openPhotoTour())
+                    .setNegativeButton("닫기", null)
+                    .show();
+            return;
+        }
         if (draftMessage.trim().isEmpty() && !media.hasImage()) {
             toast("보낼 메시지 또는 사진을 먼저 설정해 주세요.");
             return;
@@ -541,9 +630,9 @@ public class RoomEditorActivity extends Activity {
                 .setPositiveButton("전송", (d, w) -> LicenseManager.runAuthorized(this, () -> {
                     boolean ok = KakaoMessageSender.send(this, routeAlias, draftMessage, media);
                     String error = KakaoMessageSender.lastError();
-                    Prefs.setStatus(this, ok ? "수동 전송 성공: " + p.title()
+                    Prefs.setStatus(this, ok ? (media.hasImage() ? "사진 전송 요청 완료: " : "수동 전송 성공: ") + p.title()
                             : "수동 전송 실패: " + p.title() + " · " + error);
-                    toast(ok ? "테스트 전송에 성공했습니다." : "전송 실패: " + error);
+                    toast(ok ? (media.hasImage() ? "카카오톡에 사진 전송을 요청했습니다. 실제 도착을 확인하세요." : "테스트 전송에 성공했습니다.") : "전송 실패: " + error);
                     refreshConnection();
                 }))
                 .setNegativeButton("취소", null)
@@ -554,11 +643,7 @@ public class RoomEditorActivity extends Activity {
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
         if (p == null) return;
         KakaoNotificationListener.requestRefresh();
-        ArrayList<KakaoNotificationListener.SessionEntry> all = KakaoNotificationListener.candidateSessionEntries();
-        ArrayList<KakaoNotificationListener.SessionEntry> matches = new ArrayList<>();
-        for (KakaoNotificationListener.SessionEntry e : all) {
-            if (e.suggestedRoom != null && e.suggestedRoom.trim().equalsIgnoreCase(p.actualRoomName)) matches.add(e);
-        }
+        ArrayList<KakaoNotificationListener.SessionEntry> matches = KakaoNotificationListener.candidatesForRoom(this, p);
         if (matches.isEmpty()) {
             toast("이 방의 새 알림이 없습니다. 실제 방에서 메시지를 하나 받은 뒤 다시 확인해 주세요.");
             return;
@@ -572,8 +657,15 @@ public class RoomEditorActivity extends Activity {
             return;
         }
         boolean ok = KakaoNotificationListener.bindRecentTokenToRoom(this, matches.get(0).token, routeAlias);
-        toast(ok ? "방 연결을 다시 확인했습니다." : "알림 세션이 만료되었습니다.");
+        toast(ok ? "방 연결을 다시 확인했습니다." : "기존 방 식별자와 현재 알림을 확인하지 못했습니다. 메인의 새 방 연결에서 확인하세요.");
         refreshConnection();
+    }
+
+    private void openPhotoTour() {
+        if (!saveProfile(true)) return;
+        Prefs.p(this).edit().putString("photo_tour_selection_v1",
+                new org.json.JSONArray(java.util.Collections.singletonList(routeAlias)).toString()).apply();
+        startActivity(new Intent(this, PhotoTourActivity.class));
     }
 
     private void deleteProfile() {
@@ -600,14 +692,17 @@ public class RoomEditorActivity extends Activity {
         if (connectionStatus == null) return;
         boolean live = KakaoNotificationListener.hasLiveSession(routeAlias);
         boolean stored = KakaoNotificationListener.hasStoredBinding(this, routeAlias);
-        connectionStatus.setText(live ? "●  연결됨 · 지금 전송 가능"
+        KakaoNotificationListener.ReplyTarget target = KakaoNotificationListener.findTarget(routeAlias);
+        boolean textReply = live && target != null && target.pendingIntent != null
+                && KakaoMessageSender.freeFormInputs(target.remoteInputs).length > 0;
+        connectionStatus.setText(live ? (textReply ? "●  알림 문자 답장 연결됨 · 사진은 별도 준비" : "●  사진용 방 열기 연결됨 · 문자 답장 미지원")
                 : stored ? "●  복구 대기 · 새 알림이 오면 자동 복구"
                 : "●  연결 필요 · 이 방에서 새 메시지를 받아 주세요");
         connectionStatus.setTextColor(live ? GREEN : stored ? AMBER : RED);
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
         if (executionStatus != null && p != null) {
             if (p.lastSuccessAt > 0) {
-                executionStatus.setText("최근 성공  ·  " + new SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA).format(new Date(p.lastSuccessAt))
+                executionStatus.setText((RoomMediaStore.get(this, routeAlias).hasImage() ? "이전 전송 기록 · 사진 수신 미확인  ·  " : "최근 성공  ·  ") + new SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA).format(new Date(p.lastSuccessAt))
                         + (p.failureStreak > 0 ? "  ·  이후 실패 " + p.failureStreak + "회" : ""));
                 executionStatus.setTextColor(p.failureStreak > 0 ? AMBER : Color.rgb(130, 143, 166));
             } else if (p.failureStreak > 0) {
@@ -647,6 +742,7 @@ public class RoomEditorActivity extends Activity {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
                 updateMessageCount();
+                refreshPhotoSupport();
                 markDirty();
             }
             @Override public void afterTextChanged(Editable s) {}

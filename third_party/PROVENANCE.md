@@ -1,0 +1,10 @@
+# Wireless ADB preview dependencies
+
+- `wireless-adb`: https://github.com/MuntashirAkon/libadb-android at c849886ebc6d48e7b46d967e78a6bb65c90c3b74 (3.1.1). We use its Apache-2.0 option, retaining its upstream notices. Local change: client socket connect/read timeouts. Local Gradle module uses the separately built Android JNI SPAKE2 module.
+- `spake2`: Android sources from https://github.com/MuntashirAkon/spake2-java at 7615ddd680b990e14513ebb66eac4cb0dbf82464. Native `spake2-c` submodule is included as ordinary source from 0d15933e5ba3e662cb01245a7ac0dc9fca3eac31. LGPL-3.0 text and per-file Apache/ISC/BSD notices are retained. No dependency on a Git submodule checkout at build time.
+- Changes to JNI wrapper: no freeing the context on an operation error (the Java owner frees it once); idempotent synchronized destruction; implemented the upstream test's password scalar compatibility option. Cryptographic C math is unchanged. JNI tests run on Android rather than a desktop JVM. CMake uses NDK 27.2, flexible/16KB page support.
+- The upstream pure Java SPAKE2 alternative failed its own agreement tests and is **not included** in the app.
+- Android TLS provider: `org.conscrypt:conscrypt-android:2.7.0`, Apache-2.0, https://github.com/google/conscrypt . Retained reflection-facing classes in the release build. This provider is excluded only from desktop JVM test runtime, where Robolectric supplies its desktop counterpart.
+- Bouncy Castle `bcprov-jdk15to18:1.81`, MIT license, https://www.bouncycastle.org/about/license/ . Used for libadb pairing and X.509 certificate encoding.
+
+Distribute the source companion with this preview APK, including application source/build files and these library sources/licenses, so recipients can rebuild/relink with a modified LGPL library. Reverse engineering needed to debug LGPL library modifications is permitted. The debug build can be rebuilt and installed with a recipient's key; it does not require the commercial signing key. Server entitlement checks still apply. Production signing secrets and license databases are not part of the source companion.

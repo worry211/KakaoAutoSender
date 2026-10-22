@@ -155,8 +155,8 @@ public class MainActivityV4 extends Activity {
 
         LinearLayout masterButtons = new LinearLayout(this);
         masterButtons.setOrientation(LinearLayout.HORIZONTAL);
-        startButton = primaryButton("자동전송 시작");
-        startButton.setContentDescription("전체 자동전송 시작 또는 설정 계속하기");
+        startButton = primaryButton("알림 자동전송 시작");
+        startButton.setContentDescription("문자·사진 알림 답장 자동전송 시작 또는 설정 계속하기");
         startButton.setOnClickListener(v -> startAll());
         masterButtons.addView(startButton, new LinearLayout.LayoutParams(0, dp(54), 1.55f));
         stopButton = dangerSecondaryButton("전체 중단");
@@ -178,7 +178,9 @@ public class MainActivityV4 extends Activity {
         sectionRow.addView(roomHeading, weight());
         Button refresh = tertiaryButton("↻ 새로고침");
         refresh.setOnClickListener(v -> {
-            KakaoNotificationListener.requestReconnect(this);
+            if (!KakaoNotificationListener.isListenerConnected()) {
+                KakaoNotificationListener.requestReconnect(this);
+            }
             KakaoNotificationListener.requestRefresh();
             refreshUi();
             toast("카카오 방 연결 상태를 새로 확인했습니다.");
@@ -237,6 +239,15 @@ public class MainActivityV4 extends Activity {
         sortLp.leftMargin = dp(7);
         filterTools.addView(roomSortButton, sortLp);
         root.addView(filterTools, top(7));
+        Button commonSettings = tertiaryButton("여러 방 한 번에 설정");
+        commonSettings.setOnClickListener(v -> chooseRoomsForCommonSettings());
+        root.addView(commonSettings, top(9));
+        Button photoTour = tertiaryButton("사진 여러 방 전송");
+        photoTour.setOnClickListener(v -> startActivity(new Intent(this, PhotoTourActivity.class)));
+        root.addView(photoTour, top(7));
+        Button photoSetup = tertiaryButton("사진 전송 설정·권한·도움말");
+        photoSetup.setOnClickListener(v -> startActivity(new Intent(this, PhotoKeyboardSetupActivity.class)));
+        root.addView(photoSetup, top(7));
         renderRoomFilters();
 
         bulkBar = card(Color.rgb(23, 29, 42), Color.rgb(66, 84, 133), 16);
@@ -260,7 +271,7 @@ public class MainActivityV4 extends Activity {
         bulkActions.setOrientation(LinearLayout.HORIZONTAL);
         bulkActions.setGravity(Gravity.CENTER_VERTICAL);
 
-        Button bulkEdit = smallButton("일괄 편집");
+        Button bulkEdit = smallButton("사진·문구·시간");
         bulkEdit.setTextSize(10);
         bulkEdit.setMinWidth(0);
         bulkEdit.setOnClickListener(v -> openBulkEditor());
@@ -379,15 +390,26 @@ public class MainActivityV4 extends Activity {
         int enabled = 0;
         int ready = 0;
         int usable = 0;
+        int blockedPhotos = 0;
         for (MultiRoomStore.Profile p : profiles) {
             if (p.enabled) enabled++;
             if (p.enabled && RoomMediaStore.hasPayload(this, p)) {
                 usable++;
-                if (KakaoNotificationListener.hasLiveSession(p.room)) ready++;
+                RoomSendReadiness state = RoomSendReadiness.get(this, p);
+                if (state.ready) ready++;
+                if (state.blockedPhoto) blockedPhotos++;
             }
         }
 
-        if (active && usable < enabled) {
+        if ((PhotoKeyboardService.hasActiveLoop() || PhotoTourController.active())) {
+            masterStatus.setText(PhotoTourController.active() ? "사진 여러 방 순회 실행·대기 중" : "사진 키보드 예약 실행 중");
+            masterStatus.setTextColor(GREEN);
+            stylePill(masterBadge, "PHOTO", Color.rgb(25, 49, 42), Color.rgb(122, 231, 176));
+        } else if (active && blockedPhotos > 0) {
+            masterStatus.setText("알림 답장 사진 미지원 " + blockedPhotos + "개 · 사진 전송 메뉴 이용");
+            masterStatus.setTextColor(AMBER);
+            stylePill(masterBadge, "CHECK", Color.rgb(55, 45, 27), AMBER);
+        } else if (active && usable < enabled) {
             masterStatus.setText("자동전송 실행 중 · 일부 방 설정 필요");
             masterStatus.setTextColor(AMBER);
             stylePill(masterBadge, "CHECK", Color.rgb(55, 45, 27), AMBER);
@@ -424,20 +446,21 @@ public class MainActivityV4 extends Activity {
         if (Build.VERSION.SDK_INT >= 31) {
             system.append("  ·  예약 정확도 ").append(exact ? "정확 시각" : "근사 시각");
         }
-        system.append("  ·  전송 가능 방 ").append(ready).append("/").append(usable);
+        system.append("  ·  자동전송 입력 확인 ").append(ready).append("/").append(usable);
+        if ((PhotoKeyboardService.hasActiveLoop() || PhotoTourController.active())) system.append("\n").append(PhotoTourController.active() ? PhotoTourController.status(this) : PhotoLoopStore.summary(this));
         String notice = LicenseManager.updateNotice(this);
         if (notice != null && !notice.trim().isEmpty()) system.append("\n").append(notice.trim());
         systemStatus.setText(system.toString());
         systemStatus.setTextColor(!access || !listener ? AMBER : Color.rgb(181, 191, 210));
 
         startButton.setEnabled(!active);
-        stopButton.setEnabled(active);
-        if (active) startButton.setText("자동전송 실행 중");
+        stopButton.setEnabled(active || (PhotoKeyboardService.hasActiveLoop() || PhotoTourController.active()));
+        if (active) startButton.setText("알림 자동전송 실행 중");
         else if (!access) startButton.setText("알림 접근 필요");
         else if (usable == 0) startButton.setText("방 설정을 완료하세요");
-        else startButton.setText("자동전송 시작");
+        else startButton.setText("알림 자동전송 시작");
         startButton.setAlpha(startButton.isEnabled() ? 1f : 0.46f);
-        stopButton.setAlpha(active ? 1f : 0.46f);
+        stopButton.setAlpha(active || (PhotoKeyboardService.hasActiveLoop() || PhotoTourController.active()) ? 1f : 0.46f);
 
         ArrayList<MultiRoomStore.Profile> displayProfiles = RoomDashboardPolicy.sorted(profiles, roomSort);
         LinkedHashSet<String> existingAliases = new LinkedHashSet<>();
@@ -558,7 +581,7 @@ public class MainActivityV4 extends Activity {
         roomTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
         titleRow.addView(roomTitle, weight());
         if (selected) titleRow.addView(pill("✓ 선택", Color.rgb(39, 51, 89), Color.rgb(190, 202, 255)));
-        titleRow.addView(pill(p.enabled ? "사용 중" : "일시정지",
+        titleRow.addView(pill(p.enabled ? "사용 설정 켬" : "일시정지",
                 p.enabled ? Color.rgb(28, 54, 44) : Color.rgb(45, 49, 59),
                 p.enabled ? Color.rgb(130, 232, 180) : Color.rgb(162, 171, 190)));
         card.addView(titleRow);
@@ -583,11 +606,18 @@ public class MainActivityV4 extends Activity {
         metaRow.addView(schedule, scheduleLp);
         card.addView(metaRow, top(10));
 
+        RoomMediaStore.Media roomPhoto = RoomMediaStore.get(this, p.room);
+        if (roomPhoto.hasImage()) {
+            RoomSendReadiness photoState = RoomSendReadiness.get(this, p);
+            card.addView(text("사진 · " + roomPhoto.name, 12, true, TEXT), top(8));
+            card.addView(text(photoState.label, 11, true, photoState.ready ? GREEN : AMBER), top(4));
+        }
+
         String preview = p.message == null ? "" : p.message.replace('\n', ' ').trim();
         if (preview.length() > 92) preview = preview.substring(0, 92) + "…";
         LinearLayout previewBox = card(FIELD, Color.rgb(34, 43, 60), 12);
-        TextView message = text(preview.isEmpty() ? "메시지가 아직 설정되지 않았습니다." : preview, 12, false,
-                preview.isEmpty() ? AMBER : Color.rgb(207, 215, 232));
+        TextView message = text(preview.isEmpty() ? (roomPhoto.hasImage() ? "문구 없이 사진만 설정됨" : "메시지가 아직 설정되지 않았습니다.") : preview, 12, false,
+                preview.isEmpty() && !roomPhoto.hasImage() ? AMBER : Color.rgb(207, 215, 232));
         message.setMaxLines(3);
         previewBox.addView(message);
         card.addView(previewBox, top(10));
@@ -599,7 +629,7 @@ public class MainActivityV4 extends Activity {
         card.addView(meta, top(8));
 
         String recent = p.lastSuccessAt > 0
-                ? "최근 성공  ·  " + formatDateTime(p.lastSuccessAt)
+                ? (roomPhoto.hasImage() ? "이전 전송 기록 · 사진 수신 미확인  ·  " : "최근 성공  ·  ") + formatDateTime(p.lastSuccessAt)
                 : p.failureStreak > 0
                     ? "최근 전송 확인 필요  ·  실패 " + p.failureStreak + "회"
                     : "최근 전송 기록 없음";
@@ -660,7 +690,10 @@ public class MainActivityV4 extends Activity {
                     .append(p.dailyTimes).append('|').append(p.dailyLimit).append('|').append(p.todayCount).append('|')
                     .append(p.nextAt).append('|').append(p.failureStreak).append('|').append(p.lastSuccessAt).append('|')
                     .append(KakaoNotificationListener.hasLiveSession(p.room)).append('|')
-                    .append(KakaoNotificationListener.hasStoredBinding(this, p.room)).append(';');
+                    .append(KakaoNotificationListener.hasStoredBinding(this, p.room)).append('|')
+                    .append(RoomMediaStore.get(this, p.room).uri).append('|')
+                    .append(RoomMediaStore.get(this, p.room).mime).append('|')
+                    .append(RoomSendReadiness.get(this, p).kind).append(';');
         }
         return fp.toString();
     }
@@ -840,13 +873,7 @@ public class MainActivityV4 extends Activity {
     }
 
     private void releasePersistedReadPermission(String rawUri) {
-        if (rawUri == null || rawUri.trim().isEmpty()) return;
-        try {
-            Uri uri = Uri.parse(rawUri);
-            if ("content".equals(uri.getScheme())) {
-                getContentResolver().releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            }
-        } catch (Throwable ignored) { }
+        RoomMediaStore.releaseIfUnused(this, rawUri);
     }
 
     private void openBulkEditor() {
@@ -854,6 +881,37 @@ public class MainActivityV4 extends Activity {
         Intent intent = new Intent(this, BulkRoomEditActivity.class);
         intent.putStringArrayListExtra(BulkRoomEditActivity.EXTRA_ROOMS, new ArrayList<>(selectedRooms));
         startActivityForResult(intent, REQUEST_BULK_EDIT);
+    }
+
+    private void chooseRoomsForCommonSettings() {
+        ArrayList<MultiRoomStore.Profile> profiles = MultiRoomStore.list(this);
+        if (profiles.isEmpty()) { toast("먼저 카카오톡 방을 연결하세요."); return; }
+        String[] labels = new String[profiles.size()];
+        boolean[] checked = new boolean[profiles.size()];
+        for (int i = 0; i < profiles.size(); i++) {
+            MultiRoomStore.Profile profile = profiles.get(i);
+            String hint = Prefs.bindingHintForAlias(this, profile.room);
+            labels[i] = profile.title() + (hint.isEmpty() ? "" : " · #" + hint);
+            checked[i] = selectedRooms.contains(profile.room);
+        }
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("같이 설정할 방 선택")
+            .setMultiChoiceItems(labels, checked, (d, index, value) -> checked[index] = value)
+            .setPositiveButton("선택한 방 설정", null).setNeutralButton("전체 선택/해제", null)
+            .setNegativeButton("취소", null).create();
+        dialog.setOnShowListener(d -> {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                boolean all = true; for (boolean value : checked) all &= value;
+                for (int i = 0; i < checked.length; i++) { checked[i] = !all; dialog.getListView().setItemChecked(i, !all); }
+            });
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                ArrayList<String> aliases = new ArrayList<>();
+                for (int i = 0; i < checked.length; i++) if (checked[i]) aliases.add(profiles.get(i).room);
+                if (aliases.isEmpty()) { toast("방을 하나 이상 선택하세요."); return; }
+                Intent request = new Intent(this, BulkRoomEditActivity.class).putStringArrayListExtra(BulkRoomEditActivity.EXTRA_ROOMS, aliases);
+                dialog.dismiss(); startActivityForResult(request, REQUEST_BULK_EDIT);
+            });
+        });
+        dialog.show();
     }
 
     private void applySelectedEnabled(boolean enabled) {
@@ -880,12 +938,24 @@ public class MainActivityV4 extends Activity {
     }
 
     private void showAddCandidates() {
+        if (!isNotificationAccessEnabled()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("방 연결에 알림 접근 권한이 필요합니다")
+                    .setMessage("알림 접근에서 카카오매크로를 허용한 뒤, 대상 카카오톡 방의 새 메시지 알림을 받아 주세요.")
+                    .setPositiveButton("알림 접근 설정", (d, w) -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)))
+                    .setNegativeButton("닫기", null)
+                    .show();
+            return;
+        }
+        if (!KakaoNotificationListener.isListenerConnected()) {
+            KakaoNotificationListener.requestReconnect(this);
+        }
         KakaoNotificationListener.requestRefresh();
         final ArrayList<KakaoNotificationListener.SessionEntry> entries = KakaoNotificationListener.candidateSessionEntries();
         if (entries.isEmpty()) {
             new AlertDialog.Builder(this)
                     .setTitle("연결할 방을 찾지 못했습니다")
-                    .setMessage("연결하려는 오픈채팅방에서 새 메시지를 하나 받은 뒤 다시 시도해 주세요.\n\n최근 알림을 직접 확인해야 한다면 ‘직접 연결’을 사용할 수 있습니다.")
+                    .setMessage("카카오톡에서 대상 방의 알림을 켜고, 방 화면에서 나온 뒤 새 메시지를 받아 주세요. 휴대폰 알림창에 해당 방의 알림이 남아 있는 상태에서 다시 연결하세요.\n\n방 이름을 숨기는 알림 설정에서는 방을 식별하지 못할 수 있습니다. 최근 알림은 ‘직접 연결’에서 확인할 수 있습니다.")
                     .setPositiveButton("직접 연결", (d, w) -> showAdvancedManualAdd())
                     .setNegativeButton("닫기", null)
                     .show();
@@ -1235,6 +1305,10 @@ public class MainActivityV4 extends Activity {
     }
 
     private void testRoom(MultiRoomStore.Profile p) {
+        RoomMediaStore.Media media = RoomMediaStore.get(this, p.room);
+        RoomSendReadiness readiness = RoomSendReadiness.get(this, p);
+        if (readiness.blockedPhoto) { new AlertDialog.Builder(this).setTitle(readiness.label).setMessage(readiness.detail)
+            .setPositiveButton("방 설정 보기", (d,w) -> openEditor(p.room)).setNegativeButton("닫기", null).show(); return; }
         if (!RoomMediaStore.hasPayload(this, p)) {
             toast("메시지가 비어 있습니다. 방 설정에서 먼저 입력해 주세요.");
             return;
@@ -1245,13 +1319,13 @@ public class MainActivityV4 extends Activity {
         }
         new AlertDialog.Builder(this)
                 .setTitle("1회 테스트 전송")
-                .setMessage(p.title() + "\n\n" + p.message)
+                .setMessage(p.title() + "\n\n" + p.message + (media.hasImage() ? "\n사진: " + media.name : ""))
                 .setPositiveButton("전송", (d, w) -> {
                     LicenseManager.runAuthorized(this, () -> {
                         boolean ok = KakaoMessageSender.send(this, p.room, p.message, RoomMediaStore.get(this, p.room));
-                        Prefs.setStatus(this, ok ? "수동 전송 성공: " + p.title()
+                        Prefs.setStatus(this, ok ? (media.hasImage() ? "사진 요청 수락 · 실제 도착 확인 필요: " : "수동 전송 성공: ") + p.title()
                                 : "수동 전송 실패: " + p.title() + " · " + KakaoMessageSender.lastError());
-                        toast(ok ? "테스트 전송에 성공했습니다." : "전송 실패: " + KakaoMessageSender.lastError());
+                        toast(ok ? (media.hasImage() ? "사진 요청이 수락됐습니다. 실제 도착을 확인하세요." : "테스트 전송에 성공했습니다.") : "전송 실패: " + KakaoMessageSender.lastError());
                         refreshUi();
                     });
                 })
@@ -1264,6 +1338,32 @@ public class MainActivityV4 extends Activity {
     }
 
     private void startAuthorized() {
+        ArrayList<String> unsupported = new ArrayList<>();
+        int eligible = 0;
+        StringBuilder blockedNames = new StringBuilder();
+        for (MultiRoomStore.Profile profile : MultiRoomStore.list(this)) {
+            if (!profile.enabled || !RoomMediaStore.hasPayload(this, profile)) continue;
+            if (RoomSendReadiness.get(this, profile).blockedPhoto) {
+                unsupported.add(profile.room);
+                if (unsupported.size() <= 6) blockedNames.append("• ").append(profile.title()).append('\n');
+            } else eligible++;
+        }
+        if (!unsupported.isEmpty()) {
+            if (unsupported.size() > 6) blockedNames.append("외 ").append(unsupported.size() - 6).append("개 방\n");
+            AlertDialog.Builder info = new AlertDialog.Builder(this).setTitle("알림 답장으로 사진을 받지 않는 방")
+                .setMessage(blockedNames + "\n사진 설정은 저장되어 있습니다. 사진 키보드·예약·여러 방 순회는 ‘사진 여러 방 전송’에서 준비하세요.")
+                .setNegativeButton("닫기", null);
+            if (eligible > 0) info.setPositiveButton("미지원 방 끄고 나머지 시작", (d,w) -> {
+                MultiRoomStore.BulkPatch pause = new MultiRoomStore.BulkPatch(); pause.applyEnabled = true; pause.enabled = false;
+                MultiRoomStore.applyBulkPatch(this, unsupported, pause); startAuthorized();
+            });
+            else info.setPositiveButton("사진 여러 방 전송", (d,w) -> {
+                Prefs.p(this).edit().putString("photo_tour_selection_v1", new org.json.JSONArray(unsupported).toString()).apply();
+                startActivity(new Intent(this, PhotoTourActivity.class));
+            });
+            if (eligible > 0) info.setNeutralButton("사진 전송 메뉴", (d,w) -> startActivity(new Intent(this, PhotoTourActivity.class)));
+            info.show(); return;
+        }
         if (!isNotificationAccessEnabled()) {
             new AlertDialog.Builder(this)
                     .setTitle("알림 접근 권한이 필요합니다")
@@ -1280,7 +1380,7 @@ public class MainActivityV4 extends Activity {
         for (MultiRoomStore.Profile p : profiles) {
             if (!p.enabled || !RoomMediaStore.hasPayload(this, p)) continue;
             usable++;
-            if (KakaoNotificationListener.hasLiveSession(p.room)) ready++;
+            if (RoomSendReadiness.get(this, p).ready) ready++;
         }
         if (usable == 0) {
             AlertDialog.Builder setup = new AlertDialog.Builder(this)
@@ -1395,8 +1495,7 @@ public class MainActivityV4 extends Activity {
     }
 
     private boolean isNotificationAccessEnabled() {
-        String enabled = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
-        return enabled != null && enabled.contains(new ComponentName(this, KakaoNotificationListener.class).flattenToString());
+        return KakaoNotificationListener.notificationAccessEnabled(this);
     }
 
     private String appVersion() {

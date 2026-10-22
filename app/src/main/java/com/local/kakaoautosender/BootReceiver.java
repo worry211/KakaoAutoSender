@@ -14,6 +14,9 @@ public class BootReceiver extends BroadcastReceiver {
             || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action);
     if (!restoreEvent) return;
 
+    PhotoTourController.stop(context, "재부팅·업데이트 후 사진 순회는 앱에서 다시 시작하세요.");
+    PhotoKeyboardService.stopLoop(context, null, "재부팅·업데이트 후 사진 키보드 예약은 채팅방에서 다시 시작하세요.");
+
     Prefs.ensureLabelSchema(context);
     MultiRoomStore.ensureMigrated(context);
 

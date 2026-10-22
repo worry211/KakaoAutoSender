@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="photo_keyboard_label">카톡매크로 사진 키보드</string>
+    <string name="photo_ui_label">카톡매크로 사진 전송 보조</string>
+    <string name="photo_ui_description">사용자가 확인한 현재 카카오톡 방에서 사진 예약을 실행합니다. 직접 누른 사진 전송 버튼을 학습한 뒤 같은 전송 화면에서만 누릅니다. 방 제목과 화면 구조를 기기 안에서 비교하며 대화·입력 문구는 저장하거나 전송하지 않습니다. 화면이나 연결이 바뀌면 중지합니다.</string>
+    <string name="photo_keyboard_status">%1$s\n\n%2$s</string>
+</resources>

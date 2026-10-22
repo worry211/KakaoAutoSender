@@ -2,381 +2,853 @@ package com.local.kakaoautosender;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
-
 import java.util.ArrayList;
 
 public class BulkRoomEditActivity extends Activity {
-    static final String EXTRA_ROOMS = "rooms";
+  static final String EXTRA_ROOMS = "rooms";
+  static final String EXTRA_PHOTO_MODE = "photo_mode";
+  private boolean photoMode;
+  private long previewGeneration;
 
-    private static final int BG = Color.rgb(9, 11, 16);
-    private static final int SURFACE = Color.rgb(18, 23, 34);
-    private static final int FIELD = Color.rgb(15, 20, 30);
-    private static final int BORDER = Color.rgb(45, 55, 75);
-    private static final int TEXT = Color.rgb(238, 242, 249);
-    private static final int MUTED = Color.rgb(154, 166, 188);
-    private static final int ACCENT = Color.rgb(86, 112, 255);
-    private static final int AMBER = Color.rgb(243, 190, 91);
+  private static final int BG = Color.rgb(9, 11, 16);
+  private static final int SURFACE = Color.rgb(18, 23, 34);
+  private static final int FIELD = Color.rgb(15, 20, 30);
+  private static final int BORDER = Color.rgb(45, 55, 75);
+  private static final int TEXT = Color.rgb(238, 242, 249);
+  private static final int MUTED = Color.rgb(154, 166, 188);
+  private static final int ACCENT = Color.rgb(86, 112, 255);
+  private static final int AMBER = Color.rgb(243, 190, 91);
 
-    private final ArrayList<String> rooms = new ArrayList<>();
-    private CheckBox applyMessage;
-    private CheckBox applySchedule;
-    private CheckBox applyLimit;
-    private CheckBox applyEnabled;
-    private EditText messageInput;
-    private EditText intervalInput;
-    private EditText timesInput;
-    private EditText limitInput;
-    private CheckBox unlimitedCheck;
-    private CheckBox enabledCheck;
-    private RadioButton intervalRadio;
-    private RadioButton timesRadio;
-    private LinearLayout intervalBox;
-    private LinearLayout timesBox;
-    private MultiRoomStore.Profile templateProfile;
+  private final ArrayList<String> rooms = new ArrayList<>();
+  private CheckBox applyMessage;
+  private CheckBox applySchedule;
+  private CheckBox applyLimit;
+  private CheckBox applyEnabled;
+  private EditText messageInput;
+  private EditText intervalInput;
+  private EditText timesInput;
+  private EditText limitInput;
+  private CheckBox unlimitedCheck;
+  private CheckBox enabledCheck;
+  private RadioButton intervalRadio;
+  private RadioButton timesRadio;
+  private LinearLayout intervalBox;
+  private LinearLayout timesBox;
+  private MultiRoomStore.Profile templateProfile;
+  private static final int PICK_PHOTO = 5201;
+  private int photoAction; // 0 keep, 1 replace, 2 clear
+  private RoomMediaStore.Media photo = new RoomMediaStore.Media("", "", "");
+  private TextView photoStatus, resultSummary;
+  private ImageView photoPreview;
+  private Button saveButton;
+  private boolean busy;
+  private String selectingUri = "";
+  private long operation;
+  private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
 
-    @Override protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        ArrayList<String> incoming = getIntent().getStringArrayListExtra(EXTRA_ROOMS);
-        ArrayList<MultiRoomStore.Profile> selected = MultiRoomStore.getMany(this, incoming);
-        for (MultiRoomStore.Profile profile : selected) rooms.add(profile.room);
-        if (selected.isEmpty()) { finish(); return; }
-        templateProfile = selected.get(0).copy();
-        setContentView(buildUi());
-        loadFirstProfileAsTemplate();
-        syncApplyState();
+  @Override
+  protected void onCreate(Bundle savedInstanceState) {
+    super.onCreate(savedInstanceState);
+    photoMode = getIntent().getBooleanExtra(EXTRA_PHOTO_MODE, false);
+    ArrayList<String> incoming = getIntent().getStringArrayListExtra(EXTRA_ROOMS);
+    ArrayList<MultiRoomStore.Profile> selected = MultiRoomStore.getMany(this, incoming);
+    for (MultiRoomStore.Profile profile : selected) rooms.add(profile.room);
+    if (selected.isEmpty()) {
+      finish();
+      return;
+    }
+    templateProfile = selected.get(0).copy();
+    if (savedInstanceState != null) {
+      photoAction = savedInstanceState.getInt("photoAction", 0);
+      photo =
+          new RoomMediaStore.Media(
+              savedInstanceState.getString("photoUri", ""),
+              savedInstanceState.getString("photoMime", ""),
+              savedInstanceState.getString("photoName", ""));
+    }
+    setContentView(buildUi());
+    loadFirstProfileAsTemplate();
+    if (savedInstanceState != null) {
+      messageInput.setText(
+          savedInstanceState.getString("message", messageInput.getText().toString()));
+      intervalInput.setText(
+          savedInstanceState.getString("interval", intervalInput.getText().toString()));
+      timesInput.setText(savedInstanceState.getString("times", timesInput.getText().toString()));
+      limitInput.setText(savedInstanceState.getString("limit", limitInput.getText().toString()));
+      applyMessage.setChecked(savedInstanceState.getBoolean("applyMessage"));
+      applySchedule.setChecked(savedInstanceState.getBoolean("applySchedule"));
+      applyLimit.setChecked(savedInstanceState.getBoolean("applyLimit"));
+      applyEnabled.setChecked(savedInstanceState.getBoolean("applyEnabled"));
+      enabledCheck.setChecked(savedInstanceState.getBoolean("enabled", enabledCheck.isChecked()));
+      unlimitedCheck.setChecked(
+          savedInstanceState.getBoolean("unlimited", unlimitedCheck.isChecked()));
+      if (savedInstanceState.getBoolean("fixed", timesRadio.isChecked()))
+        timesRadio.setChecked(true);
+      else intervalRadio.setChecked(true);
+    }
+    if (photoMode && savedInstanceState == null) {
+      applySchedule.setChecked(true);
+      applyLimit.setChecked(true);
+    }
+    syncApplyState();
+    refreshPhoto();
+  }
+
+  private View buildUi() {
+    ScrollView scroll = new ScrollView(this);
+    scroll.setFillViewport(true);
+    scroll.setBackgroundColor(BG);
+    LinearLayout root = new LinearLayout(this);
+    root.setOrientation(LinearLayout.VERTICAL);
+    root.setPadding(dp(18), dp(22), dp(18), dp(42));
+    scroll.addView(root);
+
+    LinearLayout header = new LinearLayout(this);
+    header.setOrientation(LinearLayout.HORIZONTAL);
+    header.setGravity(Gravity.CENTER_VERTICAL);
+    LinearLayout titleBox = new LinearLayout(this);
+    titleBox.setOrientation(LinearLayout.VERTICAL);
+    titleBox.addView(text(photoMode ? "사진 공통 설정" : "여러 방 한 번에 설정", 26, true, TEXT));
+    titleBox.addView(text(rooms.size() + "개 방 선택됨", 12, false, MUTED), topWrap(5));
+    header.addView(titleBox, weight());
+    header.addView(pill(photoMode ? "사진" : "일괄", Color.rgb(29, 38, 65), Color.rgb(180, 195, 255)));
+    root.addView(header);
+
+    LinearLayout info = card(Color.rgb(14, 18, 27), Color.rgb(35, 44, 61), 16);
+    info.addView(text("첫 번째 선택 방의 현재 설정을 기본값으로 불러왔습니다.", 13, true, TEXT));
+    info.addView(
+        text(
+            photoMode
+                ? "사진 한 장과 시간·하루 한도를 선택한 방에 함께 적용합니다. 기존 문구·방 연결·전송 횟수는 유지합니다."
+                : "문구·시간·한도는 체크한 항목만 바뀝니다. 사진은 한 장을 골라 함께 적용할 수 있습니다. 방 연결과 전송 횟수는 유지됩니다.",
+            11,
+            false,
+            Color.rgb(127, 141, 166)),
+        top(6));
+    root.addView(info, top(18));
+
+    View messageSection = section("메시지", "여러 방에 같은 문구를 한 번에 적용합니다.");
+    LinearLayout messageCard = card(SURFACE, BORDER, 18);
+    applyMessage = check("메시지 일괄 적용");
+    messageCard.addView(applyMessage);
+    messageInput = edit("선택한 방에 적용할 메시지", true);
+    messageCard.addView(messageInput, top(10));
+
+    root.addView(section("사진", "사진 한 장을 선택한 모든 방에 적용합니다."), top(24));
+    LinearLayout photoCard = card(SURFACE, BORDER, 18);
+    photoStatus = text("기존 사진 유지", 13, true, TEXT);
+    photoCard.addView(photoStatus);
+    photoPreview = new ImageView(this);
+    photoPreview.setAdjustViewBounds(true);
+    photoPreview.setMaxHeight(dp(150));
+    photoPreview.setContentDescription("모든 선택 방에 적용할 사진");
+    photoCard.addView(photoPreview, top(8));
+    Button pick = primaryButton("같은 사진 선택");
+    pick.setOnClickListener(
+        v -> {
+          if (busy) return;
+          Intent request =
+              new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                  .addCategory(Intent.CATEGORY_OPENABLE)
+                  .setType("image/*")
+                  .addFlags(
+                      Intent.FLAG_GRANT_READ_URI_PERMISSION
+                          | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+          startActivityForResult(request, PICK_PHOTO);
+        });
+    photoCard.addView(pick, top(10));
+    Button keep = secondaryButton("사진 변경 안 함");
+    keep.setOnClickListener(
+        v -> {
+          if (busy) return;
+          String previous = photo.uri;
+          photoAction = 0;
+          photo = new RoomMediaStore.Media("", "", "");
+          RoomMediaStore.releaseIfUnused(this, previous);
+          refreshPhoto();
+        });
+    Button remove = secondaryButton("사진 모두 제거");
+    remove.setOnClickListener(
+        v -> {
+          if (busy) return;
+          String previous = photo.uri;
+          photoAction = 2;
+          photo = new RoomMediaStore.Media("", "", "");
+          RoomMediaStore.releaseIfUnused(this, previous);
+          refreshPhoto();
+        });
+    LinearLayout photoOptions = new LinearLayout(this);
+    photoOptions.setOrientation(LinearLayout.HORIZONTAL);
+    photoOptions.addView(keep, weight());
+    LinearLayout.LayoutParams removeLayout = weight();
+    removeLayout.leftMargin = dp(8);
+    photoOptions.addView(remove, removeLayout);
+    photoCard.addView(photoOptions, top(6));
+    photoCard.addView(
+        text("사진 설정 저장과 실제 자동전송은 별개입니다. 저장 후 방마다 지원 상태를 표시합니다.", 11, false, AMBER), top(9));
+    root.addView(photoCard, top(9));
+    root.addView(messageSection, top(24));
+    root.addView(messageCard, top(9));
+    if (photoMode) {
+      messageSection.setVisibility(View.GONE);
+      messageCard.setVisibility(View.GONE);
     }
 
-    private View buildUi() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackgroundColor(BG);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(22), dp(18), dp(42));
-        scroll.addView(root);
+    root.addView(section("전송 스케줄", "간격 또는 지정 시각을 선택한 모든 방에 적용합니다."), top(24));
+    LinearLayout scheduleCard = card(SURFACE, BORDER, 18);
+    applySchedule = check("스케줄 일괄 적용");
+    scheduleCard.addView(applySchedule);
 
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout titleBox = new LinearLayout(this);
-        titleBox.setOrientation(LinearLayout.VERTICAL);
-        titleBox.addView(text("여러 방 일괄 편집", 26, true, TEXT));
-        titleBox.addView(text(rooms.size() + "개 방 선택됨", 12, false, MUTED), topWrap(5));
-        header.addView(titleBox, weight());
-        header.addView(pill("BULK", Color.rgb(29, 38, 65), Color.rgb(180, 195, 255)));
-        root.addView(header);
+    RadioGroup modes = new RadioGroup(this);
+    modes.setOrientation(RadioGroup.HORIZONTAL);
+    intervalRadio = radio("간격 반복");
+    timesRadio = radio("매일 지정 시각");
+    modes.addView(
+        intervalRadio, new RadioGroup.LayoutParams(0, RadioGroup.LayoutParams.WRAP_CONTENT, 1f));
+    modes.addView(
+        timesRadio, new RadioGroup.LayoutParams(0, RadioGroup.LayoutParams.WRAP_CONTENT, 1f));
+    scheduleCard.addView(modes, top(10));
 
-        LinearLayout info = card(Color.rgb(14, 18, 27), Color.rgb(35, 44, 61), 16);
-        info.addView(text("첫 번째 선택 방의 현재 설정을 기본값으로 불러왔습니다.", 13, true, TEXT));
-        info.addView(text("체크한 항목만 모든 선택 방에 적용됩니다. 사진과 카카오 연결 정보는 방마다 고유하게 유지됩니다.", 11, false, Color.rgb(127, 141, 166)), top(6));
-        root.addView(info, top(18));
+    intervalBox = new LinearLayout(this);
+    intervalBox.setOrientation(LinearLayout.VERTICAL);
+    intervalInput = edit("간격(분)", false);
+    intervalInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+    intervalBox.addView(intervalInput);
+    LinearLayout presets = new LinearLayout(this);
+    presets.setOrientation(LinearLayout.HORIZONTAL);
+    int[] values = {1, 5, 10, 30, 60};
+    String[] labels = {"1분", "5분", "10분", "30분", "1시간"};
+    for (int i = 0; i < values.length; i++) {
+      final int value = values[i];
+      Button b = miniButton(labels[i]);
+      b.setOnClickListener(v -> intervalInput.setText(String.valueOf(value)));
+      LinearLayout.LayoutParams lp = weight();
+      if (i > 0) lp.leftMargin = dp(5);
+      presets.addView(b, lp);
+    }
+    intervalBox.addView(presets, top(8));
+    scheduleCard.addView(intervalBox, top(10));
 
-        root.addView(section("메시지", "여러 방에 같은 문구를 한 번에 적용합니다."), top(24));
-        LinearLayout messageCard = card(SURFACE, BORDER, 18);
-        applyMessage = check("메시지 일괄 적용");
-        messageCard.addView(applyMessage);
-        messageInput = edit("선택한 방에 적용할 메시지", true);
-        messageCard.addView(messageInput, top(10));
-        root.addView(messageCard, top(9));
+    timesBox = new LinearLayout(this);
+    timesBox.setOrientation(LinearLayout.VERTICAL);
+    timesInput = edit("예: 09:00, 13:30, 20:00", false);
+    timesBox.addView(timesInput);
+    scheduleCard.addView(timesBox, top(10));
+    modes.setOnCheckedChangeListener((g, id) -> updateScheduleVisibility());
+    root.addView(scheduleCard, top(9));
 
-        root.addView(section("전송 스케줄", "간격 또는 지정 시각을 선택한 모든 방에 적용합니다."), top(24));
-        LinearLayout scheduleCard = card(SURFACE, BORDER, 18);
-        applySchedule = check("스케줄 일괄 적용");
-        scheduleCard.addView(applySchedule);
+    root.addView(section("하루 전송 제한", "기존 카운트는 유지하고 제한값만 변경합니다."), top(24));
+    LinearLayout limitCard = card(SURFACE, BORDER, 18);
+    applyLimit = check("하루 최대 횟수 일괄 적용");
+    limitCard.addView(applyLimit);
+    LinearLayout limitRow = new LinearLayout(this);
+    limitRow.setOrientation(LinearLayout.HORIZONTAL);
+    limitRow.setGravity(Gravity.CENTER_VERTICAL);
+    limitInput = edit("하루 최대 횟수", false);
+    limitInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+    limitRow.addView(limitInput, weight());
+    unlimitedCheck = check("무제한");
+    LinearLayout.LayoutParams unlimitedLp =
+        new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+    unlimitedLp.leftMargin = dp(12);
+    limitRow.addView(unlimitedCheck, unlimitedLp);
+    limitCard.addView(limitRow, top(10));
+    root.addView(limitCard, top(9));
 
-        RadioGroup modes = new RadioGroup(this);
-        modes.setOrientation(RadioGroup.HORIZONTAL);
-        intervalRadio = radio("간격 반복");
-        timesRadio = radio("매일 지정 시각");
-        modes.addView(intervalRadio, new RadioGroup.LayoutParams(0, RadioGroup.LayoutParams.WRAP_CONTENT, 1f));
-        modes.addView(timesRadio, new RadioGroup.LayoutParams(0, RadioGroup.LayoutParams.WRAP_CONTENT, 1f));
-        scheduleCard.addView(modes, top(10));
+    View enabledSection = section("사용 상태", "선택한 방을 한 번에 켜거나 일시정지할 수 있습니다.");
+    root.addView(enabledSection, top(24));
+    LinearLayout enabledCard = card(SURFACE, BORDER, 18);
+    applyEnabled = check("사용 여부 일괄 적용");
+    enabledCard.addView(applyEnabled);
+    enabledCheck = check("자동전송 사용");
+    enabledCard.addView(enabledCheck, top(8));
+    root.addView(enabledCard, top(9));
+    if (photoMode) {
+      enabledSection.setVisibility(View.GONE);
+      enabledCard.setVisibility(View.GONE);
+      root.addView(
+          text(
+              "사진 순회용 설정입니다. 저장하면 선택 방의 기존 알림 자동전송을 끄고, 사진 여러 방 화면에서 사진 전송을 별도로 시작합니다. 다른 방 설정은"
+                  + " 유지됩니다.",
+              12,
+              false,
+              AMBER),
+          top(12));
+    }
 
-        intervalBox = new LinearLayout(this);
-        intervalBox.setOrientation(LinearLayout.VERTICAL);
-        intervalInput = edit("간격(분)", false);
-        intervalInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        intervalBox.addView(intervalInput);
-        LinearLayout presets = new LinearLayout(this);
-        presets.setOrientation(LinearLayout.HORIZONTAL);
-        int[] values = {1, 5, 10, 30, 60};
-        String[] labels = {"1분", "5분", "10분", "30분", "1시간"};
-        for (int i = 0; i < values.length; i++) {
-            final int value = values[i];
-            Button b = miniButton(labels[i]);
-            b.setOnClickListener(v -> intervalInput.setText(String.valueOf(value)));
-            LinearLayout.LayoutParams lp = weight();
-            if (i > 0) lp.leftMargin = dp(5);
-            presets.addView(b, lp);
-        }
-        intervalBox.addView(presets, top(8));
-        scheduleCard.addView(intervalBox, top(10));
-
-        timesBox = new LinearLayout(this);
-        timesBox.setOrientation(LinearLayout.VERTICAL);
-        timesInput = edit("예: 09:00, 13:30, 20:00", false);
-        timesBox.addView(timesInput);
-        scheduleCard.addView(timesBox, top(10));
-        modes.setOnCheckedChangeListener((g, id) -> updateScheduleVisibility());
-        root.addView(scheduleCard, top(9));
-
-        root.addView(section("하루 전송 제한", "기존 카운트는 유지하고 제한값만 변경합니다."), top(24));
-        LinearLayout limitCard = card(SURFACE, BORDER, 18);
-        applyLimit = check("하루 최대 횟수 일괄 적용");
-        limitCard.addView(applyLimit);
-        LinearLayout limitRow = new LinearLayout(this);
-        limitRow.setOrientation(LinearLayout.HORIZONTAL);
-        limitRow.setGravity(Gravity.CENTER_VERTICAL);
-        limitInput = edit("하루 최대 횟수", false);
-        limitInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        limitRow.addView(limitInput, weight());
-        unlimitedCheck = check("무제한");
-        LinearLayout.LayoutParams unlimitedLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        unlimitedLp.leftMargin = dp(12);
-        limitRow.addView(unlimitedCheck, unlimitedLp);
-        limitCard.addView(limitRow, top(10));
-        root.addView(limitCard, top(9));
-
-        root.addView(section("사용 상태", "선택한 방을 한 번에 켜거나 일시정지할 수 있습니다."), top(24));
-        LinearLayout enabledCard = card(SURFACE, BORDER, 18);
-        applyEnabled = check("사용 여부 일괄 적용");
-        enabledCard.addView(applyEnabled);
-        enabledCheck = check("자동전송 사용");
-        enabledCard.addView(enabledCheck, top(8));
-        root.addView(enabledCard, top(9));
-
-        applyMessage.setOnCheckedChangeListener((b, c) -> syncApplyState());
-        applySchedule.setOnCheckedChangeListener((b, c) -> syncApplyState());
-        applyLimit.setOnCheckedChangeListener((b, c) -> syncApplyState());
-        applyEnabled.setOnCheckedChangeListener((b, c) -> syncApplyState());
-        unlimitedCheck.setOnCheckedChangeListener((b, c) -> {
-            limitInput.setEnabled(applyLimit.isChecked() && !c);
+    applyMessage.setOnCheckedChangeListener((b, c) -> syncApplyState());
+    applySchedule.setOnCheckedChangeListener((b, c) -> syncApplyState());
+    applyLimit.setOnCheckedChangeListener((b, c) -> syncApplyState());
+    applyEnabled.setOnCheckedChangeListener((b, c) -> syncApplyState());
+    unlimitedCheck.setOnCheckedChangeListener(
+        (b, c) -> {
+          limitInput.setEnabled(applyLimit.isChecked() && !c);
         });
 
-        LinearLayout action = card(Color.rgb(23, 29, 42), BORDER, 18);
-        action.addView(text("일괄 변경", 12, true, Color.rgb(151, 165, 193)));
-        Button save = primaryButton(rooms.size() + "개 방에 적용");
-        save.setOnClickListener(v -> confirmApply());
-        action.addView(save, top(10));
-        Button cancel = secondaryButton("취소");
-        cancel.setOnClickListener(v -> finish());
-        action.addView(cancel, top(8));
-        root.addView(action, top(28));
-        return scroll;
-    }
+    LinearLayout action = card(Color.rgb(23, 29, 42), BORDER, 18);
+    resultSummary = text("전송하지 않고 선택한 설정만 저장합니다.", 12, false, MUTED);
+    resultSummary.setMaxLines(2);
+    action.addView(resultSummary);
+    LinearLayout actionButtons = new LinearLayout(this);
+    actionButtons.setOrientation(LinearLayout.HORIZONTAL);
+    saveButton = primaryButton(rooms.size() + "개 방에 적용");
+    saveButton.setOnClickListener(v -> confirmApply());
+    actionButtons.addView(saveButton, new LinearLayout.LayoutParams(0, dp(48), 2f));
+    Button cancel = secondaryButton("취소");
+    cancel.setOnClickListener(
+        v -> {
+          if (!busy) finish();
+        });
+    LinearLayout.LayoutParams cancelLayout = new LinearLayout.LayoutParams(0, dp(48), 1f);
+    cancelLayout.leftMargin = dp(8);
+    actionButtons.addView(cancel, cancelLayout);
+    action.addView(actionButtons, top(8));
+    LinearLayout screen = new LinearLayout(this);
+    screen.setOrientation(LinearLayout.VERTICAL);
+    screen.setBackgroundColor(BG);
+    screen.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+    screen.addView(action, new LinearLayout.LayoutParams(-1, -2));
+    PhotoSettingsLayout.apply(this, screen);
+    return screen;
+  }
 
-    private void loadFirstProfileAsTemplate() {
-        MultiRoomStore.Profile first = templateProfile == null ? null : templateProfile.copy();
-        if (first == null) return;
-        messageInput.setText(first.message);
-        intervalInput.setText(String.valueOf(first.intervalMinutes));
-        timesInput.setText(first.dailyTimes);
-        if (first.fixedTimes()) timesRadio.setChecked(true); else intervalRadio.setChecked(true);
-        unlimitedCheck.setChecked(first.unlimited());
-        limitInput.setText(first.unlimited() ? "8" : String.valueOf(first.dailyLimit));
-        enabledCheck.setChecked(first.enabled);
-        updateScheduleVisibility();
-    }
+  private void loadFirstProfileAsTemplate() {
+    MultiRoomStore.Profile first = templateProfile == null ? null : templateProfile.copy();
+    if (first == null) return;
+    messageInput.setText(first.message);
+    intervalInput.setText(String.valueOf(first.intervalMinutes));
+    timesInput.setText(first.dailyTimes);
+    if (first.fixedTimes()) timesRadio.setChecked(true);
+    else intervalRadio.setChecked(true);
+    unlimitedCheck.setChecked(first.unlimited());
+    limitInput.setText(first.unlimited() ? "8" : String.valueOf(first.dailyLimit));
+    enabledCheck.setChecked(first.enabled);
+    updateScheduleVisibility();
+  }
 
-    private void syncApplyState() {
-        boolean message = applyMessage != null && applyMessage.isChecked();
-        boolean schedule = applySchedule != null && applySchedule.isChecked();
-        boolean limit = applyLimit != null && applyLimit.isChecked();
-        boolean enabled = applyEnabled != null && applyEnabled.isChecked();
-        if (messageInput != null) { messageInput.setEnabled(message); messageInput.setAlpha(message ? 1f : 0.48f); }
-        if (intervalRadio != null) intervalRadio.setEnabled(schedule);
-        if (timesRadio != null) timesRadio.setEnabled(schedule);
-        if (intervalInput != null) intervalInput.setEnabled(schedule);
-        if (timesInput != null) timesInput.setEnabled(schedule);
-        if (unlimitedCheck != null) unlimitedCheck.setEnabled(limit);
-        if (limitInput != null) limitInput.setEnabled(limit && !unlimitedCheck.isChecked());
-        if (enabledCheck != null) enabledCheck.setEnabled(enabled);
+  private void syncApplyState() {
+    boolean message = applyMessage != null && applyMessage.isChecked();
+    boolean schedule = applySchedule != null && applySchedule.isChecked();
+    boolean limit = applyLimit != null && applyLimit.isChecked();
+    boolean enabled = applyEnabled != null && applyEnabled.isChecked();
+    if (messageInput != null) {
+      messageInput.setEnabled(message);
+      messageInput.setAlpha(message ? 1f : 0.48f);
     }
+    if (intervalRadio != null) intervalRadio.setEnabled(schedule);
+    if (timesRadio != null) timesRadio.setEnabled(schedule);
+    if (intervalInput != null) intervalInput.setEnabled(schedule);
+    if (timesInput != null) timesInput.setEnabled(schedule);
+    if (unlimitedCheck != null) unlimitedCheck.setEnabled(limit);
+    if (limitInput != null) limitInput.setEnabled(limit && !unlimitedCheck.isChecked());
+    if (enabledCheck != null) enabledCheck.setEnabled(enabled);
+  }
 
-    private void updateScheduleVisibility() {
-        boolean fixed = timesRadio != null && timesRadio.isChecked();
-        if (intervalBox != null) intervalBox.setVisibility(fixed ? View.GONE : View.VISIBLE);
-        if (timesBox != null) timesBox.setVisibility(fixed ? View.VISIBLE : View.GONE);
+  private void updateScheduleVisibility() {
+    boolean fixed = timesRadio != null && timesRadio.isChecked();
+    if (intervalBox != null) intervalBox.setVisibility(fixed ? View.GONE : View.VISIBLE);
+    if (timesBox != null) timesBox.setVisibility(fixed ? View.VISIBLE : View.GONE);
+  }
+
+  private void confirmApply() {
+    if (busy) return;
+    if (photoAction == 0
+        && !applyMessage.isChecked()
+        && !applySchedule.isChecked()
+        && !applyLimit.isChecked()
+        && !applyEnabled.isChecked()) {
+      toast("적용할 항목을 하나 이상 체크해 주세요.");
+      return;
     }
-
-    private void confirmApply() {
-        if (!applyMessage.isChecked() && !applySchedule.isChecked() && !applyLimit.isChecked() && !applyEnabled.isChecked()) {
-            toast("적용할 항목을 하나 이상 체크해 주세요.");
-            return;
-        }
-        if (applySchedule.isChecked() && timesRadio.isChecked() && !MultiRoomStore.hasValidTimes(timesInput.getText().toString())) {
-            toast("지정 시각을 HH:mm 형식으로 하나 이상 입력해 주세요.");
-            return;
-        }
-        new AlertDialog.Builder(this)
-                .setTitle(rooms.size() + "개 방 일괄 변경")
-                .setMessage("체크한 설정만 선택한 방에 적용합니다. 사진과 방 연결 정보는 유지됩니다.")
-                .setPositiveButton("적용", (d, w) -> applyNow())
-                .setNegativeButton("취소", null)
-                .show();
+    if (applySchedule.isChecked()
+        && timesRadio.isChecked()
+        && !MultiRoomStore.hasValidTimes(timesInput.getText().toString())) {
+      toast("지정 시각을 HH:mm 형식으로 하나 이상 입력해 주세요.");
+      return;
     }
+    new AlertDialog.Builder(this)
+        .setTitle(rooms.size() + "개 방 일괄 변경")
+        .setMessage(
+            (photoAction == 1
+                    ? "선택한 모든 방의 사진을 ‘" + photo.name + "’로 바꿉니다."
+                    : photoAction == 2 ? "선택한 모든 방의 사진을 제거합니다." : "기존 사진은 유지합니다.")
+                + "\n체크한 문구·시간·한도·사용 설정만 함께 바뀝니다."
+                + (photoMode
+                    ? "\n사진 순회와 겹치지 않도록 선택 방의 기존 알림 자동전송을 끕니다."
+                    : photoAction == 1
+                        ? "\n알림 답장으로 사진을 지원하지 않는 방의 기존 알림 자동전송은 일시정지합니다. 사진 키보드 순회는 별도입니다."
+                        : "")
+                + "\n\n지금 사진을 전송하거나 사진 자동전송 지원을 활성화하는 작업은 아닙니다.")
+        .setPositiveButton("적용", (d, w) -> applyNow())
+        .setNegativeButton("취소", null)
+        .show();
+  }
 
-    private void applyNow() {
-        MultiRoomStore.BulkPatch patch = new MultiRoomStore.BulkPatch();
-        patch.applyMessage = applyMessage.isChecked();
-        patch.message = messageInput.getText().toString();
-        patch.applySchedule = applySchedule.isChecked();
-        patch.scheduleMode = timesRadio.isChecked() ? MultiRoomStore.MODE_TIMES : MultiRoomStore.MODE_INTERVAL;
-        patch.intervalMinutes = Math.max(SendScheduler.MIN_INTERVAL_MINUTES, parseInt(intervalInput.getText().toString(), 60));
-        patch.dailyTimes = MultiRoomStore.canonicalTimes(timesInput.getText().toString());
-        patch.applyDailyLimit = applyLimit.isChecked();
-        patch.dailyLimit = unlimitedCheck.isChecked() ? 0 : Math.max(1, parseInt(limitInput.getText().toString(), 8));
-        patch.applyEnabled = applyEnabled.isChecked();
-        patch.enabled = enabledCheck.isChecked();
-
-        int changed = MultiRoomStore.applyBulkPatch(this, rooms, patch);
-        if (Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false)) SendScheduler.scheduleNext(this);
-        Prefs.setStatus(this, "일괄 설정 변경 · " + changed + "개 방");
-        toast(changed + "개 방 설정을 변경했습니다.");
-        setResult(RESULT_OK);
-        finish();
+  private void applyNow() {
+    MultiRoomStore.BulkPatch patch = new MultiRoomStore.BulkPatch();
+    patch.applyMessage = applyMessage.isChecked();
+    if (photoMode) patch.applyMessage = false;
+    patch.message = messageInput.getText().toString();
+    patch.applySchedule = applySchedule.isChecked();
+    patch.scheduleMode =
+        timesRadio.isChecked() ? MultiRoomStore.MODE_TIMES : MultiRoomStore.MODE_INTERVAL;
+    patch.intervalMinutes =
+        Math.max(
+            SendScheduler.MIN_INTERVAL_MINUTES, parseInt(intervalInput.getText().toString(), 60));
+    patch.dailyTimes = MultiRoomStore.canonicalTimes(timesInput.getText().toString());
+    patch.applyDailyLimit = applyLimit.isChecked();
+    patch.dailyLimit =
+        unlimitedCheck.isChecked() ? 0 : Math.max(1, parseInt(limitInput.getText().toString(), 8));
+    patch.applyEnabled = applyEnabled.isChecked();
+    patch.enabled = enabledCheck.isChecked();
+    if (photoMode) {
+      patch.applyEnabled = true;
+      patch.enabled = false;
     }
+    patch.applyMedia = photoAction != 0;
+    patch.media = photo;
+    patch.pauseUnsupportedPhotos = true;
+    if (patch.applyMedia && patch.media.hasImage()) {
+      setBusy(true);
+      long token = ++operation;
+      main.postDelayed(
+          () -> {
+            if (!busy || operation != token) return;
+            operation++;
+            setBusy(false);
+            toast("사진 확인 시간이 초과됐습니다. 아무 설정도 변경하지 않았습니다.");
+          },
+          8000);
+      new Thread(
+              () -> {
+                boolean readable;
+                try {
+                  PhotoShareRequest.create(this, patch.media);
+                  android.graphics.BitmapFactory.Options bounds =
+                      new android.graphics.BitmapFactory.Options();
+                  bounds.inJustDecodeBounds = true;
+                  try (java.io.InputStream input =
+                      getContentResolver().openInputStream(Uri.parse(patch.media.uri))) {
+                    android.graphics.BitmapFactory.decodeStream(input, null, bounds);
+                  }
+                  readable = bounds.outWidth > 0 && bounds.outHeight > 0;
+                } catch (java.io.IOException | RuntimeException error) {
+                  readable = false;
+                }
+                boolean valid = readable;
+                main.post(
+                    () -> {
+                      if (isFinishing() || isDestroyed() || operation != token) return;
+                      setBusy(false);
+                      if (!valid) {
+                        toast("사진을 읽을 수 없습니다. 아무 설정도 변경하지 않았습니다. 사진을 다시 선택하세요.");
+                        return;
+                      }
+                      commitPatch(patch);
+                    });
+              },
+              "bulk-photo-check")
+          .start();
+    } else commitPatch(patch);
+  }
 
-    private int parseInt(String value, int fallback) {
-        try { return Integer.parseInt(value.trim()); } catch (Exception ignored) { return fallback; }
+  private void commitPatch(MultiRoomStore.BulkPatch patch) {
+    java.util.LinkedHashSet<String> previousUris = new java.util.LinkedHashSet<>();
+    for (MultiRoomStore.Profile p : MultiRoomStore.getMany(this, rooms))
+      previousUris.add(RoomMediaStore.get(this, p.room).uri);
+    int changed;
+    try {
+      changed = MultiRoomStore.applyBulkPatch(this, rooms, patch);
+    } catch (RuntimeException error) {
+      toast("설정을 저장하지 못했습니다. 저장 공간을 확인하고 다시 시도하세요.");
+      return;
     }
+    for (String uri : previousUris) RoomMediaStore.releaseIfUnused(this, uri);
+    if (photoMode) {
+      if (Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false)) SendScheduler.scheduleNext(this);
+      Prefs.setStatus(this, "사진 순회 설정 저장 · " + changed + "개 방");
+      resultSummary.setText("사진 순회 설정 저장 완료 · " + changed + "개 방");
+      new AlertDialog.Builder(this)
+          .setTitle("사진 설정 저장 완료")
+          .setMessage(
+              changed
+                  + "개 방에 설정을 저장하고 선택 방의 기존 알림 자동전송을 껐습니다.\n\n"
+                  + "다음: 방 최초 준비 → 1회 시험 또는 반복 시작. 지금 사진을 보내지는 않았습니다.")
+          .setPositiveButton(
+              "사진 전송으로 돌아가기",
+              (d, w) -> {
+                setResult(RESULT_OK);
+                finish();
+              })
+          .show();
+      return;
+    }
+    if (Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false)) SendScheduler.scheduleNext(this);
+    Prefs.setStatus(this, "일괄 설정 변경 · " + changed + "개 방");
+    int blocked = 0, ready = 0, waiting = 0;
+    for (MultiRoomStore.Profile p : MultiRoomStore.getMany(this, rooms)) {
+      RoomSendReadiness state = RoomSendReadiness.get(this, p);
+      if (state.blockedPhoto) blocked++;
+      else if (state.ready) ready++;
+      else waiting++;
+    }
+    resultSummary.setText(
+        "저장 완료: "
+            + changed
+            + "개 방\n자동전송 입력 확인 "
+            + ready
+            + " · 연결/내용 확인 "
+            + waiting
+            + " · 알림 답장 사진 미지원 "
+            + blocked);
+    new AlertDialog.Builder(this)
+        .setTitle(changed + "개 방 설정 저장 완료")
+        .setMessage(
+            "자동전송 입력 확인 "
+                + ready
+                + "개\n연결·내용 확인 필요 "
+                + waiting
+                + "개\n알림 답장 사진 미지원 "
+                + blocked
+                + "개\n\n"
+                + "사진 미지원은 알림 답장 경로의 상태입니다. 사진 키보드·여러 방 순회 지원은 별도로 준비합니다.\n"
+                + "설정만 저장했으며 실제 도착 확인은 아닙니다.")
+        .setPositiveButton(
+            "방 목록 보기",
+            (d, w) -> {
+              setResult(RESULT_OK);
+              finish();
+            })
+        .show();
+  }
 
-    private CheckBox check(String label) {
-        CheckBox c = new CheckBox(this);
-        c.setText(label);
-        c.setTextColor(TEXT);
-        c.setTextSize(13);
-        return c;
-    }
+  private void refreshPhoto() {
+    final long previewToken = ++previewGeneration;
+    RoomMediaStore.Media common =
+        rooms.isEmpty()
+            ? new RoomMediaStore.Media("", "", "")
+            : RoomMediaStore.get(this, rooms.get(0));
+    for (String room : rooms)
+      if (!PhotoKeyboardSession.sameMedia(common, RoomMediaStore.get(this, room))) {
+        common = new RoomMediaStore.Media("", "", "");
+        break;
+      }
+    final RoomMediaStore.Media selected = photoAction == 0 ? common : photo;
+    photoStatus.setText(
+        photoAction == 0
+            ? selected.hasImage()
+                ? "저장된 공통 사진 · " + selected.name + " · 변경 안 함"
+                : "기존 사진 유지 · 선택한 방의 사진은 바뀌지 않습니다."
+            : photoAction == 2
+                ? rooms.size() + "개 방의 사진 제거 예정"
+                : rooms.size() + "개 방에 적용할 사진 · " + photo.name);
+    photoPreview.setImageDrawable(null);
+    photoPreview.setVisibility(selected.hasImage() ? View.VISIBLE : View.GONE);
+    if (selected.hasImage())
+      new Thread(
+              () -> {
+                android.graphics.Bitmap bitmap = null;
+                try {
+                  android.graphics.BitmapFactory.Options options =
+                      new android.graphics.BitmapFactory.Options();
+                  options.inJustDecodeBounds = true;
+                  try (java.io.InputStream in =
+                      getContentResolver().openInputStream(Uri.parse(selected.uri))) {
+                    android.graphics.BitmapFactory.decodeStream(in, null, options);
+                  }
+                  if (options.outWidth <= 0 || options.outHeight <= 0)
+                    throw new java.io.IOException("Invalid photo");
+                  options.inJustDecodeBounds = false;
+                  options.inSampleSize = 1;
+                  while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > 640)
+                    options.inSampleSize *= 2;
+                  try (java.io.InputStream in =
+                      getContentResolver().openInputStream(Uri.parse(selected.uri))) {
+                    bitmap = android.graphics.BitmapFactory.decodeStream(in, null, options);
+                  }
+                } catch (java.io.IOException | RuntimeException ignored) {
+                }
+                android.graphics.Bitmap ready = bitmap;
+                main.post(
+                    () -> {
+                      if (!isFinishing() && !isDestroyed() && previewToken == previewGeneration) {
+                        photoPreview.setImageBitmap(ready);
+                        if (ready == null) photoStatus.setText("사진 미리보기를 읽을 수 없습니다. 사진을 다시 선택하세요.");
+                      } else if (ready != null) ready.recycle();
+                    });
+              },
+              "bulk-photo-preview")
+          .start();
+  }
 
-    private RadioButton radio(String label) {
-        RadioButton r = new RadioButton(this);
-        r.setText(label);
-        r.setTextColor(TEXT);
-        r.setTextSize(13);
-        return r;
-    }
+  @Override
+  protected void onActivityResult(int request, int result, Intent data) {
+    super.onActivityResult(request, result, data);
+    if (request != PICK_PHOTO || result != RESULT_OK || data == null || data.getData() == null)
+      return;
+    Uri uri = data.getData();
+    selectingUri = uri.toString();
+    setBusy(true);
+    long token = ++operation;
+    main.postDelayed(
+        () -> {
+          if (!busy || operation != token) return;
+          operation++;
+          setBusy(false);
+          toast("사진 정보 확인이 지연되고 있습니다. 다시 선택하세요.");
+        },
+        8000);
+    new Thread(
+            () -> {
+              String name = "선택한 사진";
+              try (android.database.Cursor cursor =
+                  getContentResolver()
+                      .query(uri, new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) name = cursor.getString(0);
+              } catch (RuntimeException ignored) {
+              }
+              RoomMediaStore.Media selected = null;
+              try {
+                String mime =
+                    RoomEditorActivity.resolveConcreteImageMime(
+                        getContentResolver().getType(uri), name);
+                if (!"content".equals(uri.getScheme()) || mime == null)
+                  throw new IllegalArgumentException();
+                getContentResolver()
+                    .takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                selected = new RoomMediaStore.Media(uri.toString(), mime, name);
+              } catch (RuntimeException ignored) {
+              }
+              RoomMediaStore.Media picked = selected;
+              main.post(
+                  () -> {
+                    if (isFinishing() || isDestroyed() || operation != token) {
+                      if (!photo.uri.equals(uri.toString()) && !selectingUri.equals(uri.toString()))
+                        RoomMediaStore.releaseIfUnused(this, uri.toString());
+                      return;
+                    }
+                    selectingUri = "";
+                    setBusy(false);
+                    if (picked == null) {
+                      toast("사진을 계속 읽을 수 있는 권한이 필요합니다. 기기에 저장된 사진을 다시 선택하세요.");
+                      return;
+                    }
+                    String previous = photo.uri;
+                    photo = picked;
+                    photoAction = 1;
+                    if (!previous.equals(photo.uri)) RoomMediaStore.releaseIfUnused(this, previous);
+                    refreshPhoto();
+                  });
+            },
+            "bulk-photo-select")
+        .start();
+  }
 
-    private View section(String title, String subtitle) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.addView(text(title, 16, true, TEXT));
-        box.addView(text(subtitle, 11, false, Color.rgb(118, 129, 149)), topWrap(3));
-        return box;
-    }
+  @Override
+  protected void onSaveInstanceState(Bundle state) {
+    super.onSaveInstanceState(state);
+    state.putInt("photoAction", photoAction);
+    state.putString("photoUri", photo.uri);
+    state.putString("photoMime", photo.mime);
+    state.putString("photoName", photo.name);
+    state.putString("message", messageInput.getText().toString());
+    state.putString("interval", intervalInput.getText().toString());
+    state.putString("times", timesInput.getText().toString());
+    state.putString("limit", limitInput.getText().toString());
+    state.putBoolean("applyMessage", applyMessage.isChecked());
+    state.putBoolean("applySchedule", applySchedule.isChecked());
+    state.putBoolean("applyLimit", applyLimit.isChecked());
+    state.putBoolean("applyEnabled", applyEnabled.isChecked());
+    state.putBoolean("enabled", enabledCheck.isChecked());
+    state.putBoolean("unlimited", unlimitedCheck.isChecked());
+    state.putBoolean("fixed", timesRadio.isChecked());
+  }
 
-    private EditText edit(String hint, boolean multi) {
-        EditText e = new EditText(this);
-        e.setHint(hint);
-        e.setHintTextColor(Color.rgb(102, 114, 137));
-        e.setTextColor(TEXT);
-        e.setTextSize(14);
-        e.setPadding(dp(14), dp(12), dp(14), dp(12));
-        e.setBackground(roundStroke(FIELD, BORDER, 12));
-        e.setSingleLine(!multi);
-        if (multi) {
-            e.setGravity(Gravity.TOP | Gravity.START);
-            e.setMinLines(4);
-        }
-        return e;
-    }
+  private void setBusy(boolean value) {
+    busy = value;
+    saveButton.setText(value ? "사진 확인 중…" : rooms.size() + "개 방에 적용");
+    enableTree(findViewById(android.R.id.content), !value);
+    if (!value) syncApplyState();
+  }
 
-    private Button primaryButton(String label) { return button(label, ACCENT, Color.WHITE, ACCENT); }
-    private Button secondaryButton(String label) { return button(label, Color.rgb(27, 34, 49), TEXT, BORDER); }
-    private Button miniButton(String label) {
-        Button b = button(label, Color.rgb(27, 34, 49), Color.rgb(195, 205, 226), BORDER);
-        b.setTextSize(11);
-        b.setMinHeight(0);
-        b.setPadding(dp(5), dp(8), dp(5), dp(8));
-        return b;
-    }
+  private void enableTree(View view, boolean enabled) {
+    view.setEnabled(enabled);
+    if (view instanceof android.view.ViewGroup)
+      for (int i = 0; i < ((android.view.ViewGroup) view).getChildCount(); i++)
+        enableTree(((android.view.ViewGroup) view).getChildAt(i), enabled);
+  }
 
-    private Button button(String label, int fill, int color, int stroke) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextColor(color);
-        b.setTextSize(13);
-        b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        b.setAllCaps(false);
-        b.setMinHeight(0);
-        b.setPadding(dp(12), dp(12), dp(12), dp(12));
-        b.setBackground(roundStroke(fill, stroke, 12));
-        return b;
-    }
+  @Override
+  public void onBackPressed() {
+    if (!busy) super.onBackPressed();
+    else toast("사진을 확인하고 있습니다.");
+  }
 
-    private LinearLayout card(int fill, int stroke, int radius) {
-        LinearLayout l = new LinearLayout(this);
-        l.setOrientation(LinearLayout.VERTICAL);
-        l.setPadding(dp(15), dp(15), dp(15), dp(15));
-        l.setBackground(roundStroke(fill, stroke, radius));
-        return l;
-    }
+  @Override
+  protected void onDestroy() {
+    operation++;
+    selectingUri = "";
+    main.removeCallbacksAndMessages(null);
+    if (!isChangingConfigurations()) RoomMediaStore.releaseIfUnused(this, photo.uri);
+    super.onDestroy();
+  }
 
-    private TextView text(String value, int sp, boolean bold, int color) {
-        TextView t = new TextView(this);
-        t.setText(value);
-        t.setTextColor(color);
-        t.setTextSize(sp);
-        if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        return t;
+  private int parseInt(String value, int fallback) {
+    try {
+      return Integer.parseInt(value.trim());
+    } catch (Exception ignored) {
+      return fallback;
     }
+  }
 
-    private TextView pill(String label, int fill, int color) {
-        TextView t = text(label, 10, true, color);
-        t.setPadding(dp(9), dp(5), dp(9), dp(5));
-        t.setGravity(Gravity.CENTER);
-        t.setBackground(roundStroke(fill, fill, 999));
-        return t;
-    }
+  private CheckBox check(String label) {
+    CheckBox c = new CheckBox(this);
+    c.setText(label);
+    c.setTextColor(TEXT);
+    c.setTextSize(13);
+    return c;
+  }
 
-    private GradientDrawable roundStroke(int fill, int stroke, int radius) {
-        GradientDrawable d = new GradientDrawable();
-        d.setColor(fill);
-        d.setStroke(dp(1), stroke);
-        d.setCornerRadius(dp(radius));
-        return d;
-    }
+  private RadioButton radio(String label) {
+    RadioButton r = new RadioButton(this);
+    r.setText(label);
+    r.setTextColor(TEXT);
+    r.setTextSize(13);
+    return r;
+  }
 
-    private LinearLayout.LayoutParams weight() {
-        return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-    }
+  private View section(String title, String subtitle) {
+    LinearLayout box = new LinearLayout(this);
+    box.setOrientation(LinearLayout.VERTICAL);
+    box.addView(text(title, 16, true, TEXT));
+    box.addView(text(subtitle, 11, false, Color.rgb(118, 129, 149)), topWrap(3));
+    return box;
+  }
 
-    private LinearLayout.LayoutParams top(int margin) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(margin);
-        return lp;
+  private EditText edit(String hint, boolean multi) {
+    EditText e = new EditText(this);
+    e.setHint(hint);
+    e.setHintTextColor(Color.rgb(102, 114, 137));
+    e.setTextColor(TEXT);
+    e.setTextSize(14);
+    e.setPadding(dp(14), dp(12), dp(14), dp(12));
+    e.setBackground(roundStroke(FIELD, BORDER, 12));
+    e.setSingleLine(!multi);
+    if (multi) {
+      e.setGravity(Gravity.TOP | Gravity.START);
+      e.setMinLines(4);
     }
+    return e;
+  }
 
-    private LinearLayout.LayoutParams topWrap(int margin) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(margin);
-        return lp;
-    }
+  private Button primaryButton(String label) {
+    return button(label, ACCENT, Color.WHITE, ACCENT);
+  }
 
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
+  private Button secondaryButton(String label) {
+    return button(label, Color.rgb(27, 34, 49), TEXT, BORDER);
+  }
 
-    private void toast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-    }
+  private Button miniButton(String label) {
+    Button b = button(label, Color.rgb(27, 34, 49), Color.rgb(195, 205, 226), BORDER);
+    b.setTextSize(11);
+    b.setMinHeight(0);
+    b.setPadding(dp(5), dp(8), dp(5), dp(8));
+    return b;
+  }
+
+  private Button button(String label, int fill, int color, int stroke) {
+    Button b = new Button(this);
+    b.setText(label);
+    b.setTextColor(color);
+    b.setTextSize(13);
+    b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+    b.setAllCaps(false);
+    b.setMinHeight(0);
+    b.setPadding(dp(12), dp(12), dp(12), dp(12));
+    b.setBackground(roundStroke(fill, stroke, 12));
+    return b;
+  }
+
+  private LinearLayout card(int fill, int stroke, int radius) {
+    LinearLayout l = new LinearLayout(this);
+    l.setOrientation(LinearLayout.VERTICAL);
+    l.setPadding(dp(15), dp(15), dp(15), dp(15));
+    l.setBackground(roundStroke(fill, stroke, radius));
+    return l;
+  }
+
+  private TextView text(String value, int sp, boolean bold, int color) {
+    TextView t = new TextView(this);
+    t.setText(value);
+    t.setTextColor(color);
+    t.setTextSize(sp);
+    if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+    return t;
+  }
+
+  private TextView pill(String label, int fill, int color) {
+    TextView t = text(label, 10, true, color);
+    t.setPadding(dp(9), dp(5), dp(9), dp(5));
+    t.setGravity(Gravity.CENTER);
+    t.setBackground(roundStroke(fill, fill, 999));
+    return t;
+  }
+
+  private GradientDrawable roundStroke(int fill, int stroke, int radius) {
+    GradientDrawable d = new GradientDrawable();
+    d.setColor(fill);
+    d.setStroke(dp(1), stroke);
+    d.setCornerRadius(dp(radius));
+    return d;
+  }
+
+  private LinearLayout.LayoutParams weight() {
+    return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+  }
+
+  private LinearLayout.LayoutParams top(int margin) {
+    LinearLayout.LayoutParams lp =
+        new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+    lp.topMargin = dp(margin);
+    return lp;
+  }
+
+  private LinearLayout.LayoutParams topWrap(int margin) {
+    LinearLayout.LayoutParams lp =
+        new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+    lp.topMargin = dp(margin);
+    return lp;
+  }
+
+  private int dp(int value) {
+    return Math.round(value * getResources().getDisplayMetrics().density);
+  }
+
+  private void toast(String message) {
+    Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+  }
 }

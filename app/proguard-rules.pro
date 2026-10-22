@@ -1,0 +1,3 @@
+-keep public class com.local.kakaoautosender.PanelShell { public static void main(java.lang.String[]); }
+-keep class org.conscrypt.** { *; }
+-keep class io.github.muntashirakon.crypto.spake2.** { *; }

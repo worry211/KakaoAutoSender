@@ -60,8 +60,20 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 }
 
                 String visibleName = profile.title();
+                synchronized (DeliveryGate.LOCK) {
+                    MultiRoomStore.Profile latest = MultiRoomStore.get(app, profile.room);
+                    if (latest != null && RoomSendReadiness.get(app, latest).blockedPhoto) {
+                        MultiRoomStore.BulkPatch pause = new MultiRoomStore.BulkPatch();
+                        pause.applyEnabled = true; pause.enabled = false;
+                        MultiRoomStore.applyBulkPatch(app, java.util.Collections.singletonList(profile.room), pause);
+                        Prefs.setStatus(app, "알림 답장 사진 미지원 · " + visibleName + " 알림 예약 일시정지 · 사진 설정 유지 · 사진 전송 메뉴에서 별도 준비");
+                        SendScheduler.scheduleNext(app);
+                        return;
+                    }
+                }
                 boolean attempted = false;
                 boolean sent = false;
+                boolean photoAccepted = false;
                 boolean skippedForLimit = false;
                 String failureReason = "확인된 답장 세션 없음";
 
@@ -85,7 +97,10 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                     }
 
                     RoomMediaStore.Media media = RoomMediaStore.get(app, profile.room);
-                    for (int i = 0; i < 3 && !sent; i++) {
+                    // A photo handoff can be accepted before an ambiguous error. Never blindly
+                    // repeat that side effect within the same reserved execution.
+                    int maxAttempts = media.hasImage() ? 1 : 3;
+                    for (int i = 0; i < maxAttempts && !sent; i++) {
                         if (!Prefs.p(app).getBoolean(Prefs.KEY_ACTIVE, false)) break;
                         sent = KakaoMessageSender.send(app, profile.room, profile.message, media);
                         if (!sent) {
@@ -93,7 +108,7 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                             if (failureReason == null || failureReason.trim().isEmpty()) {
                                 failureReason = "확인된 답장 세션 없음";
                             }
-                            if (i < 2) {
+                            if (i + 1 < maxAttempts) {
                                 KakaoNotificationListener.requestRefresh();
                                 sleep(ReliabilityTiming.retryGapMillis());
                             }
@@ -101,8 +116,9 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                     }
 
                     if (sent) {
+                        photoAccepted = media.hasImage();
                         MultiRoomStore.markSuccess(app, profile.room, reservedNext,
-                                "자동전송 성공: " + visibleName + (media.hasImage() ? " · 사진 포함" : ""));
+                                (media.hasImage() ? "사진 요청 수락 · 실제 수신 미확인: " : "자동전송 성공: ") + visibleName);
                     } else {
                         String recovery = KakaoNotificationListener.hasStoredBinding(app, profile.room)
                                 ? "자동복구 정보 있음 · 같은 방 새 알림 대기"
@@ -141,7 +157,7 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                 if (skippedForLimit) {
                     status.append("예약 실행 · 한도대기 · ").append(visibleName);
                 } else if (sent) {
-                    status.append("예약 실행 · 성공 · ").append(visibleName);
+                    status.append(photoAccepted ? "예약 실행 · 사진 요청 수락 · " : "예약 실행 · 성공 · ").append(visibleName);
                 } else {
                     status.append("예약 실행 · 실패 · ").append(visibleName);
                 }
