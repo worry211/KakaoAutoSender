@@ -10,6 +10,7 @@ final class PhotoTourQueue {
     final RoomMediaStore.Media media;
     long next;
     boolean done;
+    String result = "";
 
     Job(MultiRoomStore.Profile p, RoomMediaStore.Media m, long next) {
       profile = p.copy();

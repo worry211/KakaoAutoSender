@@ -13,7 +13,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-/** Setup/diagnostics only: enabling/selecting an IME is always an Android user action. */
+/** One visible checklist and navigation hub for single-room and multi-room photo operation. */
 public final class PhotoKeyboardSetupActivity extends Activity {
   private static java.lang.ref.WeakReference<PhotoKeyboardSetupActivity> visible =
       new java.lang.ref.WeakReference<>(null);
@@ -36,61 +36,34 @@ public final class PhotoKeyboardSetupActivity extends Activity {
     body.setPadding(padding, padding, padding, padding);
     body.setBackgroundColor(Color.rgb(9, 11, 16));
     scroll.addView(body);
-    addText(body, "사진 자동전송 준비", 23);
+    PhotoSettingsLayout.apply(this, scroll);
+    addText(body, "사진 전송 설정·도움말", 23);
     status = addText(body, "", 14);
-    addText(body, "사진 선택 → 현재 방 확인 → 전송 준비 1회 → 시험 또는 예약", 16);
+    addText(body, "한 방도 여러 방도: 방 선택 → 공통 사진·시간 → 방 최초 준비 → 시험·예약·반복", 15);
+    addButton(
+        body, "사진 여러 방 전송·공통 설정", () -> startActivity(new Intent(this, PhotoTourActivity.class)));
     addText(
         body,
-        "카카오톡의 보낼 방에서 사진 키보드를 여세요. 처음 준비할 때는 카카오톡에서 전송 버튼을 한 번 직접 누릅니다. 사진 한 장이 실제로 전송됩니다. 준비 후 같은"
-            + " 방에서 사진을 다시 고르지 않고 10초 시험·예약·반복을 시작할 수 있습니다.",
-        14);
-    addText(
-        body,
-        "현재 방을 유지해야 합니다. 다른 앱·방으로 이동하거나 입력 연결이 종료되면 중지합니다. 여러 방 순회와 실제 화면 OFF 전송은 아직 지원이 확인되지"
-            + " 않았습니다. 저장 문구는 사진과 함께 보내지 않습니다.",
-        14);
-    addButton(body, "사진 키보드 사용 설정", this::openSettings);
+        "아래 항목은 처음 한 번 설정합니다. 사진은 방 설정에 저장되며 최근 키보드 선택도 유지됩니다. 첫 전송 버튼 학습은 실제 사진 한 장을 보냅니다.",
+        13);
     addButton(
         body,
-        "키보드 선택 / 기존 키보드로 복귀",
+        "1. 사진 키보드 사용 설정",
+        () -> open(Settings.ACTION_INPUT_METHOD_SETTINGS, "설정의 키보드 목록에서 사진 키보드를 켜세요."));
+    addButton(
+        body,
+        "2. 사진 키보드 선택 / 기존 키보드로 복귀",
         () -> {
           InputMethodManager manager = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
           if (manager != null) manager.showInputMethodPicker();
         });
     addButton(
         body,
-        "사진 전송 보조 접근성 설정",
-        () -> {
-          try {
-            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
-          } catch (RuntimeException error) {
-            status.setText("휴대폰 설정 → 접근성 → 설치된 앱에서 사진 전송 보조를 켜세요.");
-          }
-        });
-    addButton(body, "현재 상태 새로고침", this::refresh);
+        "3. 사진 전송 보조 접근성 설정",
+        () -> open(Settings.ACTION_ACCESSIBILITY_SETTINGS, "설정 → 접근성 → 설치된 앱에서 사진 전송 보조를 켜세요."));
     addButton(
         body,
-        "사진 예약 중지 / 준비 해제",
-        () -> {
-          PhotoKeyboardService.stopLoop(this, null, "사용자가 설정 화면에서 사진 예약을 중지했습니다.");
-          refresh();
-        });
-    LinearLayout details = new LinearLayout(this);
-    details.setOrientation(LinearLayout.VERTICAL);
-    details.setVisibility(android.view.View.GONE);
-    addButton(
-        body,
-        "고급 설정 · 이전 처리 기록 보기/접기",
-        () ->
-            details.setVisibility(
-                details.getVisibility() == android.view.View.GONE
-                    ? android.view.View.VISIBLE
-                    : android.view.View.GONE));
-    body.addView(details);
-    history = addText(details, "", 13);
-    addButton(
-        details,
-        "정확한 예약 시간 설정",
+        "4. 정확한 예약 시간 설정",
         () -> {
           if (android.os.Build.VERSION.SDK_INT >= 31 && !SendScheduler.canUseExact(this)) {
             try {
@@ -99,35 +72,78 @@ public final class PhotoKeyboardSetupActivity extends Activity {
                       Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
                       android.net.Uri.parse("package:" + getPackageName())));
             } catch (RuntimeException error) {
-              status.setText("휴대폰 설정에서 이 앱의 알람 및 리마인더를 허용하세요.");
+              status.setText("설정에서 이 앱의 알람 및 리마인더를 허용하세요.");
             }
           } else refresh();
         });
     addButton(
-        details,
-        "중지 알림 표시 허용",
+        body,
+        "5. 중지 알림 표시 허용",
         () -> {
           if (android.os.Build.VERSION.SDK_INT >= 33
               && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
                   != android.content.pm.PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[] {android.Manifest.permission.POST_NOTIFICATIONS}, 7308);
-          else refresh();
+          else open(Settings.ACTION_APP_NOTIFICATION_SETTINGS, "설정에서 이 앱의 알림을 허용하세요.");
         });
+    addButton(
+        body, "6. 화면 끄기 최초 연결 설정", () -> startActivity(new Intent(this, PanelOffActivity.class)));
+    addText(
+        body,
+        "기본 모드는 화면이 꺼지면 대기합니다. 패널 OFF 모드는 Android 11 이상에서 최초 무선 디버깅 페어링이 필요하며 보안 잠금을 풀어 보내지 않습니다."
+            + " 실제 기기별 동작은 확인이 필요합니다.",
+        13);
+    addButton(body, "현재 상태 새로고침", this::refresh);
+    addButton(
+        body,
+        "사진 예약 전체 중지·화면 복구",
+        () -> {
+          PhotoKeyboardService.cancelPending();
+          PhotoKeyboardService.stopLoop(this, null, "사용자가 설정 화면에서 사진 예약을 중지했습니다.");
+          PanelOffManager.end("사용자가 화면 복구를 요청했습니다.");
+          refresh();
+        });
+    LinearLayout details = new LinearLayout(this);
+    details.setOrientation(LinearLayout.VERTICAL);
+    details.setVisibility(android.view.View.GONE);
+    addButton(
+        body,
+        "실행·처리 기록 보기/접기",
+        () -> {
+          details.setVisibility(
+              details.getVisibility() == android.view.View.GONE
+                  ? android.view.View.VISIBLE
+                  : android.view.View.GONE);
+          refresh();
+        });
+    body.addView(details);
+    history = addText(details, "", 13);
     addText(
         details,
-        "사진 출처의 방 이름으로 수신자를 선택하지 않습니다. 현재 열린 방을 확인하세요. 같은 방의 기존 알림 자동전송과 사진 키보드 예약을 동시에 켜지 않습니다. 전체"
-            + " 중지·알림 중지로 예약을 취소할 수 있습니다.",
+        "사진 출처는 수신자 선택이 아닙니다. 현재 카카오톡 방을 확인해야 하며 저장 문구를 사진과 함께 보내지 않습니다. 같은 방의 기존 알림 자동전송은 꺼야 합니다."
+            + " 여러 방 화면에서 선택 방의 기존 예약만 정리할 수 있습니다.",
         13);
     addText(
         details,
-        "이 키보드는 문자 입력을 읽거나 저장하지 않습니다. 접근성은 기기 안에서 카카오톡의 방 제목·입력창·전송 버튼 구조를 비교합니다. 대화 내용이나 입력 문구를"
-            + " 저장하거나 서버로 보내지 않습니다. 이전 기록은 현재 연결이나 상대방 수신을 보장하지 않습니다.",
+        "사진·대화 문구·페어링 코드를 서버로 보내지 않습니다. 접근성은 기기 안에서 방 제목·입력창·전송 버튼을 비교합니다. 재부팅·앱 종료 후 자동 재개하지 않습니다."
+            + " 전송 절차 실행과 상대방 실제 수신은 구분합니다.",
         13);
-    addText(
-        details,
-        "화면 꺼짐 시도는 키보드 고급 설정의 미검증 실험입니다. Android가 연결이나 화면 접근을 막으면 중지하며, 화면을 켜거나 잠금을 풀지 않습니다."
-            + " 재부팅·업데이트·프로세스 종료 뒤 자동으로 다른 방에서 재개하지 않습니다.",
-        13);
+    addButton(
+        body,
+        "문제 확인용 상태 복사",
+        () -> {
+          android.content.ClipboardManager clipboard =
+              (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+          if (clipboard != null) {
+            clipboard.setPrimaryClip(
+                android.content.ClipData.newPlainText("사진 전송 상태", PhotoSupportReport.build(this)));
+            android.widget.Toast.makeText(
+                    this,
+                    "상태를 복사했습니다. 사진·대화 문구·페어링 코드는 포함하지 않습니다.",
+                    android.widget.Toast.LENGTH_LONG)
+                .show();
+          }
+        });
     addButton(body, "돌아가기", this::finish);
     setContentView(scroll);
   }
@@ -154,11 +170,17 @@ public final class PhotoKeyboardSetupActivity extends Activity {
     super.onPause();
   }
 
-  private void openSettings() {
+  @Override
+  public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
+    super.onRequestPermissionsResult(code, permissions, results);
+    refresh();
+  }
+
+  private void open(String action, String fallback) {
     try {
-      startActivity(new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS));
+      startActivity(new Intent(action).putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName()));
     } catch (RuntimeException error) {
-      status.setText("휴대폰 설정의 일반 관리 → 키보드 목록에서 사진 키보드를 켜세요.");
+      status.setText(fallback);
     }
   }
 
@@ -166,12 +188,25 @@ public final class PhotoKeyboardSetupActivity extends Activity {
     if (status == null) return;
     InputMethodManager manager = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
     boolean enabled = false;
-    String component = new ComponentName(this, PhotoKeyboardService.class).flattenToShortString();
+    ComponentName keyboard = new ComponentName(this, PhotoKeyboardService.class);
     if (manager != null)
       for (InputMethodInfo info : manager.getEnabledInputMethodList())
-        if (component.equals(info.getId())) enabled = true;
+        if (keyboard.equals(ComponentName.unflattenFromString(info.getId()))) enabled = true;
+    android.app.NotificationManager notices =
+        (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
     status.setText(
-        (enabled ? "사진 키보드 사용 설정됨" : "사진 키보드 사용 설정 필요")
+        "사진 키보드: "
+            + (enabled ? "사용 설정됨" : "사용 설정 필요")
+            + " / "
+            + (PhotoTourController.keyboardSelected(this) ? "현재 선택됨" : "현재 선택 필요")
+            + "\n사진 전송 보조: "
+            + (PhotoUiService.connected() ? "연결됨" : "접근성 설정 필요")
+            + "\n정확한 예약: "
+            + (SendScheduler.canUseExact(this) ? "사용 가능" : "권한 없음 · 지연 가능")
+            + "\n중지 알림: "
+            + (notices != null && notices.areNotificationsEnabled() ? "표시 가능" : "알림 허용 필요")
+            + "\n화면 패널 OFF: "
+            + (PanelOffManager.connected() ? "자체 연결됨 · 실기기 확인 필요" : "연결 필요 · 선택 기능")
             + "\n현재 연결: "
             + PhotoUiService.status()
             + "\n"
@@ -185,24 +220,24 @@ public final class PhotoKeyboardSetupActivity extends Activity {
           PhotoStatusText.combine(
               PhotoKeyboardDiagnostics.summary(this),
               PhotoLoopStore.summary(this),
-              SendScheduler.canUseExact(this) ? "정확한 알람 사용 가능" : "정확한 알람 권한 없음 · 요청 시각이 늦어질 수 있음"));
+              PhotoTourController.status(this)));
   }
 
-  private TextView addText(LinearLayout body, String value, int size) {
-    TextView view = new TextView(this);
-    view.setText(value);
-    view.setTextSize(size);
-    view.setTextColor(Color.rgb(228, 234, 245));
-    view.setPadding(0, 12, 0, 14);
-    body.addView(view);
-    return view;
+  private TextView addText(LinearLayout p, String label, int size) {
+    TextView v = new TextView(this);
+    v.setText(label);
+    v.setTextSize(size);
+    v.setTextColor(Color.rgb(228, 234, 245));
+    v.setPadding(0, 12, 0, 14);
+    p.addView(v);
+    return v;
   }
 
-  private void addButton(LinearLayout body, String label, Runnable action) {
-    Button button = new Button(this);
-    button.setText(label);
-    button.setAllCaps(false);
-    button.setOnClickListener(view -> action.run());
-    body.addView(button);
+  private void addButton(LinearLayout p, String label, Runnable click) {
+    Button b = new Button(this);
+    b.setText(label);
+    b.setAllCaps(false);
+    b.setOnClickListener(v -> click.run());
+    p.addView(b);
   }
 }

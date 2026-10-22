@@ -523,15 +523,16 @@ public final class PhotoKeyboardService extends InputMethodService {
       return;
     }
     PhotoKeyboardSession.Ticket ticket = shown != null && session.current(shown) ? shown : null;
-    if (ticket == null && !PhotoTourController.active()) {
+    if (ticket == null && !preparing && !PhotoTourController.active()) {
       PhotoKeyboardSelection.Selected selected = PhotoKeyboardSelection.load(this);
       if (selected != null) {
         learnedSource = selected.room;
         learnedMedia = selected.media;
       }
     }
-    String room = ticket != null ? ticket.room : learnedSource;
-    RoomMediaStore.Media media = ticket != null ? ticket.media : learnedMedia;
+    PhotoKeyboardSession.Ticket displaying = preparing ? active : ticket;
+    String room = displaying != null ? displaying.room : learnedSource;
+    RoomMediaStore.Media media = displaying != null ? displaying.media : learnedMedia;
     boolean remembered =
         room != null
             && media != null
@@ -546,7 +547,8 @@ public final class PhotoKeyboardService extends InputMethodService {
       }
       text("선택한 사진: " + media.name, 12);
       text("수신자는 현재 열린 카카오톡 방입니다. 저장 문구는 함께 전달하지 않습니다.", 11);
-      if (ticket == null) {
+      if (preparing) text("새 사진 확인 중 · 완료될 때까지 전송·예약을 시작하지 않습니다.", 11);
+      if (ticket == null && !preparing) {
         text("사진 선택은 저장되어 있습니다. 전송 확인은 새 입력창에서 다시 받습니다.", 11);
         button("저장한 사진 다시 준비", () -> prepare(room, media));
       }
@@ -554,50 +556,61 @@ public final class PhotoKeyboardService extends InputMethodService {
       confirm.setText("현재 카카오톡 방과 사진을 확인했습니다");
       confirm.setTextColor(Color.WHITE);
       confirm.setChecked(recipientConfirmed);
+      confirm.setEnabled(!preparing);
       panel.addView(confirm);
-      if (availability.canSchedule) {
-        MultiRoomStore.Profile source = MultiRoomStore.get(this, room);
-        if (source != null)
-          text(
-              "일정: "
-                  + MultiRoomStore.scheduleSummary(source)
-                  + " · 하루 한도 "
-                  + (source.dailyLimit == 0 ? "무제한" : source.dailyLimit + "회"),
-              12);
+      MultiRoomStore.Profile source = MultiRoomStore.get(this, room);
+      if (source != null)
+        text(
+            "일정: "
+                + MultiRoomStore.scheduleSummary(source)
+                + " · 하루 한도 "
+                + (source.dailyLimit == 0 ? "무제한" : source.dailyLimit + "회"),
+            12);
+      renderManualSend(ticket);
+      if (PhotoTourController.canConfirmRoom()) {
         button(
-            "10초 후 자동전송 1회 시험",
-            () -> startConfigured(room, media, recipientConfirmed, true, screenOffRequested, true));
-        button(
-            "저장한 일정으로 반복 시작",
-            () ->
-                startConfigured(room, media, recipientConfirmed, false, screenOffRequested, false));
-        button(
-            "다음 일정에 1회 예약",
-            () ->
-                startConfigured(room, media, recipientConfirmed, true, screenOffRequested, false));
-        text("시험도 사진 한 장을 실제로 보냅니다. 절전·알람 권한에 따라 늦어질 수 있습니다.", 11);
+            "현재 방 연결 완료 · 사진 보내지 않음",
+            () -> {
+              String error = PhotoTourController.confirmRoom(recipientConfirmed);
+              if (!error.isEmpty()) showActionStatus(error);
+            });
+        text("이미 준비한 전송 버튼 기준을 사용합니다. 이번 방은 확인만 하며 사진을 추가 전송하지 않습니다.", 11);
       } else {
-        if (PhotoTourController.canConfirmRoom()) {
-          button(
-              "현재 방 연결 완료 · 사진 보내지 않음",
-              () -> {
-                String error = PhotoTourController.confirmRoom(recipientConfirmed);
-                if (!error.isEmpty()) showActionStatus(error);
-              });
-          text("이미 준비한 전송 버튼 기준을 사용합니다. 이번 방은 확인만 하며 사진을 추가 전송하지 않습니다.", 11);
-        } else {
-          Button learn = button("자동 전송 준비 · 전송 버튼 학습 (1회)", () -> learnSelected(ticket));
-          learn.setEnabled(availability.canLearn && ticket != null);
-        }
-        if (!availability.canLearn)
-          button(
-              "현재 방 연결 다시 확인",
-              () -> {
-                status = "현재 연결을 다시 확인했습니다.";
-                render();
-              });
-        if (ticket != null) renderManualSend(ticket);
+        Button learn =
+            button(
+                availability.canSchedule ? "현재 방 전송 버튼 다시 학습" : "자동 전송 준비 · 전송 버튼 학습 (1회)",
+                () -> learnSelected(ticket));
+        learn.setEnabled(availability.canLearn && ticket != null);
       }
+      if (!availability.canSchedule) text("예약·반복 준비 필요: " + availability.message, 11);
+      Button quick =
+          button(
+              "10초 후 자동전송 1회 시험",
+              () ->
+                  startConfigured(room, media, recipientConfirmed, true, screenOffRequested, true));
+      Button repeat =
+          button(
+              "저장한 일정으로 반복 시작",
+              () ->
+                  startConfigured(
+                      room, media, recipientConfirmed, false, screenOffRequested, false));
+      Button once =
+          button(
+              "다음 일정에 1회 예약",
+              () ->
+                  startConfigured(
+                      room, media, recipientConfirmed, true, screenOffRequested, false));
+      quick.setEnabled(availability.canSchedule && !preparing);
+      repeat.setEnabled(availability.canSchedule && !preparing);
+      once.setEnabled(availability.canSchedule && !preparing);
+      text("버튼이 흐리면 위 준비 상태를 확인하세요. 시험·학습도 실제 사진 한 장을 보냅니다.", 11);
+      button(
+          "현재 방 연결 다시 확인",
+          () -> {
+            PhotoUiService.reconcileChat();
+            restoreSelectedPhoto();
+            render();
+          });
       confirm.setOnCheckedChangeListener(
           (view, checked) -> {
             recipientConfirmed = checked;
@@ -617,10 +630,7 @@ public final class PhotoKeyboardService extends InputMethodService {
         off.setOnCheckedChangeListener((view, checked) -> screenOffRequested = checked);
         panel.addView(off);
         text("현재 연결이 유지될 때만 시도합니다. 실제 화면 OFF 전송은 미검증이며 잠금을 풀거나 화면을 켜지 않습니다.", 11);
-        if (availability.canSchedule && ticket != null) {
-          button("현재 방 전송 버튼 다시 학습", () -> learnSelected(ticket));
-          renderManualSend(ticket);
-        }
+        button("화면 패널 OFF·여러 방 설정", () -> openPhotoTools(PhotoTourActivity.class));
       }
       button(
           "사진 선택 취소",
@@ -665,6 +675,8 @@ public final class PhotoKeyboardService extends InputMethodService {
       } else text("앱에서 라이선스를 확인한 뒤 입력창을 다시 여세요.", 12);
       if (!found) text("앱의 방 설정에서 사진을 먼저 선택하세요.", 12);
     }
+    button("사진 설정·권한·도움말", () -> openPhotoTools(PhotoKeyboardSetupActivity.class));
+    button("사진 여러 방 전송·화면 끄기", () -> openPhotoTools(PhotoTourActivity.class));
     button(
         "기존 키보드로 변경",
         () -> {
@@ -675,23 +687,37 @@ public final class PhotoKeyboardService extends InputMethodService {
         });
   }
 
+  private void openPhotoTools(Class<?> activity) {
+    try {
+      startActivity(new Intent(this, activity).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+    } catch (RuntimeException error) {
+      showActionStatus("앱의 사진 전송 메뉴에서 설정을 여세요.");
+    }
+  }
+
   private void renderManualSend(PhotoKeyboardSession.Ticket ticket) {
-    button(
-        "현재 방에 사진 전달 · 1회",
-        () -> {
-          if (!recipientConfirmed) {
-            showActionStatus("현재 카카오톡 방과 사진을 먼저 확인하세요.");
-            return;
-          }
-          rememberSelection(ticket);
-          String result =
-              session.commit(
-                  this, ticket, getCurrentInputEditorInfo(), getCurrentInputConnection(), true);
-          clearPreview();
-          status = result;
-          PhotoKeyboardDiagnostics.recordResult(this, result);
-          render();
-        });
+    Button send =
+        button(
+            "현재 방에 사진 전달 · 1회",
+            () -> {
+              if (ticket == null || !session.current(ticket)) {
+                showActionStatus("저장한 사진 다시 준비를 누른 뒤 현재 방을 확인하세요.");
+                return;
+              }
+              if (!recipientConfirmed) {
+                showActionStatus("현재 카카오톡 방과 사진을 먼저 확인하세요.");
+                return;
+              }
+              rememberSelection(ticket);
+              String result =
+                  session.commit(
+                      this, ticket, getCurrentInputEditorInfo(), getCurrentInputConnection(), true);
+              clearPreview();
+              status = result;
+              PhotoKeyboardDiagnostics.recordResult(this, result);
+              render();
+            });
+    send.setEnabled(ticket != null);
   }
 
   private void learnSelected(PhotoKeyboardSession.Ticket ticket) {
@@ -736,6 +762,10 @@ public final class PhotoKeyboardService extends InputMethodService {
       boolean once,
       boolean screenOff,
       boolean quickTest) {
+    if (preparing) {
+      showActionStatus("새 사진 확인이 끝난 뒤 예약을 시작하세요.");
+      return;
+    }
     String failure;
     try {
       failure =
@@ -849,7 +879,8 @@ public final class PhotoKeyboardService extends InputMethodService {
                   }
                   options.inJustDecodeBounds = false;
                   options.inSampleSize = 1;
-                  while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > 640) {
+                  while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize
+                      > 640) {
                     options.inSampleSize *= 2;
                   }
                   try (InputStream input =

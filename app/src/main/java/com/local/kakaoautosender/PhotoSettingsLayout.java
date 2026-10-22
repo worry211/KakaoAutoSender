@@ -12,14 +12,18 @@ import android.widget.ScrollView;
 final class PhotoSettingsLayout {
   static void apply(Activity activity, ScrollView scroll) {
     scroll.setFillViewport(true);
-    scroll.setClipToPadding(false);
+    scroll.setClipToPadding(true);
+    apply(activity, (android.view.View) scroll);
+  }
+
+  static void apply(Activity activity, android.view.View root) {
     if (Build.VERSION.SDK_INT < 30) {
-      scroll.setFitsSystemWindows(true);
+      root.setFitsSystemWindows(true);
       return;
     }
     activity.getWindow().setDecorFitsSystemWindows(false);
     activity.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
-    scroll.setOnApplyWindowInsetsListener(
+    root.setOnApplyWindowInsetsListener(
         (view, insets) -> {
           android.graphics.Insets bars =
               insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());

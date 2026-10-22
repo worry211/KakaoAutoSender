@@ -111,11 +111,19 @@ final class PhotoTourController {
   }
 
   static String routeError(Context c, String room, KakaoNotificationListener.ReplyTarget target) {
+    String error = routeIdentityError(c, room, target);
+    if (!error.isEmpty()) return error;
+    return KakaoNotificationListener.isCurrentTarget(room, target)
+        ? ""
+        : "이 방의 새 카카오톡 알림 연결이 필요합니다.";
+  }
+
+  static String routeIdentityError(
+      Context c, String room, KakaoNotificationListener.ReplyTarget target) {
     if (!Prefs.isRoomConfirmed(c, room)
         || target == null
         || !target.verified
         || !RoomRouting.sameTitle(room, target.label)
-        || !KakaoNotificationListener.isCurrentTarget(room, target)
         || target.stableIdentityKeys.isEmpty()) return "이 방의 새 카카오톡 알림 연결이 필요합니다.";
     ArrayList<String> aliases = Prefs.aliasesForIdentity(c, target.stableIdentityKeys);
     if (aliases.size() != 1 || !RoomRouting.sameTitle(aliases.get(0), room))
@@ -144,7 +152,7 @@ final class PhotoTourController {
       MultiRoomStore.Profile p = MultiRoomStore.get(app, room);
       if (p == null || !RoomMediaStore.get(app, room).hasImage()) return "선택한 모든 방에 사진을 먼저 설정하세요.";
       if (!PhotoTourBindings.identityMatches(
-              app, PhotoTourBindings.get(app, room), KakaoNotificationListener.findTarget(room))
+              app, PhotoTourBindings.get(app, room), PhotoRoomRoutes.get(app, room))
           && !registrations.contains(room)) registrations.add(room);
     }
     if (registrations.isEmpty()) return "선택한 방은 이미 준비됐습니다. 시험 또는 반복을 시작할 수 있습니다.";
@@ -227,8 +235,8 @@ final class PhotoTourController {
     if (!DeliveryGate.allowed(app) || !PhotoKeyboardSession.unlocked(app))
       return "화면 잠금 또는 라이선스로 방 열기를 중지했습니다.";
     if (!panelReady()) return "패널 OFF 제어 연결이 확인되지 않아 방을 열지 않았습니다.";
-    KakaoNotificationListener.ReplyTarget target = KakaoNotificationListener.findTarget(room);
-    String error = routeError(app, room, target);
+    KakaoNotificationListener.ReplyTarget target = PhotoRoomRoutes.get(app, room);
+    String error = PhotoRoomRoutes.error(app, room, target);
     if (!error.isEmpty()) return title(room) + ": " + error;
     PhotoTourBindings.Binding binding = PhotoTourBindings.get(app, room);
     if (phase == Phase.ROUTE_OPEN && !PhotoTourBindings.identityMatches(app, binding, target))
@@ -251,6 +259,7 @@ final class PhotoTourController {
                 .toBundle();
       target.openIntent.send(app, 0, null, null, null, null, options);
     } catch (android.app.PendingIntent.CanceledException | SecurityException e) {
+      PhotoRoomRoutes.forget(room);
       return "방 열기 연결이 만료됐습니다. 새 알림을 연결하세요.";
     }
     main.postDelayed(
@@ -384,7 +393,8 @@ final class PhotoTourController {
         || route == null
         || !panelReady()) return false;
     PhotoTourBindings.Binding b = PhotoTourBindings.get(app, alias);
-    return PhotoTourBindings.identityMatches(app, b, route);
+    return PhotoRoomRoutes.error(app, alias, route).isEmpty()
+        && PhotoTourBindings.identityMatches(app, b, route);
   }
 
   static void completed(String room, String run) {
@@ -397,6 +407,7 @@ final class PhotoTourController {
     lastAnchor = PhotoUiService.tourAnchor();
     loopRun = "";
     registrationRun = "";
+    job.result = "전송 절차·방 복귀 확인 · 수신 별도 확인";
     queue.finish(job, System.currentTimeMillis());
     job = null;
     phase = Phase.WAIT_DUE;
@@ -452,6 +463,7 @@ final class PhotoTourController {
     }
     if (job.profile.dailyLimit > 0
         && PhotoLoopStore.attemptsToday(app, job.profile.room) >= job.profile.dailyLimit) {
+      job.result = "오늘 요청 한도로 건너뜀";
       queue.finish(job, System.currentTimeMillis());
       if (!queue.once)
         job.next = MultiRoomStore.nextAfterDailyLimit(job.profile, System.currentTimeMillis());
@@ -550,5 +562,35 @@ final class PhotoTourController {
   private static String title(String room) {
     MultiRoomStore.Profile p = MultiRoomStore.get(app, room);
     return p == null ? room : p.title();
+  }
+
+  static String roomProgress(Context c, String room) {
+    MultiRoomStore.Profile p = MultiRoomStore.get(c, room);
+    if (p == null) return "삭제된 방";
+    String progress = "";
+    if (active() && queue == null)
+      progress =
+          registrations.contains(room)
+              ? room.equals(alias) ? "현재 방 최초 준비 중" : "최초 준비 대기"
+              : "방 준비 저장됨";
+    if (queue != null)
+      for (PhotoTourQueue.Job item : queue.jobs) {
+        if (!item.profile.room.equals(room)) continue;
+        if (item == job) progress = "현재 처리 중";
+        else if (item.done) progress = item.result;
+        else
+          progress =
+              "다음 요청 "
+                  + new java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.KOREA)
+                      .format(new java.util.Date(item.next));
+        break;
+      }
+    String error = active() ? "" : PhotoTourReadiness.roomError(c, room, true);
+    return p.title()
+        + "\n"
+        + (progress.isEmpty() ? error.isEmpty() ? "준비됨" : error : progress)
+        + " · 오늘 사진 요청 "
+        + PhotoLoopStore.attemptsToday(c, room)
+        + "회";
   }
 }

@@ -54,6 +54,40 @@ public class BulkPhotoEditorTest {
   }
 
   @Test
+  public void photoModeShowsScheduleAndLimitByDefaultAndPreservesTextWhenSaving() throws Exception {
+    for (String room : new String[] {"a", "b"}) {
+      MultiRoomStore.Profile p = MultiRoomStore.get(c, room);
+      p.message = "saved-" + room;
+      MultiRoomStore.upsert(c, p);
+    }
+    intent.putExtra(BulkRoomEditActivity.EXTRA_PHOTO_MODE, true);
+    var controller = Robolectric.buildActivity(BulkRoomEditActivity.class, intent).create();
+    try {
+      BulkRoomEditActivity activity = controller.get();
+      assertTrue(
+          ((android.widget.CheckBox) ReflectionHelpers.getField(activity, "applySchedule"))
+              .isChecked());
+      assertTrue(
+          ((android.widget.CheckBox) ReflectionHelpers.getField(activity, "applyLimit"))
+              .isChecked());
+      android.widget.EditText message = ReflectionHelpers.getField(activity, "messageInput");
+      assertEquals(View.GONE, ((View) message.getParent()).getVisibility());
+      message.setText("must not replace stored text");
+      ((android.widget.CheckBox) ReflectionHelpers.getField(activity, "applyMessage"))
+          .setChecked(true);
+      ReflectionHelpers.callInstanceMethod(activity, "applyNow");
+      for (String room : new String[] {"a", "b"}) {
+        assertFalse(MultiRoomStore.get(c, room).enabled);
+        assertEquals("saved-" + room, MultiRoomStore.get(c, room).message);
+        assertTrue(RoomMediaStore.get(c, room).hasImage());
+      }
+      assertNotNull(org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog());
+    } finally {
+      controller.destroy();
+    }
+  }
+
+  @Test
   public void recreatedEditorPreservesExplicitPhotoRemovalAndOtherDraftFields() {
     Bundle draft = new Bundle();
     draft.putInt("photoAction", 2);

@@ -162,6 +162,9 @@ public final class PhotoUiService extends AccessibilityService {
     if (event.getEventType() != AccessibilityEvent.TYPE_WINDOWS_CHANGED
         && !KakaoNotificationListener.KAKAO_PACKAGE.contentEquals(
             event.getPackageName() == null ? "" : event.getPackageName())) return;
+    if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+        || event.getEventType() == AccessibilityEvent.TYPE_WINDOWS_CHANGED)
+      PhotoTourController.windowEvent();
     if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
       String className = String.valueOf(event.getClassName());
       if (className.startsWith(KakaoNotificationListener.KAKAO_PACKAGE + ".")) {

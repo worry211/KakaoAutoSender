@@ -34,10 +34,18 @@ public final class PhotoTourActivity extends Activity {
                   ? "서버 확인 중 · 전체 중지로 취소할 수 있습니다."
                   : PhotoTourReadiness.summary(PhotoTourActivity.this, selected, usePanelOff));
           boolean editing =
-              !PhotoTourController.active() && !PanelOffManager.engaged() && !actions.pending();
+              !PhotoTourController.active()
+                  && !PhotoKeyboardService.hasActiveLoop()
+                  && !PanelOffManager.engaged()
+                  && !actions.pending();
           for (Button b : setupButtons) b.setEnabled(editing);
           off.setEnabled(editing);
-          for (int i = 0; i < rooms.getChildCount(); i++) rooms.getChildAt(i).setEnabled(editing);
+          for (int i = 0; i < rooms.getChildCount(); i++) {
+            CheckBox box = (CheckBox) rooms.getChildAt(i);
+            box.setEnabled(editing);
+            box.setText(
+                PhotoTourController.roomProgress(PhotoTourActivity.this, (String) box.getTag()));
+          }
           main.postDelayed(this, 2000L);
         }
       };
@@ -59,14 +67,14 @@ public final class PhotoTourActivity extends Activity {
     body.setBackgroundColor(Color.rgb(10, 14, 22));
     scroll.addView(body);
     PhotoSettingsLayout.apply(this, scroll);
-    text(body, "사진 여러 방 전송 · 최종 검증 후보", 23);
+    text(body, "사진 전송 · 한 방 / 여러 방", 23);
     state = text(body, "", 14);
     readiness = text(body, "", 15);
     text(body, "방 선택 → 공통 사진·시간 설정 → 각 방 최초 준비 → 1회 시험 또는 반복", 15);
     text(
         body,
-        "순회 때 휴대폰에서 카카오톡 방이 차례로 열립니다. 새 알림 연결과 준비된 방만 사용합니다. 첫 전송 버튼 준비는 사진 한 장을 보냅니다. 이후 방은 현재 방"
-            + " 확인만으로 연결할 수 있습니다.",
+        "방 열기 연결은 처음에 새 알림으로 확인합니다. 현재 앱 실행 중에는 확인한 방 열기 연결을 보관하며, 방 식별·카카오톡 버전이 바뀌거나 연결이 끊기면 다시"
+            + " 확인합니다. 첫 전송 버튼 준비는 사진 한 장을 보냅니다. 이후 방은 현재 방 확인만으로 연결할 수 있습니다.",
         13);
     text(
         body,
@@ -89,8 +97,8 @@ public final class PhotoTourActivity extends Activity {
     rooms = new LinearLayout(this);
     rooms.setOrientation(LinearLayout.VERTICAL);
     body.addView(rooms);
-    button(body, "모든 방 선택", () -> selectAll(true));
-    button(body, "선택 해제", () -> selectAll(false));
+    setupButtons.add(button(body, "모든 방 선택", () -> selectAll(true)));
+    setupButtons.add(button(body, "선택 해제", () -> selectAll(false)));
     setupButtons.add(
         button(
             body,
@@ -102,10 +110,30 @@ public final class PhotoTourActivity extends Activity {
               }
               startActivity(
                   new Intent(this, BulkRoomEditActivity.class)
+                      .putExtra(BulkRoomEditActivity.EXTRA_PHOTO_MODE, true)
                       .putStringArrayListExtra(
                           BulkRoomEditActivity.EXTRA_ROOMS, new ArrayList<>(selected)));
             }));
     setupButtons.add(button(body, "2. 준비 안 된 선택 방 연결", () -> authorized(false, false)));
+    setupButtons.add(
+        button(
+            body,
+            "선택 사진 방의 기존 알림 예약만 끄기",
+            () -> {
+              if (selected.isEmpty()) {
+                toast("먼저 방을 선택하세요.");
+                return;
+              }
+              MultiRoomStore.BulkPatch patch = new MultiRoomStore.BulkPatch();
+              patch.applyEnabled = true;
+              patch.enabled = false;
+              try {
+                int count = MultiRoomStore.applyBulkPatch(this, new ArrayList<>(selected), patch);
+                toast(count + "개 선택 방의 기존 알림 예약을 껐습니다. 사진 순회는 별도로 시작하세요.");
+              } catch (RuntimeException error) {
+                toast("설정 저장에 실패했습니다. 다시 확인하세요.");
+              }
+            }));
     setupButtons.add(button(body, "3. 선택 방 1회씩 시험 · 10초 후", () -> authorized(true, true)));
     setupButtons.add(button(body, "저장한 일정으로 선택 방 반복 시작", () -> authorized(true, false)));
     button(
@@ -113,6 +141,8 @@ public final class PhotoTourActivity extends Activity {
         "사진 여러 방 전송 전체 중지",
         () -> {
           actions.cancel();
+          PhotoKeyboardService.cancelPending();
+          PhotoKeyboardService.stopLoop(this, null, "사용자가 사진 전체 중지를 요청했습니다.");
           PhotoTourController.stop(this, "사용자가 사진 여러 방 전송을 중지했습니다.");
           PanelOffManager.end("사용자가 화면 복구를 요청했습니다.");
           state.setText(PhotoTourController.status(this));
@@ -121,6 +151,12 @@ public final class PhotoTourActivity extends Activity {
         body,
         "키보드·접근성 설정",
         () -> startActivity(new Intent(this, PhotoKeyboardSetupActivity.class)));
+    button(body, "방 추가·연결·삭제 관리", () -> startActivity(new Intent(this, MainActivityV4.class)));
+    text(
+        body,
+        "방이 보이지 않으면 대시보드에서 방을 먼저 연결하세요. 사진만 보내며 저장 문구는 붙이지 않습니다. 실제 화면 패널 OFF·상대방 사진 수신은 실기기 검증이"
+            + " 필요합니다.",
+        12);
     button(body, "돌아가기", this::finish);
     setContentView(scroll);
   }
@@ -163,6 +199,7 @@ public final class PhotoTourActivity extends Activity {
     for (MultiRoomStore.Profile p : MultiRoomStore.list(this)) {
       existing.add(p.room);
       CheckBox box = new CheckBox(this);
+      box.setTag(p.room);
       box.setTextColor(Color.WHITE);
       box.setText(
           p.title()
@@ -222,7 +259,9 @@ public final class PhotoTourActivity extends Activity {
   }
 
   private void selectAll(boolean value) {
-    if (PhotoTourController.active() || PanelOffManager.engaged()) {
+    if (PhotoTourController.active()
+        || PhotoKeyboardService.hasActiveLoop()
+        || PanelOffManager.engaged()) {
       toast("진행 중인 사진 작업을 먼저 중지하세요.");
       return;
     }

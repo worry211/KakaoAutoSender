@@ -163,6 +163,75 @@ public class PhotoTourRouteTest {
     assertFalse(PhotoTourController.routeError(c, "a", target).isEmpty());
   }
 
+  private void installKakao(int version) {
+    android.content.pm.PackageInfo info = new android.content.pm.PackageInfo();
+    info.packageName = KakaoNotificationListener.KAKAO_PACKAGE;
+    info.versionCode = version;
+    Shadows.shadowOf(c.getPackageManager()).installPackage(info);
+    MultiRoomStore.upsert(c, new MultiRoomStore.Profile("a"));
+  }
+
+  @Test
+  public void capturedActivityRouteSurvivesDismissalWithoutRestoringNotificationReply() {
+    installKakao(7);
+    assertSame(target, PhotoRoomRoutes.get(c, "a"));
+    KakaoNotificationListener.invalidateNotification("token", 100);
+    assertNull(KakaoNotificationListener.findTarget("a"));
+    assertFalse(PhotoTourController.routeError(c, "a", target).isEmpty());
+    assertSame(target, PhotoRoomRoutes.get(c, "a"));
+    assertEquals("", PhotoRoomRoutes.error(c, "a", target));
+  }
+
+  @Test
+  public void changedIdentityOrKakaoVersionInvalidatesCapturedRoute() {
+    installKakao(7);
+    PhotoRoomRoutes.get(c, "a");
+    KakaoNotificationListener.invalidateNotification("token", 100);
+    Prefs.bindIdentity(c, "b", target.stableIdentityKeys);
+    assertNull(PhotoRoomRoutes.get(c, "a"));
+    Prefs.bindIdentity(c, "a", target.stableIdentityKeys);
+    assertNull(PhotoRoomRoutes.get(c, "a"));
+  }
+
+  @Test
+  public void packageUpdateAndListenerResetRequireNewOpeningRoute() {
+    installKakao(7);
+    PhotoRoomRoutes.get(c, "a");
+    KakaoNotificationListener.invalidateNotification("token", 100);
+    installKakao(8);
+    assertNull(PhotoRoomRoutes.get(c, "a"));
+    assertFalse(PhotoRoomRoutes.error(c, "a", target).isEmpty());
+  }
+
+  @Test
+  public void clearingNotificationSessionAlsoClearsCapturedActivityRoutes() {
+    installKakao(7);
+    PhotoRoomRoutes.get(c, "a");
+    KakaoNotificationListener.clearLiveTargets();
+    assertNull(PhotoRoomRoutes.get(c, "a"));
+  }
+
+  @Test
+  public void sameActivityContentChangeCanReportFreshRoomNavigation() throws Exception {
+    controller("app", c);
+    controller("phase", PhotoTourController.Phase.REGISTER_OPEN);
+    controller("openedAt", android.os.SystemClock.elapsedRealtime());
+    controller("windowObserved", false);
+    var helper = Robolectric.buildService(PhotoUiService.class).create();
+    try {
+      android.view.accessibility.AccessibilityEvent event =
+          android.view.accessibility.AccessibilityEvent.obtain(
+              android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+      event.setPackageName(KakaoNotificationListener.KAKAO_PACKAGE);
+      helper.get().onAccessibilityEvent(event);
+      Field observed = PhotoTourController.class.getDeclaredField("windowObserved");
+      observed.setAccessible(true);
+      assertTrue(observed.getBoolean(null));
+    } finally {
+      helper.destroy();
+    }
+  }
+
   @Test
   public void confirmationAndIdentityConflictBlockNavigation() {
     Prefs.clearRoomConfirmed(c, "a");

@@ -27,7 +27,7 @@ final class PanelOffManager {
   private static volatile boolean linked, busy;
   private static volatile String status = "무선 연결 필요 · 휴대폰에서 최초 페어링을 진행하세요.";
   private static volatile Session current;
-  private static long generation;
+  private static volatile long generation;
   private static long restoreUntil;
 
   private static final class Session {
@@ -128,14 +128,39 @@ final class PanelOffManager {
                 if (generation != expected) return;
                 busy = false;
                 linked = success && !pairing;
+                if (linked) watchConnection(expected);
                 status =
                     success
                         ? (pairing
                             ? "페어링 완료 · 무선 디버깅 기본 화면의 연결 포트로 연결하세요. 페어링 포트와 다릅니다."
                             : "휴대폰 자체 연결 완료 · 먼저 ‘사진 없이 5초 화면 끄기 시험’을 진행할 수 있습니다.")
-                        : "연결 실패 · 무선 디버깅과 포트/코드를 확인하세요. 코드는 기기에 저장하지 않았습니다.";
+                        : pairing
+                            ? "페어링 실패 · 페어링 창을 연 상태에서 그 창의 포트와 새 6자리 코드를 입력하세요. 연결 포트와 다릅니다."
+                            : "자체 연결 실패 · 무선 디버깅 기본 화면의 연결 포트를 다시 확인하세요. Wi-Fi·재부팅 후 포트가 바뀔 수 있습니다."
+                                  + " 필요하면 최초 페어링을 다시 진행하세요.";
               });
         });
+  }
+
+  private static void watchConnection(long expected) {
+    io.schedule(
+        () -> {
+          if (generation != expected || !linked) return;
+          LocalAdb connection = adb;
+          boolean alive = connection != null && connection.isConnected();
+          main.post(
+              () -> {
+                if (generation != expected || !linked) return;
+                if (!alive) {
+                  linked = false;
+                  status = "무선 자체 연결이 종료됐습니다. 무선 디버깅 기본 화면의 현재 연결 포트로 다시 연결하세요.";
+                  Session s = current;
+                  if (s != null) failed(s, "무선 연결 종료로 사진 순회 중지 · 패널 복구 요청됨");
+                } else watchConnection(expected);
+              });
+        },
+        3L,
+        TimeUnit.SECONDS);
   }
 
   static String begin(Context c, String owner) {

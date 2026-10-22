@@ -243,6 +243,9 @@ public class MainActivityV4 extends Activity {
         Button photoTour = tertiaryButton("사진 여러 방 전송");
         photoTour.setOnClickListener(v -> startActivity(new Intent(this, PhotoTourActivity.class)));
         root.addView(photoTour, top(7));
+        Button photoSetup = tertiaryButton("사진 전송 설정·권한·도움말");
+        photoSetup.setOnClickListener(v -> startActivity(new Intent(this, PhotoKeyboardSetupActivity.class)));
+        root.addView(photoSetup, top(7));
         renderRoomFilters();
 
         bulkBar = card(Color.rgb(23, 29, 42), Color.rgb(66, 84, 133), 16);

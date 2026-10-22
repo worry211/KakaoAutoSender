@@ -177,6 +177,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
     @Override
     public void onListenerDisconnected() {
         instance = null;
+        PhotoTourController.stopActive("알림 연결이 끊겨 사진 순회를 중지했습니다. 연결 복구 후 다시 시작하세요.");
     clearLiveTargets();
         Prefs.setStatus(this, "알림 리스너 연결 끊김 · 재연결 대기");
         super.onListenerDisconnected();
@@ -218,6 +219,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
 
   static void clearLiveTargets() {
     synchronized (DeliveryGate.LOCK) {
+      PhotoRoomRoutes.clear();
       sessions.clear();
       synchronized (recentTargets) {
         recentTargets.clear();
@@ -1019,6 +1021,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
     }
 
     static void clearRuntimeAndBindings(Context context) {
+        PhotoRoomRoutes.clear();
         sessions.clear();
         synchronized (recentLock) {
             recentTargets.clear();

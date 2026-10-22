@@ -38,6 +38,7 @@ jobs:
           disable-animations: true
           script: |
             gradle --no-daemon :app:connectedDebugAndroidTest :spake2:connectedDebugAndroidTest
+            adb pull /sdcard/Android/data/com.local.kakaoautosender/files/photo-ui photo-ui-screenshots
             python3 scripts/panel-device-check.py app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         if: always()
@@ -49,3 +50,4 @@ jobs:
             panel-device-results.json
             panel-*-transcript.txt
             panel-*-logcat.txt
+            photo-ui-screenshots

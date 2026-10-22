@@ -26,6 +26,9 @@ import java.util.ArrayList;
 
 public class BulkRoomEditActivity extends Activity {
   static final String EXTRA_ROOMS = "rooms";
+  static final String EXTRA_PHOTO_MODE = "photo_mode";
+  private boolean photoMode;
+  private long previewGeneration;
 
   private static final int BG = Color.rgb(9, 11, 16);
   private static final int SURFACE = Color.rgb(18, 23, 34);
@@ -66,6 +69,7 @@ public class BulkRoomEditActivity extends Activity {
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
+    photoMode = getIntent().getBooleanExtra(EXTRA_PHOTO_MODE, false);
     ArrayList<String> incoming = getIntent().getStringArrayListExtra(EXTRA_ROOMS);
     ArrayList<MultiRoomStore.Profile> selected = MultiRoomStore.getMany(this, incoming);
     for (MultiRoomStore.Profile profile : selected) rooms.add(profile.room);
@@ -101,6 +105,10 @@ public class BulkRoomEditActivity extends Activity {
       if (savedInstanceState.getBoolean("fixed", timesRadio.isChecked()))
         timesRadio.setChecked(true);
       else intervalRadio.setChecked(true);
+    }
+    if (photoMode && savedInstanceState == null) {
+      applySchedule.setChecked(true);
+      applyLimit.setChecked(true);
     }
     syncApplyState();
     refreshPhoto();
@@ -199,6 +207,10 @@ public class BulkRoomEditActivity extends Activity {
     root.addView(photoCard, top(9));
     root.addView(messageSection, top(24));
     root.addView(messageCard, top(9));
+    if (photoMode) {
+      messageSection.setVisibility(View.GONE);
+      messageCard.setVisibility(View.GONE);
+    }
 
     root.addView(section("전송 스케줄", "간격 또는 지정 시각을 선택한 모든 방에 적용합니다."), top(24));
     LinearLayout scheduleCard = card(SURFACE, BORDER, 18);
@@ -262,13 +274,26 @@ public class BulkRoomEditActivity extends Activity {
     limitCard.addView(limitRow, top(10));
     root.addView(limitCard, top(9));
 
-    root.addView(section("사용 상태", "선택한 방을 한 번에 켜거나 일시정지할 수 있습니다."), top(24));
+    View enabledSection = section("사용 상태", "선택한 방을 한 번에 켜거나 일시정지할 수 있습니다.");
+    root.addView(enabledSection, top(24));
     LinearLayout enabledCard = card(SURFACE, BORDER, 18);
     applyEnabled = check("사용 여부 일괄 적용");
     enabledCard.addView(applyEnabled);
     enabledCheck = check("자동전송 사용");
     enabledCard.addView(enabledCheck, top(8));
     root.addView(enabledCard, top(9));
+    if (photoMode) {
+      enabledSection.setVisibility(View.GONE);
+      enabledCard.setVisibility(View.GONE);
+      root.addView(
+          text(
+              "사진 순회용 설정입니다. 저장하면 선택 방의 기존 알림 자동전송을 끄고, 사진 여러 방 화면에서 사진 전송을 별도로 시작합니다. 다른 방 설정은"
+                  + " 유지됩니다.",
+              12,
+              false,
+              AMBER),
+          top(12));
+    }
 
     applyMessage.setOnCheckedChangeListener((b, c) -> syncApplyState());
     applySchedule.setOnCheckedChangeListener((b, c) -> syncApplyState());
@@ -302,6 +327,7 @@ public class BulkRoomEditActivity extends Activity {
     screen.setBackgroundColor(BG);
     screen.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
     screen.addView(action, new LinearLayout.LayoutParams(-1, -2));
+    PhotoSettingsLayout.apply(this, screen);
     return screen;
   }
 
@@ -366,7 +392,11 @@ public class BulkRoomEditActivity extends Activity {
                     ? "선택한 모든 방의 사진을 ‘" + photo.name + "’로 바꿉니다."
                     : photoAction == 2 ? "선택한 모든 방의 사진을 제거합니다." : "기존 사진은 유지합니다.")
                 + "\n체크한 문구·시간·한도·사용 설정만 함께 바뀝니다."
-                + (photoAction == 1 ? "\n현재 연결이 사진 자동전송을 지원하지 않는 방은 일시정지합니다." : "")
+                + (photoMode
+                    ? "\n사진 순회와 겹치지 않도록 선택 방의 기존 알림 자동전송을 끕니다."
+                    : photoAction == 1
+                        ? "\n알림 답장으로 사진을 지원하지 않는 방의 기존 알림 자동전송은 일시정지합니다. 사진 키보드 순회는 별도입니다."
+                        : "")
                 + "\n\n지금 사진을 전송하거나 사진 자동전송 지원을 활성화하는 작업은 아닙니다.")
         .setPositiveButton("적용", (d, w) -> applyNow())
         .setNegativeButton("취소", null)
@@ -376,6 +406,7 @@ public class BulkRoomEditActivity extends Activity {
   private void applyNow() {
     MultiRoomStore.BulkPatch patch = new MultiRoomStore.BulkPatch();
     patch.applyMessage = applyMessage.isChecked();
+    if (photoMode) patch.applyMessage = false;
     patch.message = messageInput.getText().toString();
     patch.applySchedule = applySchedule.isChecked();
     patch.scheduleMode =
@@ -389,6 +420,10 @@ public class BulkRoomEditActivity extends Activity {
         unlimitedCheck.isChecked() ? 0 : Math.max(1, parseInt(limitInput.getText().toString(), 8));
     patch.applyEnabled = applyEnabled.isChecked();
     patch.enabled = enabledCheck.isChecked();
+    if (photoMode) {
+      patch.applyEnabled = true;
+      patch.enabled = false;
+    }
     patch.applyMedia = photoAction != 0;
     patch.media = photo;
     patch.pauseUnsupportedPhotos = true;
@@ -448,6 +483,25 @@ public class BulkRoomEditActivity extends Activity {
       return;
     }
     for (String uri : previousUris) RoomMediaStore.releaseIfUnused(this, uri);
+    if (photoMode) {
+      if (Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false)) SendScheduler.scheduleNext(this);
+      Prefs.setStatus(this, "사진 순회 설정 저장 · " + changed + "개 방");
+      resultSummary.setText("사진 순회 설정 저장 완료 · " + changed + "개 방");
+      new AlertDialog.Builder(this)
+          .setTitle("사진 설정 저장 완료")
+          .setMessage(
+              changed
+                  + "개 방에 설정을 저장하고 선택 방의 기존 알림 자동전송을 껐습니다.\n\n"
+                  + "다음: 방 최초 준비 → 1회 시험 또는 반복 시작. 지금 사진을 보내지는 않았습니다.")
+          .setPositiveButton(
+              "사진 전송으로 돌아가기",
+              (d, w) -> {
+                setResult(RESULT_OK);
+                finish();
+              })
+          .show();
+      return;
+    }
     if (Prefs.p(this).getBoolean(Prefs.KEY_ACTIVE, false)) SendScheduler.scheduleNext(this);
     Prefs.setStatus(this, "일괄 설정 변경 · " + changed + "개 방");
     int blocked = 0, ready = 0, waiting = 0;
@@ -475,7 +529,9 @@ public class BulkRoomEditActivity extends Activity {
                 + waiting
                 + "개\n사진 자동전송 미지원 "
                 + blocked
-                + "개\n\n설정만 저장했습니다. 실제 사진 도착을 확인한 결과는 아닙니다.")
+                + "개\n\n"
+                + "사진 미지원은 알림 답장 경로의 상태입니다. 사진 키보드·여러 방 순회 지원은 별도로 준비합니다.\n"
+                + "설정만 저장했으며 실제 도착 확인은 아닙니다.")
         .setPositiveButton(
             "방 목록 보기",
             (d, w) -> {
@@ -486,16 +542,28 @@ public class BulkRoomEditActivity extends Activity {
   }
 
   private void refreshPhoto() {
-    final RoomMediaStore.Media selected = photo;
+    final long previewToken = ++previewGeneration;
+    RoomMediaStore.Media common =
+        rooms.isEmpty()
+            ? new RoomMediaStore.Media("", "", "")
+            : RoomMediaStore.get(this, rooms.get(0));
+    for (String room : rooms)
+      if (!PhotoKeyboardSession.sameMedia(common, RoomMediaStore.get(this, room))) {
+        common = new RoomMediaStore.Media("", "", "");
+        break;
+      }
+    final RoomMediaStore.Media selected = photoAction == 0 ? common : photo;
     photoStatus.setText(
         photoAction == 0
-            ? "기존 사진 유지 · 선택한 방의 사진은 바뀌지 않습니다."
+            ? selected.hasImage()
+                ? "저장된 공통 사진 · " + selected.name + " · 변경 안 함"
+                : "기존 사진 유지 · 선택한 방의 사진은 바뀌지 않습니다."
             : photoAction == 2
                 ? rooms.size() + "개 방의 사진 제거 예정"
                 : rooms.size() + "개 방에 적용할 사진 · " + photo.name);
     photoPreview.setImageDrawable(null);
-    photoPreview.setVisibility(photoAction == 1 ? View.VISIBLE : View.GONE);
-    if (photoAction == 1)
+    photoPreview.setVisibility(selected.hasImage() ? View.VISIBLE : View.GONE);
+    if (selected.hasImage())
       new Thread(
               () -> {
                 android.graphics.Bitmap bitmap = null;
@@ -522,10 +590,7 @@ public class BulkRoomEditActivity extends Activity {
                 android.graphics.Bitmap ready = bitmap;
                 main.post(
                     () -> {
-                      if (!isFinishing()
-                          && !isDestroyed()
-                          && photoAction == 1
-                          && photo.uri.equals(selected.uri)) {
+                      if (!isFinishing() && !isDestroyed() && previewToken == previewGeneration) {
                         photoPreview.setImageBitmap(ready);
                         if (ready == null) photoStatus.setText("사진 미리보기를 읽을 수 없습니다. 사진을 다시 선택하세요.");
                       } else if (ready != null) ready.recycle();

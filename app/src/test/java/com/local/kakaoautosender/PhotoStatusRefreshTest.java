@@ -122,7 +122,8 @@ public class PhotoStatusRefreshTest {
       PhotoKeyboardService.uiStatusChanged();
       Shadows.shadowOf(Looper.getMainLooper()).idle();
       assertTrue(((CheckBox) find(view, "현재 카카오톡 방과 사진을 확인했습니다")).isChecked());
-      assertNull(find(view, "저장한 일정으로 반복 시작"));
+      assertNotNull(find(view, "저장한 일정으로 반복 시작"));
+      assertFalse(find(view, "저장한 일정으로 반복 시작").isEnabled());
       assertFalse(PhotoKeyboardService.hasActiveLoop());
     } finally {
       keyboard.onDestroy();
@@ -186,7 +187,8 @@ public class PhotoStatusRefreshTest {
       update.setAccessible(true);
       update.invoke(helper, "자동화 준비 확인 완료 · 이전 기록");
       Shadows.shadowOf(Looper.getMainLooper()).idle();
-      assertNull(find(view, "10초 후 자동전송 1회 시험"));
+      assertNotNull(find(view, "10초 후 자동전송 1회 시험"));
+      assertFalse(find(view, "10초 후 자동전송 1회 시험").isEnabled());
       assertNull(find(view, "자동화 준비 확인 완료 · 이전 기록"));
       assertFalse(PhotoUiService.ready());
       assertFalse(find(view, "자동 전송 준비 · 전송 버튼 학습 (1회)").isEnabled());
@@ -213,6 +215,42 @@ public class PhotoStatusRefreshTest {
       assertTrue(root.getMeasuredHeight() <= height * 2 / 5);
     } finally {
       keyboard.onDestroy();
+    }
+  }
+
+  @Test
+  public void loadingAnotherPhotoNeverShowsOrSchedulesThePreviousSelection() throws Exception {
+    PhotoUiService helper = Robolectric.buildService(PhotoUiService.class).create().get();
+    helper.onServiceConnected();
+    foreground(helper, root());
+    PhotoUiWorkflow workflow = (PhotoUiWorkflow) field(helper, "workflow");
+    PhotoUiWorkflow.Anchor anchor = PhotoUiService.anchor(root());
+    workflow.learn(anchor);
+    workflow.observe(
+        new PhotoUiWorkflow.Button(33, "photo.Activity", "layout", "send", "Button", "전송"));
+    workflow.manualClick(33, "send");
+    workflow.returned(anchor);
+    PhotoKeyboardService keyboard =
+        Robolectric.buildService(PhotoKeyboardService.class).create().get();
+    try {
+      android.content.Context c = keyboard;
+      for (String name : new String[] {"old", "new"}) {
+        MultiRoomStore.upsert(c, new MultiRoomStore.Profile(name));
+        RoomMediaStore.set(c, name, "content://photo/" + name, "image/png", name + ".png");
+      }
+      PhotoKeyboardSelection.save(c, "old", RoomMediaStore.get(c, "old"));
+      PhotoKeyboardSession session = (PhotoKeyboardSession) field(keyboard, "session");
+      session.invalidate(true);
+      set(keyboard, "active", session.select("new", RoomMediaStore.get(c, "new")));
+      set(keyboard, "preparing", true);
+      View view = keyboard.onCreateInputView();
+      assertNotNull(find(view, "선택한 사진: new.png"));
+      assertNull(find(view, "선택한 사진: old.png"));
+      assertFalse(find(view, "저장한 일정으로 반복 시작").isEnabled());
+      assertFalse(PhotoKeyboardService.hasActiveLoop());
+    } finally {
+      keyboard.onDestroy();
+      helper.onDestroy();
     }
   }
 
