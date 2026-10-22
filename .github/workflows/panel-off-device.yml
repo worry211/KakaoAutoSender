@@ -2,7 +2,7 @@ name: Panel OFF Android device checks
 on:
   push:
     branches: [feat/android-photo-reply-actions]
-    paths: ['app/**', 'third_party/**', 'scripts/panel-device-check.py', '.github/workflows/panel-off-device.yml', 'build.gradle', 'settings.gradle']
+    paths: ['app/**', 'third_party/**', 'scripts/panel-device-check.py', 'scripts/run-android-photo-device-tests.sh', '.github/workflows/panel-off-device.yml', 'build.gradle', 'settings.gradle']
   workflow_dispatch:
 permissions:
   contents: read
@@ -36,10 +36,7 @@ jobs:
           arch: x86_64
           target: default
           disable-animations: true
-          script: |
-            trap 'adb pull /sdcard/Android/data/com.local.kakaoautosender/files/photo-ui photo-ui-screenshots || true' EXIT
-            gradle --no-daemon :app:connectedDebugAndroidTest :spake2:connectedDebugAndroidTest
-            python3 scripts/panel-device-check.py app/build/outputs/apk/debug/app-debug.apk
+          script: bash scripts/run-android-photo-device-tests.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
