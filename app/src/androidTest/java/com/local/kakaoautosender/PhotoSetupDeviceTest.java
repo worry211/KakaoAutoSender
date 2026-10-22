@@ -17,8 +17,6 @@ import android.widget.TextView;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import org.junit.After;
@@ -114,13 +112,26 @@ public class PhotoSetupDeviceTest {
   private void screenshot(String name) throws Exception {
     Bitmap bitmap = instrumentation.getUiAutomation().takeScreenshot();
     assertNotNull(bitmap);
-    File folder = new File(c.getExternalFilesDir(null), "photo-ui");
-    assertTrue(folder.isDirectory() || folder.mkdirs());
-    try (FileOutputStream stream = new FileOutputStream(new File(folder, name + ".png"))) {
+    // AGP uninstalls the tested app before the shell wrapper resumes. App-private
+    // external files disappear then, so use scoped MediaStore output on this isolated emulator.
+    android.content.ContentValues values = new android.content.ContentValues();
+    values.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name + ".png");
+    values.put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png");
+    values.put(
+        android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/KakaoMacroUiChecks");
+    values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 1);
+    android.net.Uri output =
+        c.getContentResolver()
+            .insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+    assertNotNull(output);
+    try (java.io.OutputStream stream = c.getContentResolver().openOutputStream(output)) {
       assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream));
     } finally {
       bitmap.recycle();
     }
+    values.clear();
+    values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0);
+    c.getContentResolver().update(output, values, null, null);
   }
 
   private void verify(String name, String... buttons) throws Exception {

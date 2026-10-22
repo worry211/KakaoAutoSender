@@ -305,10 +305,13 @@ final class PhotoTourController {
       phase = Phase.REGISTER_INPUT;
     } else {
       PhotoTourBindings.Binding b = PhotoTourBindings.get(app, alias);
-      if (b == null || !b.matches(current)) {
-        stop(app, "열린 채팅방이 저장한 방과 달라 사진을 보내지 않았습니다.");
+      if (b == null) {
+        stop(app, "방 준비 정보가 만료되어 사진을 보내지 않았습니다.");
         return;
       }
+      // Kakao may briefly render its previous room while handling the opening intent.
+      // Wait inside the existing navigation deadline; never bind or send to that interim room.
+      if (!b.matches(current)) return;
       String error = PhotoUiService.bindTour(b, current);
       if (!error.isEmpty()) {
         stop(app, error);

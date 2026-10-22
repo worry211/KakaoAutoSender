@@ -128,17 +128,19 @@ public class BulkRoomEditActivity extends Activity {
     header.setGravity(Gravity.CENTER_VERTICAL);
     LinearLayout titleBox = new LinearLayout(this);
     titleBox.setOrientation(LinearLayout.VERTICAL);
-    titleBox.addView(text("여러 방 한 번에 설정", 26, true, TEXT));
+    titleBox.addView(text(photoMode ? "사진 공통 설정" : "여러 방 한 번에 설정", 26, true, TEXT));
     titleBox.addView(text(rooms.size() + "개 방 선택됨", 12, false, MUTED), topWrap(5));
     header.addView(titleBox, weight());
-    header.addView(pill("BULK", Color.rgb(29, 38, 65), Color.rgb(180, 195, 255)));
+    header.addView(pill(photoMode ? "사진" : "일괄", Color.rgb(29, 38, 65), Color.rgb(180, 195, 255)));
     root.addView(header);
 
     LinearLayout info = card(Color.rgb(14, 18, 27), Color.rgb(35, 44, 61), 16);
     info.addView(text("첫 번째 선택 방의 현재 설정을 기본값으로 불러왔습니다.", 13, true, TEXT));
     info.addView(
         text(
-            "문구·시간·한도는 체크한 항목만 바뀝니다. 사진은 한 장을 골라 함께 적용할 수 있습니다. 방 연결과 전송 횟수는 유지됩니다.",
+            photoMode
+                ? "사진 한 장과 시간·하루 한도를 선택한 방에 함께 적용합니다. 기존 문구·방 연결·전송 횟수는 유지합니다."
+                : "문구·시간·한도는 체크한 항목만 바뀝니다. 사진은 한 장을 골라 함께 적용할 수 있습니다. 방 연결과 전송 횟수는 유지됩니다.",
             11,
             false,
             Color.rgb(127, 141, 166)),

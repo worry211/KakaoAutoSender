@@ -144,4 +144,31 @@ public class PhotoTourLifecycleTest {
     assertFalse(PhotoTourController.active());
     assertTrue(q.stopped);
   }
+
+  @Test
+  public void openingAnIntermediateRoomWaitsWithoutBindingSendingOrAbortingTheTour()
+      throws Exception {
+    android.content.pm.PackageInfo info = new android.content.pm.PackageInfo();
+    info.packageName = KakaoNotificationListener.KAKAO_PACKAGE;
+    info.versionCode = 7;
+    Shadows.shadowOf(c.getPackageManager()).installPackage(info);
+    PhotoTourBindings.Binding binding =
+        new PhotoTourBindings.Binding(
+            "a",
+            new PhotoUiWorkflow.Anchor(1, "editor", "expected-room"),
+            new java.util.ArrayList<>(java.util.Collections.singletonList("identity-a")),
+            7,
+            new PhotoUiWorkflow.Button(2, "photo.Activity", "layout", "send", "Button", "전송"));
+    assertEquals("", PhotoTourBindings.save(c, binding));
+    set("phase", PhotoTourController.Phase.ROUTE_OPEN);
+    set("alias", "a");
+    set("before", null);
+    set("windowObserved", true);
+    set("panelOff", false);
+    PhotoTourController.observeChat(new PhotoUiWorkflow.Anchor(3, "editor", "previous-room"));
+    assertEquals(PhotoTourController.Phase.ROUTE_OPEN, get("phase"));
+    assertTrue(PhotoTourController.active());
+    assertFalse(q.stopped);
+    assertNull(q.inFlight);
+  }
 }
