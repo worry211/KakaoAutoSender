@@ -137,15 +137,25 @@ public class PhotoSetupDeviceTest {
           }
         });
     screenshot(name + "-top");
-    instrumentation.runOnMainSync(() -> scroll(root).fullScroll(View.FOCUS_DOWN));
+    instrumentation.runOnMainSync(
+        () -> {
+          ScrollView viewport = scroll(root);
+          // fullScroll normally animates; Looper idle does not mean its future frames have
+          // finished.
+          viewport.setSmoothScrollingEnabled(false);
+          viewport.fullScroll(View.FOCUS_DOWN);
+        });
     instrumentation.waitForIdleSync();
+    SystemClock.sleep(150);
     screenshot(name + "-bottom");
     instrumentation.runOnMainSync(
         () -> {
           View back = find(root, "돌아가기");
           if (back != null) {
             Rect bounds = new Rect();
-            assertTrue(back.getGlobalVisibleRect(bounds));
+            assertTrue(
+                "Bottom action unreachable: " + name + " scrollY=" + scroll(root).getScrollY(),
+                back.getGlobalVisibleRect(bounds));
             assertTrue(bounds.top >= 0);
             assertTrue(bounds.bottom <= root.getRootView().getHeight());
           }
