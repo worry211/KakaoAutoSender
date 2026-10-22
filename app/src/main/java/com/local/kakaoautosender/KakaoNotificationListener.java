@@ -273,23 +273,33 @@ public class KakaoNotificationListener extends NotificationListenerService {
             latestMetadataSummary = parsed.metadata;
         }
 
+        String token = sbn.getKey();
+        if (token == null || token.trim().isEmpty()) {
+            token = KAKAO_PACKAGE + ":" + sbn.getId() + ":" + safe(sbn.getTag());
+        }
+        ReplyTarget newer = recentTarget(token);
+        if (newer != null && newer.notificationPostTime > sbn.getPostTime()) return;
         Notification.Action replyAction = findReplyAction(n);
-        if (replyAction == null) {
+        boolean openingOnly = replyAction == null;
+        if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0 || openingOnly && (parsed.candidateRoom == null
+                || parsed.candidateConfidence < CONFIDENCE_MEDIUM
+                || parsed.stableIdentityKeys.isEmpty()
+                || n.contentIntent == null
+                || !KAKAO_PACKAGE.equals(n.contentIntent.getCreatorPackage())
+                || (Build.VERSION.SDK_INT >= 31 && !n.contentIntent.isActivity()))) {
+            PhotoRoomRoutes.forgetNotification(token, sbn.getPostTime());
+            invalidateNotification(token, sbn.getPostTime());
             String roomText = parsed.candidateRoom == null ? "-" : parsed.candidateRoom;
             Prefs.appendLog(this, "카카오 알림 감지 · 방=" + roomText + " · 답장 액션 없음 · " + safe(parsed.sender));
             broadcastUpdated();
             return;
         }
 
-        String token = sbn.getKey();
-        if (token == null || token.trim().isEmpty()) {
-            token = KAKAO_PACKAGE + ":" + sbn.getId() + ":" + safe(sbn.getTag());
-        }
     ReplyTarget target =
         new ReplyTarget(
                 "",
-                replyAction.actionIntent,
-                PhotoReplyAction.allInputs(replyAction),
+                openingOnly ? null : replyAction.actionIntent,
+                openingOnly ? new RemoteInput[0] : PhotoReplyAction.allInputs(replyAction),
                 System.currentTimeMillis(),
                 sbn.getPostTime(),
                 token,
@@ -300,7 +310,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
                 parsed.candidateSource,
                 parsed.stableIdentityKeys,
                 false,
-                PhotoReplyAction.capture(n, replyAction), n.contentIntent);
+                openingOnly ? new PhotoReplyAction[0] : PhotoReplyAction.capture(n, replyAction), n.contentIntent);
 
         ArrayList<String> mappedAliases = Prefs.aliasesForIdentity(this, parsed.stableIdentityKeys);
         if (mappedAliases.size() > 1) {
@@ -313,13 +323,19 @@ public class KakaoNotificationListener extends NotificationListenerService {
             String liveAlias = liveAliasForToken(token);
             if (liveAlias != null && Prefs.isRoomConfirmed(this, liveAlias)) {
                 MultiRoomStore.Profile profile = MultiRoomStore.get(this, liveAlias);
+                ReplyTarget previous = findTarget(liveAlias);
+                boolean sameIdentity = previous != null
+                        && (RoomRouting.identitiesOverlap(previous.stableIdentityKeys, parsed.stableIdentityKeys)
+                            || previous.stableIdentityKeys.isEmpty() && parsed.stableIdentityKeys.isEmpty());
         if (profile != null
+            && sameIdentity
             && parsed.candidateRoom != null
                         && RoomRouting.sameTitle(profile.actualRoomName, parsed.candidateRoom)) {
                     target = bindTarget(this, liveAlias, target, false);
                     Prefs.setStatus(this, "현재 카카오 알림 세션 연결 유지: " + profile.title());
                 } else {
                     sessions.remove(normalize(liveAlias));
+                    PhotoRoomRoutes.forget(liveAlias);
                     Prefs.setStatus(this, "방 식별 정보 변경 감지 · 기존 실시간 연결 안전 중지");
                 }
             } else if (parsed.candidateRoom != null) {
@@ -336,6 +352,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         }
 
         rememberRecent(target);
+        PhotoRoomRoutes.rememberVerified(this, target);
         ReplyTarget latest = latestReplyTarget;
         if (latest == null || target.notificationPostTime >= latest.notificationPostTime) {
             latestReplyTarget = target;
@@ -778,6 +795,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         if (!canBindTarget(context, target, name)) return false;
         ReplyTarget bound = bindTarget(context, name, target, true);
         rememberBoundReplacement(bound);
+        PhotoRoomRoutes.rememberVerified(context, bound);
         latestReplyTarget = bound;
         Prefs.setStatus(context, "최근 알림을 직접 확인해 방에 연결: " + name + persistenceText(bound));
         return true;
@@ -791,6 +809,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         if (!canBindTarget(context, target, name)) return false;
         ReplyTarget bound = bindTarget(context, name, target, true);
         rememberBoundReplacement(bound);
+        PhotoRoomRoutes.rememberVerified(context, bound);
         ReplyTarget latest = latestReplyTarget;
         if (latest != null && latest.token.equals(bound.token)) latestReplyTarget = bound;
         Prefs.setStatus(context, "선택한 카카오 알림을 방에 연결: " + name + persistenceText(bound));
@@ -799,6 +818,10 @@ public class KakaoNotificationListener extends NotificationListenerService {
 
     private static boolean canBindTarget(Context context, ReplyTarget target, String requestedAlias) {
         ArrayList<String> aliases = Prefs.aliasesForIdentity(context, target.stableIdentityKeys);
+        if (Prefs.hasBindingForAlias(context, requestedAlias) && aliases.isEmpty()) {
+            Prefs.setStatus(context, "기존 방 고유 식별자와 다른 알림입니다. 같은 제목만으로 연결을 바꾸지 않았습니다.");
+            return false;
+        }
         if (aliases.size() > 1) {
             Prefs.setStatus(context, "방 고유 식별자 충돌 · 연결을 초기화한 뒤 다시 연결해 주세요.");
             return false;
@@ -823,6 +846,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
     }
 
     static boolean unbindRoom(Context context, String room) {
+        PhotoRoomRoutes.forget(room);
         String key = normalize(room);
         if (key.isEmpty()) return false;
         boolean removed = sessions.remove(key) != null;
@@ -907,6 +931,34 @@ public class KakaoNotificationListener extends NotificationListenerService {
 
     static boolean isListenerConnected() {
         return instance != null;
+    }
+
+    static boolean notificationAccessEnabled(Context c) {
+        String enabled = android.provider.Settings.Secure.getString(
+                c.getContentResolver(), "enabled_notification_listeners");
+        if (enabled == null) return false;
+        ComponentName expected = new ComponentName(c, KakaoNotificationListener.class);
+        for (String value : enabled.split(":")) {
+            if (expected.equals(ComponentName.unflattenFromString(value))) return true;
+        }
+        return false;
+    }
+
+    static ArrayList<SessionEntry> candidatesForRoom(Context c, MultiRoomStore.Profile p) {
+        ArrayList<SessionEntry> identified = new ArrayList<>();
+        ArrayList<SessionEntry> named = new ArrayList<>();
+        for (SessionEntry entry : candidateSessionEntries()) {
+            if (identityBindingConflictForToken(c, entry.token)) continue;
+            String mapped = mappedAliasForToken(c, entry.token);
+            String live = liveAliasForToken(entry.token);
+            if (RoomRouting.sameTitle(p.room, mapped) || RoomRouting.sameTitle(p.room, live)) {
+                identified.add(entry);
+            } else if (mapped == null && live == null && !Prefs.hasBindingForAlias(c, p.room)
+                    && RoomRouting.sameTitle(p.actualRoomName, entry.suggestedRoom)) {
+                named.add(entry);
+            }
+        }
+        return identified.isEmpty() ? named : identified;
     }
 
     static void requestRefresh() {
@@ -1049,6 +1101,7 @@ public class KakaoNotificationListener extends NotificationListenerService {
         target.notificationPostTime > 0 ? target.notificationPostTime : target.capturedAt;
         String time = new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date(timeValue));
         StringBuilder sb = new StringBuilder(time);
+        if (target.pendingIntent == null) sb.append(" · 사진용 방 열기 · 문자 답장 없음");
         if (target.verified && target.label != null && !target.label.trim().isEmpty()) {
             sb.append(" · 확인됨 ").append(target.label);
         } else if (target.candidateRoom != null) {

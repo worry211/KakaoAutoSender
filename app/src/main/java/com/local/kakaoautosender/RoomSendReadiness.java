@@ -52,7 +52,8 @@ final class RoomSendReadiness {
     if (aliases.size() > 1 || (aliases.size() == 1 && !RoomRouting.sameTitle(aliases.get(0), room)))
       return result(Kind.CONNECTION, "방 연결 확인 필요", "방 연결 정보가 겹칩니다. 대상 방을 다시 연결하세요.", false, false);
     if (!photo)
-      return KakaoMessageSender.freeFormInputs(target.remoteInputs).length > 0
+      return target.pendingIntent != null
+              && KakaoMessageSender.freeFormInputs(target.remoteInputs).length > 0
           ? result(Kind.TEXT_READY, "문자 자동전송 준비", "문자 입력 연결이 확인됐습니다.", true, false)
           : result(Kind.CONNECTION, "문자 입력 없음", "현재 알림은 문자 답장을 지원하지 않습니다.", false, false);
     if (PhotoReplyAction.select(target.photoActions, media.mime, false) == null)

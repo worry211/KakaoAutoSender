@@ -83,6 +83,36 @@ public class PhotoFeatureVisibilityTest {
   }
 
   @Test
+  public void roomEditorExposesPhotoTourAndCarriesTheSelectedRoomAndSavedContent() {
+    MultiRoomStore.Profile p = new MultiRoomStore.Profile("route-editor");
+    p.actualRoomName = "시험 방";
+    p.message = "saved text";
+    MultiRoomStore.upsert(c, p);
+    RoomMediaStore.set(c, p.room, "content://photos/saved", "image/png", "saved.png");
+    var intent =
+        new android.content.Intent(c, RoomEditorActivity.class)
+            .putExtra(RoomEditorActivity.EXTRA_ROOM, p.room);
+    var activity = Robolectric.buildActivity(RoomEditorActivity.class, intent).create();
+    try {
+      View button = find(activity.get().findViewById(android.R.id.content), "사진 예약·반복 / 여러 방 전송");
+      assertNotNull(button);
+      for (View current = button;
+          current != null;
+          current = current.getParent() instanceof View ? (View) current.getParent() : null)
+        assertEquals(View.VISIBLE, current.getVisibility());
+      button.performClick();
+      assertEquals(
+          PhotoTourActivity.class.getName(),
+          Shadows.shadowOf(activity.get()).getNextStartedActivity().getComponent().getClassName());
+      assertEquals("[\"route-editor\"]", Prefs.p(c).getString("photo_tour_selection_v1", ""));
+      assertEquals("saved text", MultiRoomStore.get(c, p.room).message);
+      assertEquals("content://photos/saved", RoomMediaStore.get(c, p.room).uri);
+    } finally {
+      activity.destroy();
+    }
+  }
+
+  @Test
   public void supportReportDoesNotCopyImageUrisMessagesOrLicenseKeys() {
     MultiRoomStore.Profile p = new MultiRoomStore.Profile("fixture");
     p.message = "PRIVATE_MESSAGE_MARKER";

@@ -148,6 +148,16 @@ public final class PhotoKeyboardService extends InputMethodService {
     return true;
   }
 
+  static boolean tourInputAvailable() {
+    PhotoKeyboardService s = instance.get();
+    android.view.inputmethod.EditorInfo editor = s == null ? null : s.getCurrentInputEditorInfo();
+    return s != null
+        && s.isInputViewShown()
+        && s.getCurrentInputConnection() != null
+        && editor != null
+        && KakaoNotificationListener.KAKAO_PACKAGE.equals(editor.packageName);
+  }
+
   static String startTourOnce(MultiRoomStore.Profile p, RoomMediaStore.Media media) {
     PhotoKeyboardService s = instance.get();
     if (s == null) return "사진 키보드가 연결되지 않았습니다. 사진 키보드를 기본 입력기로 선택하세요.";

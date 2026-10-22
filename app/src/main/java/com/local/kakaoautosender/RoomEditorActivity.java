@@ -204,12 +204,15 @@ public class RoomEditorActivity extends Activity {
         sharePhotoButton = secondaryButton("카카오톡에서 사진 직접 보내기");
         sharePhotoButton.setOnClickListener(v -> sharePhoto());
         imageCard.addView(sharePhotoButton, top(10));
+        Button photoTour = primaryButton("사진 예약·반복 / 여러 방 전송");
+        photoTour.setOnClickListener(v -> openPhotoTour());
+        imageCard.addView(photoTour, top(10));
         Button keyboardSetup = secondaryButton("사진 키보드 설정 · 다른 전송 방식");
         keyboardSetup.setOnClickListener(v -> startActivity(new Intent(this, PhotoKeyboardSetupActivity.class)));
         LinearLayout advancedPhoto = new LinearLayout(this);
         advancedPhoto.setOrientation(LinearLayout.VERTICAL);
         advancedPhoto.setVisibility(View.GONE);
-        advancedPhoto.addView(text("현재 열린 방 하나에 사용하는 시험 기능입니다. 여러 방 자동전송을 지원하는 방식은 아닙니다.", 11, false, AMBER));
+        advancedPhoto.addView(text("키보드·접근성 권한을 확인합니다. 한 방 또는 여러 방 사진 예약은 위 ‘사진 예약·반복 / 여러 방 전송’에서 시작하세요.", 11, false, AMBER));
         advancedPhoto.addView(keyboardSetup, top(8));
         Button advancedToggle = secondaryButton("고급 사진 기능 · 시험 기능 보기");
         advancedToggle.setOnClickListener(v -> {
@@ -597,6 +600,18 @@ public class RoomEditorActivity extends Activity {
         if (p == null) return;
         String draftMessage = messageInput.getText().toString();
         RoomMediaStore.Media media = RoomMediaStore.get(this, routeAlias);
+        if (media.hasImage() && PhotoReplyAction.select(
+                KakaoNotificationListener.findTarget(routeAlias) == null ? new PhotoReplyAction[0]
+                        : KakaoNotificationListener.findTarget(routeAlias).photoActions,
+                media.mime, !draftMessage.trim().isEmpty()) == null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("사진 전송 메뉴에서 시험하세요")
+                    .setMessage("이 방의 알림 답장은 사진을 받지 않습니다. 저장한 사진·시간으로 사진 전송 메뉴를 열고, 방 최초 준비 후 1회 시험을 시작하세요. 사진 전송에는 저장 문구를 붙이지 않습니다.")
+                    .setPositiveButton("사진 전송 열기", (d, w) -> openPhotoTour())
+                    .setNegativeButton("닫기", null)
+                    .show();
+            return;
+        }
         if (draftMessage.trim().isEmpty() && !media.hasImage()) {
             toast("보낼 메시지 또는 사진을 먼저 설정해 주세요.");
             return;
@@ -628,11 +643,7 @@ public class RoomEditorActivity extends Activity {
         MultiRoomStore.Profile p = MultiRoomStore.get(this, routeAlias);
         if (p == null) return;
         KakaoNotificationListener.requestRefresh();
-        ArrayList<KakaoNotificationListener.SessionEntry> all = KakaoNotificationListener.candidateSessionEntries();
-        ArrayList<KakaoNotificationListener.SessionEntry> matches = new ArrayList<>();
-        for (KakaoNotificationListener.SessionEntry e : all) {
-            if (e.suggestedRoom != null && e.suggestedRoom.trim().equalsIgnoreCase(p.actualRoomName)) matches.add(e);
-        }
+        ArrayList<KakaoNotificationListener.SessionEntry> matches = KakaoNotificationListener.candidatesForRoom(this, p);
         if (matches.isEmpty()) {
             toast("이 방의 새 알림이 없습니다. 실제 방에서 메시지를 하나 받은 뒤 다시 확인해 주세요.");
             return;
@@ -646,8 +657,15 @@ public class RoomEditorActivity extends Activity {
             return;
         }
         boolean ok = KakaoNotificationListener.bindRecentTokenToRoom(this, matches.get(0).token, routeAlias);
-        toast(ok ? "방 연결을 다시 확인했습니다." : "알림 세션이 만료되었습니다.");
+        toast(ok ? "방 연결을 다시 확인했습니다." : "기존 방 식별자와 현재 알림을 확인하지 못했습니다. 메인의 새 방 연결에서 확인하세요.");
         refreshConnection();
+    }
+
+    private void openPhotoTour() {
+        if (!saveProfile(true)) return;
+        Prefs.p(this).edit().putString("photo_tour_selection_v1",
+                new org.json.JSONArray(java.util.Collections.singletonList(routeAlias)).toString()).apply();
+        startActivity(new Intent(this, PhotoTourActivity.class));
     }
 
     private void deleteProfile() {
@@ -674,7 +692,10 @@ public class RoomEditorActivity extends Activity {
         if (connectionStatus == null) return;
         boolean live = KakaoNotificationListener.hasLiveSession(routeAlias);
         boolean stored = KakaoNotificationListener.hasStoredBinding(this, routeAlias);
-        connectionStatus.setText(live ? "●  연결됨 · 지금 전송 가능"
+        KakaoNotificationListener.ReplyTarget target = KakaoNotificationListener.findTarget(routeAlias);
+        boolean textReply = live && target != null && target.pendingIntent != null
+                && KakaoMessageSender.freeFormInputs(target.remoteInputs).length > 0;
+        connectionStatus.setText(live ? (textReply ? "●  알림 문자 답장 연결됨 · 사진은 별도 준비" : "●  사진용 방 열기 연결됨 · 문자 답장 미지원")
                 : stored ? "●  복구 대기 · 새 알림이 오면 자동 복구"
                 : "●  연결 필요 · 이 방에서 새 메시지를 받아 주세요");
         connectionStatus.setTextColor(live ? GREEN : stored ? AMBER : RED);

@@ -21,6 +21,17 @@ public class PhotoTourLifecycleTest {
   private Context c;
   private PhotoTourQueue q;
 
+  @org.robolectric.annotation.Implements(android.inputmethodservice.InputMethodService.class)
+  public static class InputProbe extends org.robolectric.shadows.ShadowService {
+    static int polls;
+
+    @org.robolectric.annotation.Implementation
+    protected boolean isInputViewShown() {
+      polls++;
+      return false;
+    }
+  }
+
   private void set(String name, Object value) throws Exception {
     Field f = PhotoTourController.class.getDeclaredField(name);
     f.setAccessible(true);
@@ -170,5 +181,61 @@ public class PhotoTourLifecycleTest {
     assertTrue(PhotoTourController.active());
     assertFalse(q.stopped);
     assertNull(q.inFlight);
+  }
+
+  @Test
+  @Config(shadows = InputProbe.class)
+  public void alreadyOpenRoomPreparesWithoutNewImeCallbackAndOldPollStopsAfterCancellation()
+      throws Exception {
+    var helper = Robolectric.buildService(PhotoUiService.class).create();
+    var keyboard = Robolectric.buildService(PhotoKeyboardService.class).create();
+    try {
+      Field instance = PhotoUiService.class.getDeclaredField("instance");
+      instance.setAccessible(true);
+      instance.set(null, new java.lang.ref.WeakReference<>(helper.get()));
+      var root = android.view.accessibility.AccessibilityNodeInfo.obtain();
+      root.setPackageName(KakaoNotificationListener.KAKAO_PACKAGE);
+      root.setBoundsInScreen(new android.graphics.Rect(0, 0, 1080, 2400));
+      var title = android.view.accessibility.AccessibilityNodeInfo.obtain();
+      title.setViewIdResourceName("com.kakao.talk:id/title");
+      title.setVisibleToUser(true);
+      title.setText("시험 방");
+      title.setBoundsInScreen(new android.graphics.Rect(0, 30, 800, 110));
+      var editor = android.view.accessibility.AccessibilityNodeInfo.obtain();
+      editor.setViewIdResourceName("com.kakao.talk:id/message");
+      editor.setEditable(true);
+      editor.setEnabled(true);
+      editor.setVisibleToUser(true);
+      Shadows.shadowOf(root).addChild(title);
+      Shadows.shadowOf(root).addChild(editor);
+      var window = android.view.accessibility.AccessibilityWindowInfo.obtain();
+      Shadows.shadowOf(window)
+          .setType(android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION);
+      Shadows.shadowOf(window).setFocused(true);
+      Shadows.shadowOf(window).setActive(true);
+      Shadows.shadowOf(window).setRoot(root);
+      Shadows.shadowOf(helper.get()).setWindows(java.util.Collections.singletonList(window));
+      var anchor = PhotoUiService.tourAnchor();
+      assertNotNull(anchor);
+      set("phase", PhotoTourController.Phase.REGISTER_OPEN);
+      set("queue", null);
+      set("alias", "a");
+      set("before", anchor);
+      set("windowObserved", true);
+      set("panelOff", false);
+      InputProbe.polls = 0;
+      PhotoTourController.observeChat(anchor);
+      assertEquals(PhotoTourController.Phase.REGISTER_INPUT, get("phase"));
+      Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(250));
+      assertTrue(InputProbe.polls > 0);
+      int previous = InputProbe.polls;
+      PhotoTourController.stop(c, "cancel registration");
+      Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1));
+      assertEquals(previous, InputProbe.polls);
+      assertFalse(PhotoTourController.active());
+    } finally {
+      keyboard.destroy();
+      helper.destroy();
+    }
   }
 }

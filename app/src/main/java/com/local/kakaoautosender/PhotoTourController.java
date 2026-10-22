@@ -123,8 +123,9 @@ final class PhotoTourController {
     if (!Prefs.isRoomConfirmed(c, room)
         || target == null
         || !target.verified
-        || !RoomRouting.sameTitle(room, target.label)
-        || target.stableIdentityKeys.isEmpty()) return "이 방의 새 카카오톡 알림 연결이 필요합니다.";
+        || !RoomRouting.sameTitle(room, target.label)) return "이 방의 새 카카오톡 알림을 메인의 새 방 연결에서 확인하세요.";
+    if (target.stableIdentityKeys.isEmpty())
+      return "이 알림에는 방 고유 식별자가 없어 사진 자동 순회에 연결할 수 없습니다. 카카오톡 알림 내용을 표시하고 대상 방의 새 알림을 다시 연결하세요.";
     ArrayList<String> aliases = Prefs.aliasesForIdentity(c, target.stableIdentityKeys);
     if (aliases.size() != 1 || !RoomRouting.sameTitle(aliases.get(0), room))
       return "방 식별 정보가 겹치거나 변경됐습니다.";
@@ -294,7 +295,13 @@ final class PhotoTourController {
   static void observeChat(PhotoUiWorkflow.Anchor current) {
     if (app == null || !windowObserved || current == null) return;
     if (phase != Phase.REGISTER_OPEN && phase != Phase.ROUTE_OPEN) return;
-    boolean known = alias.equals(lastAlias) && lastAnchor != null && lastAnchor.same(before);
+    PhotoTourBindings.Binding saved = PhotoTourBindings.get(app, alias);
+    boolean known =
+        phase == Phase.REGISTER_OPEN
+            || (saved != null
+                && saved.matches(current)
+                && PhotoTourBindings.identityMatches(app, saved, route))
+            || (alias.equals(lastAlias) && lastAnchor != null && lastAnchor.same(before));
     if (!freshNavigation(before, current, windowObserved, known)) return;
     if (!PhotoKeyboardSession.unlocked(app) || !DeliveryGate.allowed(app) || !panelReady()) {
       stop(app, "화면 또는 라이선스로 사진 순회 중지");
@@ -321,6 +328,21 @@ final class PhotoTourController {
     }
     PhotoUiService.focusTourEditor();
     PhotoKeyboardService.showForTour();
+    awaitInput(epoch);
+  }
+
+  // Showing an already visible IME need not produce another onStartInputView callback.
+  // Keep one bounded poll owned by this navigation; old polls cannot act on a later room.
+  private static void awaitInput(long navigation) {
+    main.postDelayed(
+        () -> {
+          if (epoch != navigation || (phase != Phase.REGISTER_INPUT && phase != Phase.ROUTE_INPUT))
+            return;
+          inputReady();
+          if (epoch == navigation && (phase == Phase.REGISTER_INPUT || phase == Phase.ROUTE_INPUT))
+            awaitInput(navigation);
+        },
+        200L);
   }
 
   static void inputReady() {
@@ -332,8 +354,8 @@ final class PhotoTourController {
     if (phase == Phase.REGISTER_INPUT
         && registrationAnchor != null
         && registrationAnchor.same(PhotoUiService.tourAnchor())) {
-      if (PhotoKeyboardService.prepareTourPhoto(alias)) phase = Phase.REGISTER_READY;
-      else main.postDelayed(PhotoTourController::inputReady, 200L);
+      if (PhotoKeyboardService.tourInputAvailable() && PhotoKeyboardService.prepareTourPhoto(alias))
+        phase = Phase.REGISTER_READY;
     } else if (phase == Phase.ROUTE_INPUT) {
       PhotoTourBindings.Binding b = PhotoTourBindings.get(app, alias);
       if (b == null
@@ -342,6 +364,7 @@ final class PhotoTourController {
         stop(app, "현재 방 또는 빈 메시지 입력창을 확인하지 못해 사진을 보내지 않았습니다.");
         return;
       }
+      if (!PhotoKeyboardService.tourInputAvailable()) return;
       phase = Phase.SENDING;
       String error = PhotoKeyboardService.startTourOnce(job.profile, job.media);
       if (!error.isEmpty()) {

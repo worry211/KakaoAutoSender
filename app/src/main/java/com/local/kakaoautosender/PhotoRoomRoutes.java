@@ -20,6 +20,20 @@ final class PhotoRoomRoutes {
     }
   }
 
+  /** Capture at verification, before opening the chat can dismiss its notification. */
+  static void rememberVerified(Context c, KakaoNotificationListener.ReplyTarget target) {
+    if (target == null || !target.verified) return;
+    synchronized (DeliveryGate.LOCK) {
+      String room = target.label;
+      if (!PhotoTourController.routeError(c, room, target).isEmpty()) {
+        routes.remove(room);
+        return;
+      }
+      long version = PhotoTourBindings.version(c);
+      if (version >= 0) routes.put(room, new Entry(target, version));
+    }
+  }
+
   static KakaoNotificationListener.ReplyTarget get(Context c, String room) {
     synchronized (DeliveryGate.LOCK) {
       KakaoNotificationListener.ReplyTarget live = KakaoNotificationListener.findTarget(room);
@@ -54,6 +68,17 @@ final class PhotoRoomRoutes {
   static void forget(String room) {
     synchronized (DeliveryGate.LOCK) {
       routes.remove(room);
+    }
+  }
+
+  static void forgetNotification(String token, long postTime) {
+    synchronized (DeliveryGate.LOCK) {
+      routes
+          .entrySet()
+          .removeIf(
+              e ->
+                  e.getValue().target.token.equals(token)
+                      && e.getValue().target.notificationPostTime <= postTime);
     }
   }
 

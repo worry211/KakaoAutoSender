@@ -178,7 +178,9 @@ public class MainActivityV4 extends Activity {
         sectionRow.addView(roomHeading, weight());
         Button refresh = tertiaryButton("↻ 새로고침");
         refresh.setOnClickListener(v -> {
-            KakaoNotificationListener.requestReconnect(this);
+            if (!KakaoNotificationListener.isListenerConnected()) {
+                KakaoNotificationListener.requestReconnect(this);
+            }
             KakaoNotificationListener.requestRefresh();
             refreshUi();
             toast("카카오 방 연결 상태를 새로 확인했습니다.");
@@ -936,12 +938,24 @@ public class MainActivityV4 extends Activity {
     }
 
     private void showAddCandidates() {
+        if (!isNotificationAccessEnabled()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("방 연결에 알림 접근 권한이 필요합니다")
+                    .setMessage("알림 접근에서 카카오매크로를 허용한 뒤, 대상 카카오톡 방의 새 메시지 알림을 받아 주세요.")
+                    .setPositiveButton("알림 접근 설정", (d, w) -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)))
+                    .setNegativeButton("닫기", null)
+                    .show();
+            return;
+        }
+        if (!KakaoNotificationListener.isListenerConnected()) {
+            KakaoNotificationListener.requestReconnect(this);
+        }
         KakaoNotificationListener.requestRefresh();
         final ArrayList<KakaoNotificationListener.SessionEntry> entries = KakaoNotificationListener.candidateSessionEntries();
         if (entries.isEmpty()) {
             new AlertDialog.Builder(this)
                     .setTitle("연결할 방을 찾지 못했습니다")
-                    .setMessage("연결하려는 오픈채팅방에서 새 메시지를 하나 받은 뒤 다시 시도해 주세요.\n\n최근 알림을 직접 확인해야 한다면 ‘직접 연결’을 사용할 수 있습니다.")
+                    .setMessage("카카오톡에서 대상 방의 알림을 켜고, 방 화면에서 나온 뒤 새 메시지를 받아 주세요. 휴대폰 알림창에 해당 방의 알림이 남아 있는 상태에서 다시 연결하세요.\n\n방 이름을 숨기는 알림 설정에서는 방을 식별하지 못할 수 있습니다. 최근 알림은 ‘직접 연결’에서 확인할 수 있습니다.")
                     .setPositiveButton("직접 연결", (d, w) -> showAdvancedManualAdd())
                     .setNegativeButton("닫기", null)
                     .show();
@@ -1481,8 +1495,7 @@ public class MainActivityV4 extends Activity {
     }
 
     private boolean isNotificationAccessEnabled() {
-        String enabled = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
-        return enabled != null && enabled.contains(new ComponentName(this, KakaoNotificationListener.class).flattenToString());
+        return KakaoNotificationListener.notificationAccessEnabled(this);
     }
 
     private String appVersion() {

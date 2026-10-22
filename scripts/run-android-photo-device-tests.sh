@@ -10,5 +10,5 @@ trap pull_screenshots EXIT
 gradle --no-daemon :app:connectedDebugAndroidTest :spake2:connectedDebugAndroidTest
 pull_screenshots
 trap - EXIT
-test "$(find photo-ui-screenshots -type f -name '*.png' | wc -l)" -eq 8
+test "$(find photo-ui-screenshots -type f -name '*.png' | wc -l)" -eq 10
 python3 scripts/panel-device-check.py app/build/outputs/apk/debug/app-debug.apk

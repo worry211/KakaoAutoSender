@@ -208,6 +208,14 @@ public class PhotoSetupDeviceTest {
   }
 
   @Test
+  public void roomEditorShowsPhotoSchedulingWithoutOpeningAdvancedSettings() throws Exception {
+    launch(
+        new Intent(c, RoomEditorActivity.class)
+            .putExtra(RoomEditorActivity.EXTRA_ROOM, "fixture-a"));
+    verify("room-editor", "사진 예약·반복 / 여러 방 전송", "카카오톡에서 사진 직접 보내기");
+  }
+
+  @Test
   public void commonPhotoEditorHasVisibleApplyAndNoMessageEditing() throws Exception {
     launch(
         new Intent(c, BulkRoomEditActivity.class)
