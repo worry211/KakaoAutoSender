@@ -66,7 +66,7 @@ public class SendAlarmReceiver extends BroadcastReceiver {
                         MultiRoomStore.BulkPatch pause = new MultiRoomStore.BulkPatch();
                         pause.applyEnabled = true; pause.enabled = false;
                         MultiRoomStore.applyBulkPatch(app, java.util.Collections.singletonList(profile.room), pause);
-                        Prefs.setStatus(app, "사진 자동전송 미지원 · " + visibleName + " 일시정지 · 사진 설정은 유지됨");
+                        Prefs.setStatus(app, "알림 답장 사진 미지원 · " + visibleName + " 알림 예약 일시정지 · 사진 설정 유지 · 사진 전송 메뉴에서 별도 준비");
                         SendScheduler.scheduleNext(app);
                         return;
                     }

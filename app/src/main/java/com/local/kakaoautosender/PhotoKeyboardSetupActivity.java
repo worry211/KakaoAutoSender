@@ -237,7 +237,10 @@ public final class PhotoKeyboardSetupActivity extends Activity {
     Button b = new Button(this);
     b.setText(label);
     b.setAllCaps(false);
+    PhotoControls.style(b, label);
     b.setOnClickListener(v -> click.run());
-    p.addView(b);
+    LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+    params.bottomMargin = Math.round(8 * getResources().getDisplayMetrics().density);
+    p.addView(b, params);
   }
 }

@@ -84,7 +84,7 @@ final class PhotoKeyboardSession {
       InputConnection connection,
       boolean recipientConfirmed) {
     synchronized (DeliveryGate.LOCK) {
-      if (!current(ticket)) return "선택이 만료되었습니다. 사진을 다시 선택하세요.";
+      if (!current(ticket)) return "전송 확인이 만료되었습니다. 저장한 사진을 다시 준비하세요.";
       // Consume before calling any external code, including a rejecting or throwing editor.
       pending = null;
       if (!recipientConfirmed) return "현재 카카오톡 방을 먼저 확인하세요.";

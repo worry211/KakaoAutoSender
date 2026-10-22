@@ -224,6 +224,7 @@ public final class PanelOffActivity extends Activity {
     Button b = new Button(this);
     b.setText(label);
     b.setAllCaps(false);
+    PhotoControls.style(b, label);
     LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
     params.bottomMargin = 14;
     p.addView(b, params);

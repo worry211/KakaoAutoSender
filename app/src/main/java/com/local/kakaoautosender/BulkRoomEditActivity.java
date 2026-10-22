@@ -520,7 +520,7 @@ public class BulkRoomEditActivity extends Activity {
             + ready
             + " · 연결/내용 확인 "
             + waiting
-            + " · 사진 자동전송 미지원 "
+            + " · 알림 답장 사진 미지원 "
             + blocked);
     new AlertDialog.Builder(this)
         .setTitle(changed + "개 방 설정 저장 완료")
@@ -529,7 +529,7 @@ public class BulkRoomEditActivity extends Activity {
                 + ready
                 + "개\n연결·내용 확인 필요 "
                 + waiting
-                + "개\n사진 자동전송 미지원 "
+                + "개\n알림 답장 사진 미지원 "
                 + blocked
                 + "개\n\n"
                 + "사진 미지원은 알림 답장 경로의 상태입니다. 사진 키보드·여러 방 순회 지원은 별도로 준비합니다.\n"

@@ -42,8 +42,10 @@ final class RoomSendReadiness {
     if (target == null || !target.verified || !RoomRouting.sameTitle(room, target.label))
       return result(
           Kind.CONNECTION,
-          "연결 확인 필요",
-          photo ? "사진 저장됨 · 이 방의 새 알림을 연결해야 자동전송 지원을 확인할 수 있습니다." : "이 방의 새 알림을 연결하세요.",
+          photo ? "알림 답장 연결 필요" : "연결 확인 필요",
+          photo
+              ? "사진은 저장되어 있습니다. 알림 답장 확인에는 새 알림이 필요하며, 사진 키보드·여러 방 순회는 사진 전송 메뉴에서 별도로 준비합니다."
+              : "이 방의 새 알림을 연결하세요.",
           false,
           false);
     java.util.ArrayList<String> aliases = Prefs.aliasesForIdentity(c, target.stableIdentityKeys);
@@ -56,14 +58,15 @@ final class RoomSendReadiness {
     if (PhotoReplyAction.select(target.photoActions, media.mime, false) == null)
       return result(
           Kind.PHOTO_BLOCKED,
-          "사진 자동전송 미지원",
-          "현재 알림 연결은 사진을 받지 않습니다. 메인 화면의 ‘사진 여러 방 전송’에서 방 최초 준비와 순회 전송을 사용할 수 있습니다. 화면 OFF 전송을 뜻하지 않습니다.",
+          "알림 답장 사진 미지원",
+          "현재 알림 연결은 사진을 받지 않습니다. 메인 화면의 ‘사진 여러 방 전송’에서 방 최초 준비와 순회 전송을 사용할 수 있습니다. 화면 OFF 전송을 뜻하지"
+              + " 않습니다.",
           false,
           true);
     if (PhotoReplyAction.select(target.photoActions, media.mime, text) == null)
       return result(
           Kind.PHOTO_BLOCKED,
-          "사진+문구 자동전송 미지원",
+          "알림 답장 사진+문구 미지원",
           "이 연결은 사진과 문구를 함께 받지 않습니다. 문구를 지우거나 직접 보내기를 이용하세요.",
           false,
           true);

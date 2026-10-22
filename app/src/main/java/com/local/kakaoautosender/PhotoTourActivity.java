@@ -251,6 +251,7 @@ public final class PhotoTourActivity extends Activity {
     Button b = new Button(this);
     b.setText(label);
     b.setAllCaps(false);
+    PhotoControls.style(b, label);
     b.setOnClickListener(v -> action.run());
     LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
     params.bottomMargin = Math.round(10 * getResources().getDisplayMetrics().density);

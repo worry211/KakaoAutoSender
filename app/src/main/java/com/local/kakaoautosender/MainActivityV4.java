@@ -155,8 +155,8 @@ public class MainActivityV4 extends Activity {
 
         LinearLayout masterButtons = new LinearLayout(this);
         masterButtons.setOrientation(LinearLayout.HORIZONTAL);
-        startButton = primaryButton("자동전송 시작");
-        startButton.setContentDescription("전체 자동전송 시작 또는 설정 계속하기");
+        startButton = primaryButton("알림 자동전송 시작");
+        startButton.setContentDescription("문자·사진 알림 답장 자동전송 시작 또는 설정 계속하기");
         startButton.setOnClickListener(v -> startAll());
         masterButtons.addView(startButton, new LinearLayout.LayoutParams(0, dp(54), 1.55f));
         stopButton = dangerSecondaryButton("전체 중단");
@@ -404,7 +404,7 @@ public class MainActivityV4 extends Activity {
             masterStatus.setTextColor(GREEN);
             stylePill(masterBadge, "PHOTO", Color.rgb(25, 49, 42), Color.rgb(122, 231, 176));
         } else if (active && blockedPhotos > 0) {
-            masterStatus.setText("사진 자동전송 미지원 방 " + blockedPhotos + "개 · 방 상태 확인 필요");
+            masterStatus.setText("알림 답장 사진 미지원 " + blockedPhotos + "개 · 사진 전송 메뉴 이용");
             masterStatus.setTextColor(AMBER);
             stylePill(masterBadge, "CHECK", Color.rgb(55, 45, 27), AMBER);
         } else if (active && usable < enabled) {
@@ -453,10 +453,10 @@ public class MainActivityV4 extends Activity {
 
         startButton.setEnabled(!active);
         stopButton.setEnabled(active || (PhotoKeyboardService.hasActiveLoop() || PhotoTourController.active()));
-        if (active) startButton.setText("자동전송 실행 중");
+        if (active) startButton.setText("알림 자동전송 실행 중");
         else if (!access) startButton.setText("알림 접근 필요");
         else if (usable == 0) startButton.setText("방 설정을 완료하세요");
-        else startButton.setText("자동전송 시작");
+        else startButton.setText("알림 자동전송 시작");
         startButton.setAlpha(startButton.isEnabled() ? 1f : 0.46f);
         stopButton.setAlpha(active || (PhotoKeyboardService.hasActiveLoop() || PhotoTourController.active()) ? 1f : 0.46f);
 
@@ -1336,14 +1336,18 @@ public class MainActivityV4 extends Activity {
         }
         if (!unsupported.isEmpty()) {
             if (unsupported.size() > 6) blockedNames.append("외 ").append(unsupported.size() - 6).append("개 방\n");
-            AlertDialog.Builder info = new AlertDialog.Builder(this).setTitle("사진 자동전송을 지원하지 않는 방이 있습니다")
-                .setMessage(blockedNames + "\n사진 설정은 저장돼 있지만 현재 연결로 자동전송할 수 없습니다.")
+            AlertDialog.Builder info = new AlertDialog.Builder(this).setTitle("알림 답장으로 사진을 받지 않는 방")
+                .setMessage(blockedNames + "\n사진 설정은 저장되어 있습니다. 사진 키보드·예약·여러 방 순회는 ‘사진 여러 방 전송’에서 준비하세요.")
                 .setNegativeButton("닫기", null);
             if (eligible > 0) info.setPositiveButton("미지원 방 끄고 나머지 시작", (d,w) -> {
                 MultiRoomStore.BulkPatch pause = new MultiRoomStore.BulkPatch(); pause.applyEnabled = true; pause.enabled = false;
                 MultiRoomStore.applyBulkPatch(this, unsupported, pause); startAuthorized();
             });
-            else info.setPositiveButton("방 설정 보기", (d,w) -> openEditor(unsupported.get(0)));
+            else info.setPositiveButton("사진 여러 방 전송", (d,w) -> {
+                Prefs.p(this).edit().putString("photo_tour_selection_v1", new org.json.JSONArray(unsupported).toString()).apply();
+                startActivity(new Intent(this, PhotoTourActivity.class));
+            });
+            if (eligible > 0) info.setNeutralButton("사진 전송 메뉴", (d,w) -> startActivity(new Intent(this, PhotoTourActivity.class)));
             info.show(); return;
         }
         if (!isNotificationAccessEnabled()) {

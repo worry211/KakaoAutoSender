@@ -917,7 +917,7 @@ public final class PhotoKeyboardService extends InputMethodService {
     } catch (RejectedExecutionException busy) {
       session.invalidate(true);
       clearPreview();
-      status = "사진 저장소의 응답을 기다리고 있습니다. 잠시 후 다시 선택하세요.";
+      status = "사진 저장소의 응답을 기다리고 있습니다. 잠시 후 저장한 사진을 다시 준비하세요.";
       render();
     }
   }
@@ -942,6 +942,7 @@ public final class PhotoKeyboardService extends InputMethodService {
     Button button = new Button(this);
     button.setText(label);
     button.setAllCaps(false);
+    PhotoControls.style(button, label);
     button.setOnClickListener(view -> action.run());
     panel.addView(button, new LinearLayout.LayoutParams(-1, -2));
     return button;
