@@ -55,6 +55,10 @@ final class PanelOffManager {
     return linked && !busy;
   }
 
+  static boolean busy() {
+    return busy;
+  }
+
   static boolean engaged() {
     return current != null;
   }
@@ -151,11 +155,11 @@ final class PanelOffManager {
     if (PhotoTourController.active() || PhotoKeyboardService.hasActiveLoop())
       return "사진 작업을 먼저 중지하세요.";
     String error = begin(c, "trial");
+    Session requested = current;
     if (error.isEmpty())
       main.postDelayed(
           () -> {
-            Session s = current;
-            if (s != null && s.owner.equals("trial")) end("화면 끄기 시험 종료 · 패널 복구 요청됨");
+            if (requested != null && current == requested) end("화면 끄기 시험 종료 · 패널 복구 요청됨");
           },
           8000L); // Five seconds after OFF acknowledgement below; also bounds stalled startup.
     return error;

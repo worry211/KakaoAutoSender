@@ -83,7 +83,7 @@ final class PhotoTourController {
             : queue.run.equals(run))) stop(c, "사용자가 사진 여러 방 전송을 중지했습니다.");
   }
 
-  private static boolean keyboardSelected(Context c) {
+  static boolean keyboardSelected(Context c) {
     String id =
         android.provider.Settings.Secure.getString(
             c.getContentResolver(), android.provider.Settings.Secure.DEFAULT_INPUT_METHOD);
@@ -137,12 +137,15 @@ final class PhotoTourController {
         || !DeliveryGate.allowed(context)) return "접근성·라이선스와 화면 잠금 해제를 확인하세요.";
     if (!keyboardSelected(context)) return "사진 키보드를 현재 키보드로 선택하세요. 키보드·접근성 설정에서 변경할 수 있습니다.";
     app = context.getApplicationContext();
+    String preflight = PhotoTourReadiness.firstRoomError(app, rooms, false);
+    if (!preflight.isEmpty()) return preflight;
     registrations.clear();
     for (String room : rooms) {
       MultiRoomStore.Profile p = MultiRoomStore.get(app, room);
       if (p == null || !RoomMediaStore.get(app, room).hasImage()) return "선택한 모든 방에 사진을 먼저 설정하세요.";
-      if (PhotoTourBindings.get(app, room) == null && !registrations.contains(room))
-        registrations.add(room);
+      if (!PhotoTourBindings.identityMatches(
+              app, PhotoTourBindings.get(app, room), KakaoNotificationListener.findTarget(room))
+          && !registrations.contains(room)) registrations.add(room);
     }
     if (registrations.isEmpty()) return "선택한 방은 이미 준비됐습니다. 시험 또는 반복을 시작할 수 있습니다.";
     registrationRun = java.util.UUID.randomUUID().toString();
@@ -179,6 +182,8 @@ final class PhotoTourController {
     if (usePanelOff && !PanelOffManager.connected()) return "화면 끄기 설정에서 무선 연결을 먼저 완료하세요.";
     if (PanelOffManager.engaged()) return "화면 끄기 시험 또는 이전 작업을 먼저 중지하세요.";
     app = context.getApplicationContext();
+    String preflight = PhotoTourReadiness.firstRoomError(app, rooms, true);
+    if (!preflight.isEmpty()) return preflight;
     PhotoTourQueue candidate = new PhotoTourQueue(once);
     long now = System.currentTimeMillis();
     java.util.HashSet<String> unique = new java.util.HashSet<>();

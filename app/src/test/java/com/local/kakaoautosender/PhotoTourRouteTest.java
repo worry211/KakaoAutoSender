@@ -145,6 +145,19 @@ public class PhotoTourRouteTest {
   }
 
   @Test
+  public void preflightChecksEverySelectedRoomBeforeNavigation() {
+    MultiRoomStore.upsert(c, new MultiRoomStore.Profile("a"));
+    MultiRoomStore.upsert(c, new MultiRoomStore.Profile("b"));
+    RoomMediaStore.set(c, "a", "content://photos/a", "image/png", "a.png");
+    RoomMediaStore.set(c, "b", "content://photos/b", "image/png", "b.png");
+    assertEquals("", PhotoTourReadiness.roomError(c, "a", false));
+    assertFalse(PhotoTourReadiness.firstRoomError(c, Arrays.asList("a", "b"), false).isEmpty());
+    assertFalse(PhotoTourReadiness.roomError(c, "a", true).isEmpty());
+    KakaoNotificationListener.invalidateNotification("token", 100);
+    assertFalse(PhotoTourReadiness.roomError(c, "a", false).isEmpty());
+  }
+
+  @Test
   public void removedNotificationCannotNavigateUsingStaleSavedAction() {
     KakaoNotificationListener.invalidateNotification("token", 100);
     assertFalse(PhotoTourController.routeError(c, "a", target).isEmpty());

@@ -17,6 +17,10 @@ public final class PhotoTourActivity extends Activity {
   private final Handler main = new Handler(Looper.getMainLooper());
   private LinearLayout rooms;
   private TextView state;
+  private TextView readiness;
+  private CheckBox off;
+  private final PhotoSetupActionGate actions = new PhotoSetupActionGate();
+  private final ArrayList<Button> setupButtons = new ArrayList<>();
   private boolean resumed;
   private boolean usePanelOff;
   private final Runnable refresh =
@@ -25,7 +29,16 @@ public final class PhotoTourActivity extends Activity {
         public void run() {
           if (!resumed) return;
           state.setText(PhotoTourController.status(PhotoTourActivity.this));
-          main.postDelayed(this, 1000L);
+          readiness.setText(
+              actions.pending()
+                  ? "서버 확인 중 · 전체 중지로 취소할 수 있습니다."
+                  : PhotoTourReadiness.summary(PhotoTourActivity.this, selected, usePanelOff));
+          boolean editing =
+              !PhotoTourController.active() && !PanelOffManager.engaged() && !actions.pending();
+          for (Button b : setupButtons) b.setEnabled(editing);
+          off.setEnabled(editing);
+          for (int i = 0; i < rooms.getChildCount(); i++) rooms.getChildAt(i).setEnabled(editing);
+          main.postDelayed(this, 2000L);
         }
       };
 
@@ -45,8 +58,10 @@ public final class PhotoTourActivity extends Activity {
     body.setPadding(pad, pad, pad, pad);
     body.setBackgroundColor(Color.rgb(10, 14, 22));
     scroll.addView(body);
-    text(body, "사진 여러 방 전송 · 시험판", 23);
+    PhotoSettingsLayout.apply(this, scroll);
+    text(body, "사진 여러 방 전송 · 최종 검증 후보", 23);
     state = text(body, "", 14);
+    readiness = text(body, "", 15);
     text(body, "방 선택 → 공통 사진·시간 설정 → 각 방 최초 준비 → 1회 시험 또는 반복", 15);
     text(
         body,
@@ -62,35 +77,44 @@ public final class PhotoTourActivity extends Activity {
         body,
         "화면 끄기 최초 설정 · PC·USB 불필요",
         () -> startActivity(new Intent(this, PanelOffActivity.class)));
-    CheckBox off = new CheckBox(this);
+    off = new CheckBox(this);
     off.setTextColor(Color.WHITE);
     off.setText("시작할 때 화면 패널을 끄고 순회 · 최초 설정 필요");
-    off.setOnCheckedChangeListener((v, checked) -> usePanelOff = checked);
+    off.setOnCheckedChangeListener(
+        (v, checked) -> {
+          actions.cancel();
+          usePanelOff = checked;
+        });
     body.addView(off);
     rooms = new LinearLayout(this);
     rooms.setOrientation(LinearLayout.VERTICAL);
     body.addView(rooms);
-    button(
-        body,
-        "1. 선택 방 공통 사진·시간 설정",
-        () -> {
-          if (selected.isEmpty()) {
-            toast("먼저 방을 선택하세요.");
-            return;
-          }
-          startActivity(
-              new Intent(this, BulkRoomEditActivity.class)
-                  .putStringArrayListExtra(
-                      BulkRoomEditActivity.EXTRA_ROOMS, new ArrayList<>(selected)));
-        });
-    button(body, "2. 준비 안 된 선택 방 연결", () -> authorized(false, false));
-    button(body, "3. 선택 방 1회씩 시험 · 10초 후", () -> authorized(true, true));
-    button(body, "저장한 일정으로 선택 방 반복 시작", () -> authorized(true, false));
+    button(body, "모든 방 선택", () -> selectAll(true));
+    button(body, "선택 해제", () -> selectAll(false));
+    setupButtons.add(
+        button(
+            body,
+            "1. 선택 방 공통 사진·시간 설정",
+            () -> {
+              if (selected.isEmpty()) {
+                toast("먼저 방을 선택하세요.");
+                return;
+              }
+              startActivity(
+                  new Intent(this, BulkRoomEditActivity.class)
+                      .putStringArrayListExtra(
+                          BulkRoomEditActivity.EXTRA_ROOMS, new ArrayList<>(selected)));
+            }));
+    setupButtons.add(button(body, "2. 준비 안 된 선택 방 연결", () -> authorized(false, false)));
+    setupButtons.add(button(body, "3. 선택 방 1회씩 시험 · 10초 후", () -> authorized(true, true)));
+    setupButtons.add(button(body, "저장한 일정으로 선택 방 반복 시작", () -> authorized(true, false)));
     button(
         body,
         "사진 여러 방 전송 전체 중지",
         () -> {
+          actions.cancel();
           PhotoTourController.stop(this, "사용자가 사진 여러 방 전송을 중지했습니다.");
+          PanelOffManager.end("사용자가 화면 복구를 요청했습니다.");
           state.setText(PhotoTourController.status(this));
         });
     button(
@@ -110,15 +134,16 @@ public final class PhotoTourActivity extends Activity {
     boolean requestedOff = usePanelOff;
     LicenseManager.runAuthorized(
         this,
-        () -> {
-          if (!resumed || isFinishing()) return;
-          String error =
-              start
-                  ? PhotoTourController.start(this, requested, once, requestedOff)
-                  : PhotoTourController.prepare(this, requested);
-          if (!error.isEmpty()) toast(error);
-          state.setText(PhotoTourController.status(this));
-        });
+        actions.guard(
+            () -> {
+              if (!resumed || isFinishing()) return;
+              String error =
+                  start
+                      ? PhotoTourController.start(this, requested, once, requestedOff)
+                      : PhotoTourController.prepare(this, requested);
+              if (!error.isEmpty()) toast(error);
+              state.setText(PhotoTourController.status(this));
+            }));
   }
 
   @Override
@@ -147,6 +172,7 @@ public final class PhotoTourActivity extends Activity {
       box.setChecked(selected.contains(p.room));
       box.setOnCheckedChangeListener(
           (b, checked) -> {
+            actions.cancel();
             if (checked) selected.add(p.room);
             else selected.remove(p.room);
             Prefs.p(this)
@@ -157,6 +183,10 @@ public final class PhotoTourActivity extends Activity {
       rooms.addView(box);
     }
     selected.retainAll(existing);
+    Prefs.p(this)
+        .edit()
+        .putString("photo_tour_selection_v1", new JSONArray(selected).toString())
+        .apply();
     resumed = true;
     main.removeCallbacks(refresh);
     refresh.run();
@@ -164,6 +194,7 @@ public final class PhotoTourActivity extends Activity {
 
   @Override
   protected void onPause() {
+    actions.cancel();
     resumed = false;
     main.removeCallbacks(refresh);
     super.onPause();
@@ -179,12 +210,26 @@ public final class PhotoTourActivity extends Activity {
     return v;
   }
 
-  private void button(LinearLayout p, String label, Runnable action) {
+  private Button button(LinearLayout p, String label, Runnable action) {
     Button b = new Button(this);
     b.setText(label);
     b.setAllCaps(false);
     b.setOnClickListener(v -> action.run());
-    p.addView(b);
+    LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+    params.bottomMargin = Math.round(10 * getResources().getDisplayMetrics().density);
+    p.addView(b, params);
+    return b;
+  }
+
+  private void selectAll(boolean value) {
+    if (PhotoTourController.active() || PanelOffManager.engaged()) {
+      toast("진행 중인 사진 작업을 먼저 중지하세요.");
+      return;
+    }
+    actions.cancel();
+    for (int i = 0; i < rooms.getChildCount(); i++)
+      ((CheckBox) rooms.getChildAt(i)).setChecked(value);
+    readiness.setText(PhotoTourReadiness.summary(this, selected, usePanelOff));
   }
 
   private void toast(String value) {
