@@ -15,10 +15,10 @@ import org.robolectric.annotation.Config;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=28)
 public class TemporaryOfflineTest {
-  @Test public void independentPackageRetainsLocalAdbPermission() {
+  @Test public void independentPackageRetainsLocalAdbPermission() throws Exception {
     Context c=RuntimeEnvironment.getApplication();
     assertEquals("com.local.kakaoautosender.temporaryrc4",c.getPackageName());
-    assertEquals(PackageManager.PERMISSION_GRANTED,c.checkSelfPermission("android.permission.INTERNET"));
+    assertTrue(java.util.Arrays.asList(c.getPackageManager().getPackageInfo(c.getPackageName(), PackageManager.GET_PERMISSIONS).requestedPermissions).contains("android.permission.INTERNET"));
   }
   @Test public void noStoredLoginOrExpiredCommercialStateIsRequired() {
     Context c=RuntimeEnvironment.getApplication();
