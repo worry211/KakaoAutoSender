@@ -13,6 +13,8 @@ android {
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         versionCode 51
         versionName '2.3.20-photo-rc4'
+        manifestPlaceholders = [appLabel: '카톡매크로', listenerLabel: '카톡매크로 알림 접근']
+        buildConfigField 'boolean', 'TEMPORARY_OFFLINE', 'false'
         def apiUrl = System.getenv('ANDROID_API_BASE_URL') ?: 'https://license.invalid'
         if (!(apiUrl ==~ /https:\/\/[A-Za-z0-9.-]+(:[0-9]+)?/)) {
             throw new GradleException('ANDROID_API_BASE_URL must be an HTTPS origin without a trailing slash')
@@ -43,6 +45,14 @@ android {
     }
 
     buildTypes {
+        standalone {
+            initWith debug
+            applicationIdSuffix '.temporaryrc4'
+            versionNameSuffix '-temporary.1'
+            matchingFallbacks = ['debug']
+            manifestPlaceholders = [appLabel: '카톡매크로 임시 RC4', listenerLabel: '카톡매크로 임시 RC4 알림 접근']
+            buildConfigField 'boolean', 'TEMPORARY_OFFLINE', 'true'
+        }
         release {
             signingConfig signingConfigs.release
             minifyEnabled true
@@ -86,4 +96,9 @@ dependencies {
 // stay in the APK, not on the Windows/Linux JVM unit-test runtime classpath.
 configurations.matching { it.name.endsWith('UnitTestRuntimeClasspath') }.configureEach {
     exclude group: 'org.conscrypt', module: 'conscrypt-android'
+}
+
+// Commercial entitlement rejection tests apply to the commercial variant.
+tasks.withType(Test).configureEach {
+    if (name == 'testStandaloneUnitTest') filter { excludeTestsMatching '*CommercialGateTest' }
 }

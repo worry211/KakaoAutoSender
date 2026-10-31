@@ -14,7 +14,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
-        android:label="카톡매크로"
+        android:label="${appLabel}"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
@@ -64,7 +64,7 @@
 
         <service
             android:name=".KakaoNotificationListener"
-            android:label="카톡매크로 알림 접근"
+            android:label="${listenerLabel}"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
             android:exported="true">
             <intent-filter>

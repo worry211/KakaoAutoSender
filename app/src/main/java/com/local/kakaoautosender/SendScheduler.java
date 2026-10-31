@@ -16,7 +16,7 @@ final class SendScheduler {
 
     static PendingIntent pending(Context c) {
         Intent i = new Intent(c, SendAlarmReceiver.class);
-        i.setAction("com.local.kakaoautosender.SEND_ALARM");
+        i.setAction(c.getPackageName() + ".SEND_ALARM");
         return PendingIntent.getBroadcast(c, REQUEST_CODE, i,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }

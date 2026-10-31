@@ -36,7 +36,7 @@ public final class IntegrityGateActivity extends Activity {
   private void forward() {
     if (forwarded) return;
     forwarded = true;
-    startActivity(new Intent(this, LicenseActivity.class));
+    startActivity(new Intent(this, BuildConfig.TEMPORARY_OFFLINE ? MainActivityV4.class : LicenseActivity.class));
     finish();
   }
 

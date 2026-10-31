@@ -13,8 +13,8 @@ import java.util.Date;
 import java.util.Locale;
 
 final class PhotoLoopAlarm {
-  static final String TICK = "com.local.kakaoautosender.PHOTO_LOOP_TICK";
-  static final String STOP = "com.local.kakaoautosender.PHOTO_LOOP_STOP";
+  static final String TICK = BuildConfig.APPLICATION_ID + ".PHOTO_LOOP_TICK";
+  static final String STOP = BuildConfig.APPLICATION_ID + ".PHOTO_LOOP_STOP";
   private static final int ID = 7308;
   private static final String CHANNEL = "photo_keyboard_schedule";
 

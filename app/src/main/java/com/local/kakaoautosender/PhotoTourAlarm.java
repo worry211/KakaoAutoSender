@@ -5,8 +5,8 @@ import android.content.Context;
 import android.content.Intent;
 
 final class PhotoTourAlarm {
-  static final String TICK = "com.local.kakaoautosender.PHOTO_TOUR_TICK";
-  static final String STOP = "com.local.kakaoautosender.PHOTO_TOUR_STOP";
+  static final String TICK = BuildConfig.APPLICATION_ID + ".PHOTO_TOUR_TICK";
+  static final String STOP = BuildConfig.APPLICATION_ID + ".PHOTO_TOUR_STOP";
   private static final int ID = 7310;
 
   private static PendingIntent pending(Context c, String action, String run) {

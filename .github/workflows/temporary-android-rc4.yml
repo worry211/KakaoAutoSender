@@ -1,0 +1,42 @@
+name: Temporary RC4 Android APK
+on:
+  push:
+    branches: [temporary/android-rc4-no-login]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Verify existing commercial behavior
+        run: gradle --no-daemon :app:testDebugUnitTest :wireless-adb:testDebugUnitTest
+      - name: Verify temporary app and build
+        run: |
+          gradle --no-daemon :app:testStandaloneUnitTest --tests '*TemporaryOfflineTest' --tests '*NotificationConnectionFlowTest' --tests '*BulkPhotoEditorTest' --tests '*PhotoFeatureVisibilityTest' --tests '*PhotoTourBindingsTest' --tests '*PhotoTourQueueTest'
+          gradle --no-daemon :app:lintStandalone :app:assembleStandalone
+      - name: Verify install identity and offline permission
+        run: |
+          APK=app/build/outputs/apk/standalone/app-standalone.apk
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -1)
+          "$AAPT" dump badging "$APK" | tee apk-badging.txt
+          grep -q "package: name='com.local.kakaoautosender.temporaryrc4'" apk-badging.txt
+          "$AAPT" dump permissions "$APK" | grep -q android.permission.INTERNET
+          cp "$APK" KakaoMacro-RC4-NoLogin.apk
+          sha256sum KakaoMacro-RC4-NoLogin.apk > SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KakaoMacro-RC4-NoLogin
+          path: |
+            KakaoMacro-RC4-NoLogin.apk
+            SHA256.txt
+            apk-badging.txt
+
