@@ -18,7 +18,7 @@ import java.util.Locale;
  * the server-side license system; it does not replace it.
  */
 final class AppIntegrity {
-  static final String EXPECTED_PACKAGE = "com.local.kakaoautosender";
+  static final String EXPECTED_PACKAGE = BuildConfig.APPLICATION_ID;
   private static volatile Context app;
   private static volatile String lastReason = "";
 

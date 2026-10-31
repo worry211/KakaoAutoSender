@@ -12,6 +12,8 @@ android {
         targetSdk 35
         versionCode 36
         versionName '2.3.5'
+        manifestPlaceholders = [appLabel: '카톡매크로', listenerLabel: '카톡매크로 알림 접근']
+        buildConfigField 'boolean', 'TEMPORARY_OFFLINE', 'false'
         def apiUrl = System.getenv('ANDROID_API_BASE_URL') ?: 'https://license.invalid'
         if (!(apiUrl ==~ /https:\/\/[A-Za-z0-9.-]+(:[0-9]+)?/)) {
             throw new GradleException('ANDROID_API_BASE_URL must be an HTTPS origin without a trailing slash')
@@ -42,6 +44,14 @@ android {
     }
 
     buildTypes {
+        standalone {
+            initWith debug
+            applicationIdSuffix '.temporary'
+            versionNameSuffix '-temporary.1'
+            matchingFallbacks = ['debug']
+            manifestPlaceholders = [appLabel: '카톡매크로 임시', listenerLabel: '카톡매크로 임시 알림 접근']
+            buildConfigField 'boolean', 'TEMPORARY_OFFLINE', 'true'
+        }
         release {
             signingConfig signingConfigs.release
             minifyEnabled true

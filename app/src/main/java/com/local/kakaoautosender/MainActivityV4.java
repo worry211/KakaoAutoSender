@@ -123,7 +123,7 @@ public class MainActivityV4 extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout brand = new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);
-        TextView title = text("카톡매크로", 29, true, TEXT);
+        TextView title = text(BuildConfig.TEMPORARY_OFFLINE ? "카톡매크로 임시" : "카톡매크로", 29, true, TEXT);
         title.setLetterSpacing(-0.015f);
         brand.addView(title);
         TextView kicker = text("KAKAO AUTOMATION SUITE", 9, true, Color.rgb(121, 136, 166));

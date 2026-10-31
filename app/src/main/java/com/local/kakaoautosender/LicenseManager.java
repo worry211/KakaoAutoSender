@@ -70,6 +70,7 @@ final class LicenseManager {
   }
 
   static Verification verifyStored(Context c) {
+    if (BuildConfig.TEMPORARY_OFFLINE) return new Verification(true, "LOCAL", "임시 앱 · 로그인 없이 사용", "", 0);
     SharedPreferences p = p(c);
     String state = p.getString("state", "INVALID");
     long expiry = p.getLong("expiry", 0), elapsed = SystemClock.elapsedRealtime();
@@ -110,6 +111,7 @@ final class LicenseManager {
   }
 
   static String shortStatus(Context c) {
+    if (BuildConfig.TEMPORARY_OFFLINE) return "임시 앱 · 로그인 없이 사용";
     Verification v = verifyStored(c);
     if (!v.valid) return v.message;
     long remaining = v.expiresAtSeconds - estimatedServerTime(c);
@@ -132,6 +134,7 @@ final class LicenseManager {
   }
 
   static void checkAsync(Context context, Callback callback) {
+    if (BuildConfig.TEMPORARY_OFFLINE) { MAIN.post(() -> callback.done(verifyStored(context))); return; }
     Context app = context.getApplicationContext();
     NETWORK.execute(
         () -> {
@@ -141,6 +144,7 @@ final class LicenseManager {
   }
 
   static void activateAsync(Context context, String key, Callback callback) {
+    if (BuildConfig.TEMPORARY_OFFLINE) { checkAsync(context, callback); return; }
     Context app = context.getApplicationContext();
     NETWORK.execute(
         () -> {
@@ -222,6 +226,7 @@ final class LicenseManager {
   }
 
   static Verification validate(Context c) {
+    if (BuildConfig.TEMPORARY_OFFLINE) return verifyStored(c);
     if (Looper.myLooper() == Looper.getMainLooper())
       throw new IllegalStateException("Network entitlement checks require worker thread");
     boolean acquired = false;
@@ -504,6 +509,7 @@ final class LicenseManager {
   }
 
   static String diagnostic(Context c) {
+    if (BuildConfig.TEMPORARY_OFFLINE) return "앱 버전: " + BuildConfig.VERSION_NAME + "\n임시 독립 앱 · 서버 로그인 없음";
     SharedPreferences p = p(c);
     return "앱 버전: "
         + BuildConfig.VERSION_NAME
@@ -518,6 +524,7 @@ final class LicenseManager {
   }
 
   static String updateNotice(Context c) {
+    if (BuildConfig.TEMPORARY_OFFLINE) return "";
     return p(c).getLong("latest_version", 0) > BuildConfig.VERSION_CODE
         ? "새 앱 버전이 있습니다. 판매자에게 업데이트를 문의하세요."
         : "";

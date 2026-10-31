@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class KakaoNotificationListener extends NotificationListenerService {
     static final String KAKAO_PACKAGE = "com.kakao.talk";
-    static final String ACTION_SESSIONS_UPDATED = "com.local.kakaoautosender.SESSIONS_UPDATED";
+    static final String ACTION_SESSIONS_UPDATED = BuildConfig.APPLICATION_ID + ".SESSIONS_UPDATED";
     private static final int MAX_RECENT_TARGETS = 24;
     private static final int CONFIDENCE_LOW = 1;
     private static final int CONFIDENCE_MEDIUM = 2;
