@@ -502,7 +502,7 @@ final class LicenseManager {
   }
 
   static void route(Activity a) {
-    Intent i = new Intent(a, LicenseActivity.class);
+    Intent i = new Intent(a, BuildConfig.TEMPORARY_OFFLINE ? MainActivityV4.class : LicenseActivity.class);
     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
     a.startActivity(i);
     a.finish();
